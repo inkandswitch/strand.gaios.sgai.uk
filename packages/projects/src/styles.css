@@ -14,9 +14,17 @@
 	--projects-space: var(--studio-space, 0.75rem);
 	--projects-space-lg: var(--studio-space-md, 1rem);
 	--projects-radius: var(--studio-radius-sm, 4px);
-	--projects-header-height: calc(
-		env(safe-area-inset-top, 0px) + var(--studio-space-2xl, 3rem)
-	);
+	--projects-radius-lg: var(--studio-radius-lg, 8px);
+	/* Two layers: the sidebar sits on the ground, the open document is a
+	   surface raised above it. */
+	--projects-ground: var(--projects-chrome);
+	--projects-surface: var(--projects-bg);
+	--projects-surface-edge: color-mix(in oklch, var(--projects-fg) 9%, transparent);
+	--projects-elevation:
+		0 1px 2px rgb(0 0 0 / 0.06),
+		0 4px 12px -2px rgb(0 0 0 / 0.08),
+		0 12px 32px -8px rgb(0 0 0 / 0.1);
+	--projects-header-height: var(--studio-space-2xl, 3rem);
 	--projects-sidebar-width: 18rem;
 }
 
@@ -35,25 +43,6 @@
 	font: inherit;
 	color: inherit;
 	cursor: var(--studio-cursor-pointer, pointer);
-}
-
-.projects__notice {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: var(--projects-space);
-	margin: 0;
-	padding: var(--projects-space-sm) var(--projects-space);
-	background: var(--projects-hover);
-	color: var(--projects-chrome-fg);
-	border-bottom: 1px solid var(--projects-divider);
-}
-
-.projects__notice-dismiss {
-	border: 1px solid var(--projects-divider);
-	border-radius: var(--projects-radius);
-	background: none;
-	padding: var(--projects-space-xs) var(--projects-space-sm);
 }
 
 .projects__empty {
@@ -152,15 +141,18 @@
 	grid-template-columns: var(--projects-sidebar-width) minmax(0, 1fr);
 	flex: 1;
 	min-height: 0;
+	padding: calc(env(safe-area-inset-top, 0px) + var(--projects-space-sm))
+		var(--projects-space-sm) var(--projects-space-sm) 0;
+	box-sizing: border-box;
+	background: var(--projects-ground);
 }
 
 .projects__sidebar {
+	--document-list-fill: var(--projects-ground);
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	background: var(--projects-chrome);
 	color: var(--projects-chrome-fg);
-	border-inline-end: 1px solid var(--projects-divider);
 }
 
 .projects__sidebar-header,
@@ -169,9 +161,8 @@
 	align-items: center;
 	gap: var(--projects-space-sm);
 	min-height: var(--projects-header-height);
-	padding: env(safe-area-inset-top, 0px) var(--projects-space-sm) 0;
+	padding: 0 var(--projects-space-sm);
 	box-sizing: border-box;
-	border-bottom: 1px solid var(--projects-divider);
 }
 
 .projects__home {
@@ -213,11 +204,41 @@
 	margin: 0;
 }
 
-.projects__tree {
+.projects__tabs {
+	display: flex;
+	gap: 2px;
+	margin: 0 var(--projects-space-sm) var(--projects-space-sm);
+	padding: 2px;
+	border-radius: var(--projects-radius);
+	background: var(--projects-hover);
+}
+
+.projects .projects__tab {
+	flex: 1;
+	padding: var(--projects-space-xs) var(--projects-space-sm);
+	border: none;
+	border-radius: calc(var(--projects-radius) - 1px);
+	background: none;
+	color: var(--projects-muted);
+	font-size: 0.85rem;
+	font-weight: 500;
+}
+
+.projects .projects__tab[aria-selected="true"] {
+	background: var(--projects-surface);
+	color: var(--projects-fg);
+	box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+}
+
+.projects__panel {
 	display: block;
 	flex: 1;
 	min-height: 0;
 	overflow: auto;
+}
+
+.projects__panel--hidden {
+	display: none;
 }
 
 .projects__main {
@@ -225,12 +246,16 @@
 	flex-direction: column;
 	min-width: 0;
 	min-height: 0;
+	overflow: hidden;
+	background: var(--projects-surface);
+	border: 1px solid var(--projects-surface-edge);
+	border-radius: var(--projects-radius-lg);
+	box-shadow: var(--projects-elevation);
 }
 
 .projects__titlebar {
-	background: var(--projects-chrome);
-	color: var(--projects-chrome-fg);
 	padding-inline: var(--projects-space);
+	border-bottom: 1px solid var(--projects-surface-edge);
 }
 
 .projects__title {
@@ -259,11 +284,10 @@
 	.projects__project {
 		grid-template-columns: minmax(0, 1fr);
 		grid-template-rows: auto minmax(0, 1fr);
+		padding-inline-start: var(--projects-space-sm);
 	}
 
 	.projects__sidebar {
 		max-height: 40dvh;
-		border-inline-end: none;
-		border-bottom: 1px solid var(--projects-divider);
 	}
 }

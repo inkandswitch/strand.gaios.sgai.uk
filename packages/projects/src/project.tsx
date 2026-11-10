@@ -1,5 +1,5 @@
 import type {Repo} from "@automerge/automerge-repo/slim"
-import {createEffect, For, Show} from "solid-js"
+import {createEffect, createSignal, For, Show} from "solid-js"
 import {useDocTitle} from "./hooks.ts"
 import type {ProjectRoute} from "./navigation.ts"
 import {Provider} from "./provider.tsx"
@@ -10,6 +10,13 @@ const TITLEBAR_TOOLS = [
 	"doc-presence",
 	"sync-indicator",
 	"theme-titlebar",
+]
+
+type Panel = "files" | "review"
+
+const PANELS: {id: Panel; label: string}[] = [
+	{id: "files", label: "Files"},
+	{id: "review", label: "Review"},
 ]
 
 /**
@@ -26,6 +33,14 @@ export function ProjectView(props: {
 	const projectName = () => props.route.resolved.projectName
 	const draftKey = (): string => props.route.location.draft ?? "main"
 	const title = useDocTitle(props.repo, docUrl)
+	// Both panels stay mounted once shown, so switching back keeps their state;
+	// the review only starts working things out once it's first opened.
+	const [tab, setTab] = createSignal<Panel>("files")
+	const [reviewOpened, setReviewOpened] = createSignal(false)
+	const openTab = (panel: Panel) => {
+		if (panel === "review") setReviewOpened(true)
+		setTab(panel)
+	}
 	createEffect(() => {
 		document.title = [title(), projectName(), props.siteTitle]
 			.filter(Boolean)
@@ -47,11 +62,34 @@ export function ProjectView(props: {
 					<h1 class="projects__project-name">{projectName()}</h1>
 					<patchwork-view component="draft-picker" />
 				</header>
+				<div class="projects__tabs" role="tablist">
+					<For each={PANELS}>
+						{panel => (
+							<button
+								type="button"
+								role="tab"
+								class="projects__tab"
+								aria-selected={tab() === panel.id}
+								onClick={() => openTab(panel.id)}>
+								{panel.label}
+							</button>
+						)}
+					</For>
+				</div>
 				<patchwork-view
-					class="projects__tree"
+					class="projects__panel"
+					classList={{"projects__panel--hidden": tab() !== "files"}}
 					tool-id="chee/document-list"
 					doc-url={props.route.resolved.projectUrl}
 				/>
+				<Show when={reviewOpened()}>
+					<patchwork-view
+						class="projects__panel"
+						classList={{"projects__panel--hidden": tab() !== "review"}}
+						tool-id="review"
+						doc-url={props.route.resolved.projectUrl}
+					/>
+				</Show>
 			</aside>
 			<Provider component="patchwork-comments-provider">
 				<Provider component="patchwork-focus-provider">

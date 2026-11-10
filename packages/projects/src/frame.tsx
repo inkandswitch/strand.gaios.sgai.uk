@@ -64,19 +64,6 @@ function Frame(props: {
 				docUrl={props.account.url}>
 				<patchwork-view component="patchwork-worker-provider">
 					<div class="projects">
-						<Show when={navigation.notice()}>
-							{notice => (
-								<p class="projects__notice" role="status">
-									{notice()}
-									<button
-										type="button"
-										class="projects__notice-dismiss"
-										onClick={() => navigation.dismissNotice()}>
-										Dismiss
-									</button>
-								</p>
-							)}
-						</Show>
 						<Show when={navigation.route().page === "splash"}>
 							<Splash
 								recents={recents}

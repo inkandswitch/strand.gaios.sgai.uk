@@ -31,6 +31,7 @@ import {automergeSyncPlugin} from "@automerge/automerge-codemirror"
 import {isImmutableStringFileDoc} from "../datatype"
 import {collectExtensions} from "./codemirror-extensions"
 import {createFileComments} from "./comments"
+import {createDraftDiff} from "./draft-diff"
 import codemirrorTheme from "../codemirror-theme"
 import {getLanguageExtension} from "../languages"
 import type {FileDoc} from "../types"
@@ -104,6 +105,10 @@ export function TextFileEditor(props: {
 		props.handle && props.element
 			? createFileComments({handle: props.handle, element: props.element})
 			: undefined
+	const diff =
+		props.handle && props.element
+			? createDraftDiff({handle: props.handle, element: props.element})
+			: undefined
 
 	const view = new EditorView({
 		doc: props.doc.content?.toString() || "",
@@ -147,11 +152,13 @@ export function TextFileEditor(props: {
 			...codemirrorTheme,
 			automergeSyncPlugin({handle: props.handle, path: ["content"]}),
 			comments?.extension ?? [],
+			diff?.extension ?? [],
 			// last, so they can override anything above
 			collectExtensions(props.element, props.handle, props.doc, false),
 		],
 	})
 	comments?.attach(view)
+	diff?.attach(view)
 
 	// For code files, connect to the shared TypeScript language server (tsgo,
 	// in a worker) and add its features to the editor in place. Each document

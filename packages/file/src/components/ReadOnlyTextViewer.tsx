@@ -19,6 +19,7 @@ import type {FileDoc} from "../types"
 import {fileText} from "../datatype"
 import {collectExtensions} from "./codemirror-extensions"
 import {createFileComments} from "./comments"
+import {createDraftDiff} from "./draft-diff"
 
 // Read-only text: ImmutableString files, and any text file opened through a
 // read-only handle. It follows the file as it changes (an ImmutableString is
@@ -38,6 +39,10 @@ export function ReadOnlyTextViewer(props: {
 	const comments =
 		props.handle && props.element
 			? createFileComments({handle: props.handle, element: props.element})
+			: undefined
+	const diff =
+		props.handle && props.element
+			? createDraftDiff({handle: props.handle, element: props.element})
 			: undefined
 
 	const view = new EditorView({
@@ -59,10 +64,12 @@ export function ReadOnlyTextViewer(props: {
 			languageExtension,
 			...codemirrorTheme,
 			comments?.extension ?? [],
+			diff?.extension ?? [],
 			// last, so they can override anything above
 			collectExtensions(props.element, props.handle, props.doc, true),
 		],
 	})
+	diff?.attach(view)
 
 	const follow = () => {
 		const text = fileText(props.handle?.doc())

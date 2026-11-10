@@ -43,9 +43,6 @@ export type Navigation = {
 	route: Accessor<Route>
 	project: Accessor<ProjectRoute | undefined>
 	selectedView: Accessor<SelectedView | undefined>
-	/** why the last thing asked for couldn't be opened */
-	notice: Accessor<string | undefined>
-	dismissNotice(): void
 	open(url: string, toolId?: string | null): void
 	home(): void
 	/** where a draft provider should be mounted, if anywhere */
@@ -84,7 +81,6 @@ type Attached = {
 export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	const find: FindDoc = async url => (await repo.find(url)).doc()
 	const [route, setRoute] = createSignal<Route>({page: "loading"})
-	const [notice, setNotice] = createSignal<string>()
 	const [scope, setScope] = createSignal<DraftScope>()
 	const [attached, setAttached] = createSignal<Attached>()
 	let waiting: ((attached: Attached) => void)[] = []
@@ -137,8 +133,6 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		route,
 		project,
 		selectedView,
-		notice,
-		dismissNotice: () => setNotice(undefined),
 		open,
 		home,
 		scope,
@@ -177,7 +171,6 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 
 	function home() {
 		attempt++
-		setNotice(undefined)
 		setRoute({page: "splash"})
 		setScope(undefined)
 		write("", "push")
@@ -308,18 +301,17 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			...location,
 			segments: resolved.trail.map(step => step.segment),
 		}
-		setNotice(undefined)
 		setRoute({page: "project", resolved, location: canonical})
 		write(formatHash(canonical, resolved.projectName), mode)
 	}
 
-	// A failed open request leaves things as they were. A hash that can't be
-	// followed goes back to the splash screen, so a reload doesn't repeat it.
+	// A link that goes nowhere is ignored: what's open stays open. A hash
+	// that can't be followed goes back to the splash screen, so a reload
+	// doesn't repeat it.
 	function reject(error: unknown, mode: HistoryMode) {
 		const message =
 			error instanceof LocationError ? error.message : String(error)
 		console.warn("projects:", message)
-		setNotice(message)
 		if (mode === "push") return
 		setRoute({page: "splash"})
 		setScope(undefined)
