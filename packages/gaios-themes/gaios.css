@@ -102,7 +102,8 @@
 	--text-editor-fill: var(--paper);
 	--text-editor-line: var(--ink);
 	--text-editor-cursor-fill: var(--accent);
-	--text-editor-gutter-fill: var(--paper-tint);
+	--text-editor-gutter-fill: color-mix(in oklch, var(--paper-tint) 35%, var(--paper));
+	--text-editor-gutter-fill--line-numbers: var(--text-editor-gutter-fill);
 	--text-editor-gutter-line: var(--ink-dim);
 	--text-editor-gutter-border: var(--rule-hair);
 	--text-editor-gutter-font-size: 0.8em;
@@ -221,12 +222,13 @@
 	color-scheme: dark;
 
 	--hue: 85;
-	--hue-chroma: 0.012;
+	--hue-chroma: 0;
 	--accent-chroma: 0.13;
 	--accent-lightness: 74%;
 
-	--l-paper: 16%;
-	--l-paper-tint: 22%;
+	/* Chrome sits below the page, so it's the darker of the two here too. */
+	--l-paper: 17%;
+	--l-paper-tint: 12%;
 	--l-ink: 93%;
 	--l-ink-soft: 84%;
 	--l-ink-mute: 68%;
