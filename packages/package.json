@@ -1,0 +1,16 @@
+{
+  "name": "@gaios/pkg-base",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "GAIOS's own Patchwork packages, served ahead of patchwork-pkg-base",
+  "private": true,
+  "scripts": {
+    "test": "node scripts/each.mjs test",
+    "build": "node scripts/each.mjs build",
+    "each": "node scripts/each.mjs",
+    "bundle": "node scripts/bundle.mjs",
+    "watch": "node scripts/watch.mjs"
+  },
+  "packageManager": "pnpm@11.15.1",
+  "patchwork": {"static": "static-dist"}
+}

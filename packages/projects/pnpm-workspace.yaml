@@ -1,0 +1,9 @@
+# pnpm 11 reads its settings from this file. This is not a workspace: the tool
+# installs on its own, apart from the site.
+minimumReleaseAge: 0
+verifyDepsBeforeRun: false
+allowBuilds:
+  "@swc/core": true
+  cbor-extract: true
+  core-js: true
+  esbuild: true
