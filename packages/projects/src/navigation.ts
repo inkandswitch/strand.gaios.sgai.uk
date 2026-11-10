@@ -15,6 +15,8 @@ import {
 } from "./location.ts"
 import {
 	LocationError,
+	endsInFolder,
+	projectRoot,
 	relocate,
 	resolveLocation,
 	type FindDoc,
@@ -139,11 +141,21 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		else reject(new LocationError("not-a-project"), "replace")
 	}
 
+	// Folders only expand in the tree, they never open. Asking to open one does
+	// nothing; a hash naming one shows its project with nothing open.
 	async function go(location: Location, mode: HistoryMode) {
 		const mine = ++attempt
 		try {
 			const resolved = await resolveLocation(location, find)
-			if (mine === attempt) show(resolved, location, mode)
+			const folder = await endsInFolder(resolved, find)
+			if (mine !== attempt) return
+			if (!folder) show(resolved, location, mode)
+			else if (mode === "replace")
+				show(
+					projectRoot(resolved),
+					{...location, segments: [], heads: undefined, toolId: undefined},
+					mode
+				)
 		} catch (error) {
 			if (mine === attempt) reject(error, mode)
 		}

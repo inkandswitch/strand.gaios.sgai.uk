@@ -200,9 +200,6 @@ export default function Folder(props: {
         onToggleExpand={() => setExpanded((yn) => !yn)}
         expand={() => setExpanded(true)}
         createInside={createInside}
-        openWith={(toolId) => {
-          props.open({ url: props.location as AutomergeUrl, toolId });
-        }}
       >
         {/* not a button: it sits inside the row, and the row is what you
             focus. the row's aria-expanded and Left/Right do its job for

@@ -48,7 +48,8 @@ export default function Item(props: {
   type: string;
   pressed: boolean;
   children: JSX.Element;
-  openWith(toolId?: string): void;
+  /** unset for folders: pressing a folder's row expands it instead */
+  openWith?(toolId?: string): void;
   startRenaming(): void;
   remove(): void;
   element: PatchworkViewElement;
@@ -86,7 +87,7 @@ export default function Item(props: {
 
   const springLoad = createHoverTimer(SPRING_LOAD_MS, () => {
     row?.removeAttribute("data-dnd-springload");
-    props.openWith();
+    props.openWith?.();
   });
   function startSpringLoad() {
     if (isFolder() || dragstack.has(props.id)) return;
@@ -122,7 +123,8 @@ export default function Item(props: {
 
   function open() {
     clearDragstack();
-    props.openWith();
+    if (isFolder()) props.onToggleExpand?.();
+    else props.openWith?.();
   }
 
   return (

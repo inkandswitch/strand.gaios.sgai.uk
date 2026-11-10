@@ -46,7 +46,8 @@ export interface MenuTarget {
   url: AutomergeUrl;
   name: string;
   type: string;
-  openWith(toolId?: string): void;
+  /** unset for folders, which only expand */
+  openWith?(toolId?: string): void;
   startRenaming(): void;
   remove(): void;
   createInside?(datatype: Plugin<DatatypeDescription>): void;

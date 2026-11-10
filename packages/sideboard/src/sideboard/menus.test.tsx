@@ -416,6 +416,13 @@ describe("ItemMenu", () => {
     expect(itemTexts()).toEqual(["Copy", "Rename", "Remove"]);
   });
 
+  it("omits Open with... for rows that don't open, like folders", async () => {
+    mountMenu();
+    setMenuTarget({ ...target, openWith: undefined });
+    await waitFor(menu);
+    expect(itemTexts()).toEqual(["Create", "Copy", "Rename", "Remove"]);
+  });
+
   it("ignores targets outside its panel", async () => {
     mountMenu();
     const elsewhere = document.createElement("div");

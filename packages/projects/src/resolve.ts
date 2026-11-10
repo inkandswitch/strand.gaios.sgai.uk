@@ -66,6 +66,20 @@ export async function resolveLocation(
 	}
 }
 
+/** Whether the document a location names is itself a folder. */
+export async function endsInFolder(
+	resolved: Resolved,
+	find: FindDoc
+): Promise<boolean> {
+	const last = resolved.trail.at(-1)
+	return last ? isFolder(await find(last.url)) : false
+}
+
+/** The same project, with nothing open. */
+export function projectRoot(resolved: Resolved): Resolved {
+	return {...resolved, docUrl: undefined, trail: []}
+}
+
 /**
  * Re-read a resolved location's folders, after a rename say, and name each
  * step as it's named now. Undefined once an entry on the way is gone.

@@ -1,7 +1,13 @@
 import type {AutomergeUrl, DocumentId} from "@automerge/automerge-repo/slim"
 import {describe, expect, it} from "vitest"
 import type {Location} from "./location.ts"
-import {LocationError, relocate, resolveLocation} from "./resolve.ts"
+import {
+	LocationError,
+	endsInFolder,
+	projectRoot,
+	relocate,
+	resolveLocation,
+} from "./resolve.ts"
 
 const PROJECT = "automerge:3regSr3818zmNnyXN5EobkuGtGhB" as AutomergeUrl
 const NOTES = "automerge:41DCUsb2mbtrzLAwAbxbMyF8zDfF" as AutomergeUrl
@@ -108,6 +114,22 @@ describe("resolveLocation", () => {
 		await expect(resolveLocation(at(), repo({}))).rejects.toEqual(
 			new LocationError("unavailable")
 		)
+	})
+})
+
+describe("endsInFolder", () => {
+	it("is true for a folder inside the project, false for a document or the project", async () => {
+		const find = repo(docs)
+		const folder = await resolveLocation(at("Notes"), find)
+		const document = await resolveLocation(at("Notes", "Roadmap"), find)
+		expect(await endsInFolder(folder, find)).toBe(true)
+		expect(await endsInFolder(document, find)).toBe(false)
+		expect(await endsInFolder(await resolveLocation(at(), find), find)).toBe(false)
+	})
+
+	it("leaves the project with nothing open, for projectRoot", async () => {
+		const folder = await resolveLocation(at("Notes"), repo(docs))
+		expect(projectRoot(folder)).toEqual(await resolveLocation(at(), repo(docs)))
 	})
 })
 

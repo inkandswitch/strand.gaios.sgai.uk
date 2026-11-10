@@ -97,11 +97,11 @@ function MenuItems(props: {
           </For>
         </SubMenu>
       </Show>
-      <Show when={tools.length}>
+      <Show when={t.openWith && tools.length}>
         <SubMenu label="Open with...">
           <For each={tools}>
             {(tool) => (
-              <MenuItem onSelect={() => t.openWith(tool.id)}>
+              <MenuItem onSelect={() => t.openWith?.(tool.id)}>
                 {tool.name}
               </MenuItem>
             )}
