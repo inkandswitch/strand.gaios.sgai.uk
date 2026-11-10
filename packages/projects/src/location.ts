@@ -1,12 +1,18 @@
-import {isValidDocumentId, type DocumentId} from "@automerge/automerge-repo/slim"
+import {
+	isValidAutomergeUrl,
+	isValidDocumentId,
+	type AutomergeUrl,
+	type DocumentId,
+} from "@automerge/automerge-repo/slim"
 
 /**
  * Where something sits inside a project: the project folder's document id,
  * then the names of the entries leading down to it.
  *
  * As a url (what open events carry): `automerge:<projectId>/<name>/<name>#<heads>`
- * In the hash, behind a slug of the project's name and ahead of the tool:
- * `#<slug>/automerge:<projectId>/<name>/<name>#<heads>?tool=<toolId>`
+ * In the hash, behind a slug of the project's name and ahead of the tool and
+ * the draft:
+ * `#<slug>/automerge:<projectId>/<name>/<name>#<heads>?tool=<toolId>&draft=<url>`
  */
 export type Location = {
 	projectId: DocumentId
@@ -14,6 +20,8 @@ export type Location = {
 	segments: string[]
 	heads?: string
 	toolId?: string
+	/** the project's draft it's in; main when unset */
+	draft?: AutomergeUrl
 }
 
 const SCHEME = "automerge:"
@@ -25,8 +33,14 @@ export function parseHash(hash: string): Location | undefined {
 	const [url, query] = split(hash.slice(start), "?")
 	const location = parseLocationUrl(url)
 	if (!location) return undefined
-	const toolId = new URLSearchParams(query).get("tool")
-	return toolId ? {...location, toolId} : location
+	const params = new URLSearchParams(query)
+	const toolId = params.get("tool")
+	const draft = params.get("draft")
+	return {
+		...location,
+		...(toolId ? {toolId} : {}),
+		...(isValidAutomergeUrl(draft) ? {draft} : {}),
+	}
 }
 
 export function parseLocationUrl(url: string): Location | undefined {
@@ -41,10 +55,12 @@ export function parseLocationUrl(url: string): Location | undefined {
 
 export function formatHash(location: Location, projectName: string) {
 	const slug = slugify(projectName)
-	const tool = location.toolId
-		? `?tool=${encodeURIComponent(location.toolId)}`
-		: ""
-	return `${slug ? `${slug}/` : ""}${formatLocationUrl(location)}${tool}`
+	const query = [
+		location.toolId && `tool=${encodeURIComponent(location.toolId)}`,
+		location.draft && `draft=${location.draft}`,
+	].filter(Boolean)
+	const params = query.length ? `?${query.join("&")}` : ""
+	return `${slug ? `${slug}/` : ""}${formatLocationUrl(location)}${params}`
 }
 
 export function formatLocationUrl({projectId, segments, heads}: Location) {

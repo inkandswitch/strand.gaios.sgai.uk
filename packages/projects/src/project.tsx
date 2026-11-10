@@ -12,7 +12,10 @@ const TITLEBAR_TOOLS = [
 	"theme-titlebar",
 ]
 
-/** A project's folder tree beside the open document. */
+/**
+ * A project's folder tree beside the open document, both seen through the
+ * draft the provider around it has checked out: `repo` is that provider's.
+ */
 export function ProjectView(props: {
 	route: ProjectRoute
 	repo: Repo
@@ -21,6 +24,7 @@ export function ProjectView(props: {
 }) {
 	const docUrl = () => props.route.resolved.docUrl
 	const projectName = () => props.route.resolved.projectName
+	const draftKey = (): string => props.route.location.draft ?? "main"
 	const title = useDocTitle(props.repo, docUrl)
 	createEffect(() => {
 		document.title = [title(), projectName(), props.siteTitle]
@@ -41,6 +45,7 @@ export function ProjectView(props: {
 						<BackIcon />
 					</button>
 					<h1 class="projects__project-name">{projectName()}</h1>
+					<patchwork-view component="draft-picker" />
 				</header>
 				<patchwork-view
 					class="projects__tree"
@@ -59,23 +64,30 @@ export function ProjectView(props: {
 								</p>
 							}>
 							{url => (
-								<>
-									<header class="projects__titlebar">
-										<span class="projects__title">{title() ?? ""}</span>
-										<div class="projects__titlebar-tools">
-											<For each={TITLEBAR_TOOLS}>
-												{toolId => (
-													<patchwork-view tool-id={toolId} doc-url={url()} />
-												)}
-											</For>
-										</div>
-									</header>
-									<patchwork-view
-										class="projects__document"
-										doc-url={url()}
-										tool-id={props.route.location.toolId}
-									/>
-								</>
+								// Most tools keep showing what they first read when their
+								// handle moves onto another draft's copy, so each draft
+								// gets views of its own.
+								<Show when={draftKey()} keyed>
+									{_draft => (
+										<>
+											<header class="projects__titlebar">
+												<span class="projects__title">{title() ?? ""}</span>
+												<div class="projects__titlebar-tools">
+													<For each={TITLEBAR_TOOLS}>
+														{toolId => (
+															<patchwork-view tool-id={toolId} doc-url={url()} />
+														)}
+													</For>
+												</div>
+											</header>
+											<patchwork-view
+												class="projects__document"
+												doc-url={url()}
+												tool-id={props.route.location.toolId}
+											/>
+										</>
+									)}
+								</Show>
 							)}
 						</Show>
 					</main>

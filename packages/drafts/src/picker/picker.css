@@ -1,0 +1,185 @@
+.draft-picker {
+  --draft-picker-bg: var(--studio-fill, white);
+  --draft-picker-fg: var(--studio-chrome-line, var(--studio-line, black));
+  --draft-picker-muted: var(--studio-line-offset-50, #888);
+  --draft-picker-divider: var(--studio-chrome-offset-20, #d4d4d4);
+  --draft-picker-hover: var(--studio-chrome-offset-10, #ececec);
+  --draft-picker-accent: var(--studio-primary-fill, var(--studio-primary, #35f7ca));
+  --draft-picker-danger: var(--studio-danger, #c62828);
+  --draft-picker-radius: var(--studio-radius-sm, 4px);
+  --draft-picker-space-xs: var(--studio-space-2xs, 0.25rem);
+  --draft-picker-space-sm: var(--studio-space-sm, 0.5rem);
+
+  display: flex;
+  min-width: 0;
+  color: var(--draft-picker-fg);
+  font-family: var(--studio-family-sans, system-ui, sans-serif);
+  font-size: 0.85rem;
+}
+
+.draft-picker button {
+  font: inherit;
+  color: inherit;
+  cursor: var(--studio-cursor-pointer, pointer);
+}
+
+.draft-picker__button {
+  display: flex;
+  align-items: center;
+  gap: var(--draft-picker-space-xs);
+  min-width: 0;
+  max-width: 10rem;
+  padding: var(--draft-picker-space-xs) var(--draft-picker-space-sm);
+  border: 1px solid var(--draft-picker-divider);
+  border-radius: var(--draft-picker-radius);
+  background: none;
+}
+
+.draft-picker__button:hover,
+.draft-picker__button[aria-expanded="true"] {
+  background: var(--draft-picker-hover);
+}
+
+.draft-picker__button--draft {
+  border-color: var(--draft-picker-accent);
+}
+
+.draft-picker__button svg {
+  flex-shrink: 0;
+}
+
+.draft-picker__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-picker__popover {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  min-width: 14rem;
+  max-width: 22rem;
+  max-height: 60dvh;
+  overflow: auto;
+  padding: var(--draft-picker-space-xs);
+  box-sizing: border-box;
+  background: var(--draft-picker-bg);
+  color: var(--draft-picker-fg);
+  border: 1px solid var(--draft-picker-divider);
+  border-radius: var(--studio-radius-md, 8px);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 15%);
+}
+
+.draft-picker__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-picker__row {
+  display: flex;
+  align-items: center;
+  padding-inline-start: calc(var(--draft-depth, 0) * 0.875rem);
+  border-radius: var(--draft-picker-radius);
+}
+
+.draft-picker__row:hover {
+  background: var(--draft-picker-hover);
+}
+
+.draft-picker__entry {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--draft-picker-space-xs);
+  min-width: 0;
+  padding: var(--draft-picker-space-xs) var(--draft-picker-space-sm);
+  border: none;
+  background: none;
+  text-align: start;
+}
+
+.draft-picker__check {
+  width: 1em;
+  flex-shrink: 0;
+  color: var(--draft-picker-muted);
+}
+
+.draft-picker__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-picker__more {
+  padding: 0 var(--draft-picker-space-sm);
+  border: none;
+  background: none;
+  color: var(--draft-picker-muted);
+  opacity: 0;
+}
+
+.draft-picker__row:hover .draft-picker__more,
+.draft-picker__more:focus-visible {
+  opacity: 1;
+}
+
+.draft-picker__rename {
+  flex: 1;
+  min-width: 0;
+  margin: 1px var(--draft-picker-space-xs);
+  padding: var(--draft-picker-space-xs);
+  border: 1px solid var(--draft-picker-accent);
+  border-radius: var(--draft-picker-radius);
+  background: var(--draft-picker-bg);
+  color: inherit;
+  font: inherit;
+}
+
+.draft-picker__new {
+  margin-top: var(--draft-picker-space-xs);
+  padding: var(--draft-picker-space-xs) var(--draft-picker-space-sm);
+  border: none;
+  border-top: 1px solid var(--draft-picker-divider);
+  border-radius: 0;
+  background: none;
+  text-align: start;
+}
+
+.draft-picker__new:hover {
+  background: var(--draft-picker-hover);
+}
+
+.draft-picker__menu {
+  min-width: 11rem;
+}
+
+.draft-picker__menu button {
+  padding: var(--draft-picker-space-xs) var(--draft-picker-space-sm);
+  border: none;
+  border-radius: var(--draft-picker-radius);
+  background: none;
+  text-align: start;
+}
+
+.draft-picker__menu button:hover:not(:disabled) {
+  background: var(--draft-picker-hover);
+}
+
+.draft-picker__menu button:disabled {
+  color: var(--draft-picker-muted);
+  cursor: default;
+}
+
+.draft-picker__menu hr {
+  width: 100%;
+  margin: var(--draft-picker-space-xs) 0;
+  border: none;
+  border-top: 1px solid var(--draft-picker-divider);
+}
+
+.draft-picker__menu .draft-picker__danger:not(:disabled) {
+  color: var(--draft-picker-danger);
+}

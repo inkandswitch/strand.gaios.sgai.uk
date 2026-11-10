@@ -1,4 +1,4 @@
-import type {DocumentId} from "@automerge/automerge-repo/slim"
+import type {AutomergeUrl, DocumentId} from "@automerge/automerge-repo/slim"
 import {describe, expect, it} from "vitest"
 import {
 	formatHash,
@@ -9,6 +9,7 @@ import {
 } from "./location.ts"
 
 const PROJECT = "3regSr3818zmNnyXN5EobkuGtGhB" as DocumentId
+const DRAFT = "66tnmtww1pkA5wXYoiEG4jaY8sF" as DocumentId
 
 describe("parseLocationUrl", () => {
 	it("reads a project on its own", () => {
@@ -53,6 +54,16 @@ describe("parseHash", () => {
 		})
 	})
 
+	it("reads the draft, and ignores one that isn't a url", () => {
+		expect(
+			parseHash(`automerge:${PROJECT}/Roadmap?draft=automerge:${DRAFT}`)
+		).toEqual({projectId: PROJECT, segments: ["Roadmap"], draft: `automerge:${DRAFT}`})
+		expect(parseHash(`automerge:${PROJECT}?draft=nope`)).toEqual({
+			projectId: PROJECT,
+			segments: [],
+		})
+	})
+
 	it("rejects a hash with no location in it", () => {
 		expect(parseHash("doc=whatever")).toBeUndefined()
 	})
@@ -69,6 +80,20 @@ describe("formatHash", () => {
 		const hash = formatHash(location, "Q3 Planning!")
 		expect(hash).toBe(
 			`q3-planning/automerge:${PROJECT}/Design%20Notes/a%3Fb%23c#abc?tool=markdown`
+		)
+		expect(parseHash(hash)).toEqual(location)
+	})
+
+	it("writes the draft after the tool", () => {
+		const location = {
+			projectId: PROJECT,
+			segments: ["Roadmap"],
+			toolId: "markdown",
+			draft: `automerge:${DRAFT}` as AutomergeUrl,
+		}
+		const hash = formatHash(location, "Q3")
+		expect(hash).toBe(
+			`q3/automerge:${PROJECT}/Roadmap?tool=markdown&draft=automerge:${DRAFT}`
 		)
 		expect(parseHash(hash)).toEqual(location)
 	})

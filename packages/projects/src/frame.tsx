@@ -1,10 +1,11 @@
 import type {DocHandle} from "@automerge/automerge-repo/slim"
 import type {FolderDoc} from "@inkandswitch/patchwork-filesystem"
 import type {ToolElement} from "@inkandswitch/patchwork-plugins"
-import {createEffect, Match, Show, Switch} from "solid-js"
+import {createEffect, Show} from "solid-js"
 import {render} from "solid-js/web"
+import {DraftScopeView} from "./drafts.tsx"
 import {useDoc, useHandle} from "./hooks.ts"
-import {createNavigation} from "./navigation.ts"
+import {createNavigation, type DraftScope} from "./navigation.ts"
 import {ProjectView} from "./project.tsx"
 import {Provider} from "./provider.tsx"
 import {addToRecents} from "./recents.ts"
@@ -47,6 +48,15 @@ function Frame(props: {
 		if (navigation.route().page === "splash") document.title = props.siteTitle
 	})
 
+	// The open project, once it's the one whose drafts are mounted.
+	const shown = (scope: DraftScope) => {
+		const project = navigation.project()
+		const projectRepo = navigation.projectRepo()
+		return project?.resolved.projectUrl === scope.projectUrl && projectRepo
+			? {project, repo: projectRepo}
+			: undefined
+	}
+
 	return (
 		<Provider component="patchwork-account-provider" docUrl={props.account.url}>
 			<Provider
@@ -67,25 +77,29 @@ function Frame(props: {
 								</p>
 							)}
 						</Show>
-						<Switch>
-							<Match when={navigation.project()}>
-								{project => (
-									<ProjectView
-										route={project()}
-										repo={repo}
-										siteTitle={props.siteTitle}
-										home={navigation.home}
-									/>
-								)}
-							</Match>
-							<Match when={navigation.route().page === "splash"}>
-								<Splash
-									recents={recents}
-									repo={repo}
-									open={url => navigation.open(url)}
-								/>
-							</Match>
-						</Switch>
+						<Show when={navigation.route().page === "splash"}>
+							<Splash
+								recents={recents}
+								repo={repo}
+								open={url => navigation.open(url)}
+							/>
+						</Show>
+						<Show when={navigation.scope()} keyed>
+							{scope => (
+								<DraftScopeView scope={scope} attach={navigation.attach}>
+									<Show when={shown(scope)}>
+										{shown => (
+											<ProjectView
+												route={shown().project}
+												repo={shown().repo}
+												siteTitle={props.siteTitle}
+												home={navigation.home}
+											/>
+										)}
+									</Show>
+								</DraftScopeView>
+							)}
+						</Show>
 					</div>
 				</patchwork-view>
 			</Provider>

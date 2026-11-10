@@ -188,12 +188,29 @@
 }
 
 .projects__project-name {
+	flex: 1;
+	min-width: 0;
 	margin: 0;
 	font-size: 1rem;
 	font-weight: 600;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.projects__unavailable {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: var(--projects-space);
+	width: min(36rem, 100%);
+	margin: 0 auto;
+	padding: calc(var(--projects-space-lg) * 3) var(--projects-space-lg);
+	box-sizing: border-box;
+}
+
+.projects__unavailable p {
+	margin: 0;
 }
 
 .projects__tree {

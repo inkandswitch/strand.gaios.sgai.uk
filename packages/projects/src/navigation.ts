@@ -1,5 +1,6 @@
 import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
 import type {OpenDocumentEvent} from "@inkandswitch/patchwork-elements"
+import {request, subscribe} from "@inkandswitch/patchwork-providers"
 import {
 	createEffect,
 	createMemo,
@@ -16,6 +17,7 @@ import {
 import {
 	LocationError,
 	endsInFolder,
+	findProject,
 	projectRoot,
 	relocate,
 	resolveLocation,
@@ -31,6 +33,12 @@ export type Route =
 	| {page: "splash"}
 	| ({page: "project"} & ProjectRoute)
 
+/** The project whose drafts are mounted, and the draft to start it on. */
+export type DraftScope = {projectUrl: AutomergeUrl; draft?: AutomergeUrl}
+
+/** A mounted draft provider; its repo reads whichever draft is checked out. */
+export type DraftProviderElement = HTMLElement & {repo: Repo}
+
 export type Navigation = {
 	route: Accessor<Route>
 	project: Accessor<ProjectRoute | undefined>
@@ -40,25 +48,58 @@ export type Navigation = {
 	dismissNotice(): void
 	open(url: string, toolId?: string | null): void
 	home(): void
+	/** where a draft provider should be mounted, if anywhere */
+	scope: Accessor<DraftScope | undefined>
+	/** the open project's repo, reading its checked-out draft */
+	projectRepo: Accessor<Repo | undefined>
+	/** the scope's provider has mounted; returns a detach */
+	attach(projectUrl: AutomergeUrl, provider: DraftProviderElement): () => void
 }
 
 type HistoryMode = "push" | "replace"
+
+type Attached = {
+	projectUrl: AutomergeUrl
+	provider: DraftProviderElement
+	find: FindDoc
+	/** the draft it was started on */
+	initial: AutomergeUrl | null
+	/** what it has checked out, once it has said */
+	checkedOut: AutomergeUrl | null | undefined
+	/** a switch navigation asked for, so it's not taken for the user's */
+	switching: AutomergeUrl | null | undefined
+}
 
 /**
  * The frame's router. The hash says what's open; `patchwork:open-document`
  * events from anything inside `element` change it. Only locations inside a
  * project are opened, and a project has to be a folder.
+ *
+ * A project is seen through one of its drafts: the frame mounts a draft
+ * provider for it (see `scope`), and everything in the project, paths
+ * included, is looked up through that provider's repo. The hash's `draft=`
+ * and the checked-out draft follow each other. Opening another project
+ * starts it on main.
  */
 export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	const find: FindDoc = async url => (await repo.find(url)).doc()
 	const [route, setRoute] = createSignal<Route>({page: "loading"})
 	const [notice, setNotice] = createSignal<string>()
+	const [scope, setScope] = createSignal<DraftScope>()
+	const [attached, setAttached] = createSignal<Attached>()
+	let waiting: ((attached: Attached) => void)[] = []
 	let written: string | undefined
 	let attempt = 0
 
 	const project = createMemo(() => {
 		const current = route()
 		return current.page === "project" ? current : undefined
+	})
+	const projectRepo = createMemo(() => {
+		const current = attached()
+		return current && current.projectUrl === project()?.resolved.projectUrl
+			? current.provider.repo
+			: undefined
 	})
 	const selectedView = createMemo<SelectedView | undefined>(
 		() => {
@@ -100,6 +141,9 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		dismissNotice: () => setNotice(undefined),
 		open,
 		home,
+		scope,
+		projectRepo,
+		attach,
 	}
 
 	function open(url: string, toolId?: string | null) {
@@ -118,13 +162,24 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			reject(new LocationError("not-a-project"), "push")
 			return
 		}
-		void go({...location, toolId: toolId ?? undefined}, "push")
+		// Within a project, stay in the draft it's on.
+		const sameProject =
+			current && current.resolved.projectUrl === projectUrlOf(location)
+		void go(
+			{
+				...location,
+				toolId: toolId ?? undefined,
+				draft: sameProject ? current.location.draft : undefined,
+			},
+			"push"
+		)
 	}
 
 	function home() {
 		attempt++
 		setNotice(undefined)
 		setRoute({page: "splash"})
+		setScope(undefined)
 		write("", "push")
 	}
 
@@ -134,6 +189,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		if (!hash) {
 			attempt++
 			setRoute({page: "splash"})
+			setScope(undefined)
 			return
 		}
 		const location = parseHash(hash)
@@ -145,20 +201,106 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	// nothing; a hash naming one shows its project with nothing open.
 	async function go(location: Location, mode: HistoryMode) {
 		const mine = ++attempt
+		const left = project()
 		try {
-			const resolved = await resolveLocation(location, find)
-			const folder = await endsInFolder(resolved, find)
+			const projectUrl = await findProject(location, find)
 			if (mine !== attempt) return
-			if (!folder) show(resolved, location, mode)
-			else if (mode === "replace")
-				show(
-					projectRoot(resolved),
-					{...location, segments: [], heads: undefined, toolId: undefined},
-					mode
+			const scoped = await enter(projectUrl, location.draft)
+			if (mine !== attempt) return
+			const draft = location.draft ?? null
+			if (draft !== draftOf(scoped)) {
+				scoped.switching = draft
+				const selection = await request<{checkedOut: AutomergeUrl | null}>(
+					scoped.provider,
+					{type: "draft:select", checkedOut: draft, at: null}
 				)
+				scoped.checkedOut = selection.checkedOut
+				if (mine !== attempt) return
+			}
+			const resolved = await resolveLocation(location, scoped.find)
+			const folder = await endsInFolder(resolved, scoped.find)
+			if (mine !== attempt) return
+			const shown = {...location, draft: draftOf(scoped) ?? undefined}
+			if (!folder) show(resolved, shown, mode)
+			else if (mode === "replace") show(projectRoot(resolved), atRoot(shown), mode)
+			else if (left?.resolved.projectUrl !== projectUrl) restore(left)
 		} catch (error) {
-			if (mine === attempt) reject(error, mode)
+			if (mine !== attempt) return
+			if (mode === "push") restore(left)
+			reject(error, mode)
 		}
+	}
+
+	// Mount the project's draft provider, unless it's already there, and wait
+	// for it.
+	function enter(
+		projectUrl: AutomergeUrl,
+		draft: AutomergeUrl | undefined
+	): Promise<Attached> {
+		const current = attached()
+		if (current?.projectUrl === projectUrl) return Promise.resolve(current)
+		if (scope()?.projectUrl !== projectUrl) {
+			waiting = []
+			setScope({projectUrl, draft})
+		}
+		return new Promise(resolve => waiting.push(resolve))
+	}
+
+	// A push that didn't open anything leaves the project that was open.
+	function restore(left: ProjectRoute | undefined) {
+		if (scope()?.projectUrl === left?.resolved.projectUrl) return
+		waiting = []
+		setScope(
+			left && {projectUrl: left.resolved.projectUrl, draft: left.location.draft}
+		)
+	}
+
+	function attach(projectUrl: AutomergeUrl, provider: DraftProviderElement) {
+		const scoped: Attached = {
+			projectUrl,
+			provider,
+			find: async url => (await provider.repo.find(url)).doc(),
+			initial: scope()?.draft ?? null,
+			checkedOut: undefined,
+			switching: undefined,
+		}
+		const unsubscribe = subscribe<{checkedOut: AutomergeUrl | null}>(
+			provider,
+			{type: "draft:selection"},
+			selection => onDraftSelected(scoped, selection.checkedOut)
+		)
+		setAttached(scoped)
+		const ready = waiting
+		waiting = []
+		for (const resolve of ready) resolve(scoped)
+		return () => {
+			unsubscribe()
+			if (attached() === scoped) setAttached(undefined)
+		}
+	}
+
+	// Someone picked another draft, or the one checked out went away: show
+	// the same thing in it, or the project with nothing open if it isn't
+	// there.
+	function onDraftSelected(scoped: Attached, checkedOut: AutomergeUrl | null) {
+		scoped.checkedOut = checkedOut
+		if (scoped.switching === checkedOut) {
+			scoped.switching = undefined
+			return
+		}
+		const current = project()
+		if (!current || current.resolved.projectUrl !== scoped.projectUrl) return
+		if ((current.location.draft ?? null) === checkedOut) return
+		const mine = ++attempt
+		const location = {...current.location, draft: checkedOut ?? undefined}
+		void relocate(current.resolved, scoped.find).then(
+			next => {
+				if (mine !== attempt) return
+				if (next) show(next, location, "replace")
+				else show(projectRoot(current.resolved), atRoot(location), "replace")
+			},
+			error => mine === attempt && reject(error, "replace")
+		)
 	}
 
 	function show(resolved: Resolved, location: Location, mode: HistoryMode) {
@@ -180,16 +322,20 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		setNotice(message)
 		if (mode === "push") return
 		setRoute({page: "splash"})
+		setScope(undefined)
 		write("", "replace")
 	}
 
 	// Entries get renamed while they're open (sideboard names a document's
 	// entry after its title), so watch the folders on the way to the open
-	// document and keep the hash naming things as they're named now.
+	// document and keep the hash naming things as they're named now. One
+	// that's gone (removed, or not in this draft) leaves the project open
+	// with nothing in it.
 	function followRenames() {
 		createEffect(() => {
 			const current = project()
-			if (!current) return
+			const scoped = attached()
+			if (!current || scoped?.projectUrl !== current.resolved.projectUrl) return
 			const {resolved} = current
 			const folders = new Set<AutomergeUrl>([
 				resolved.projectUrl,
@@ -198,14 +344,14 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			let live = true
 			const stops: (() => void)[] = []
 			const refresh = () =>
-				void relocate(resolved, find).then(next => {
+				void relocate(resolved, scoped.find).then(next => {
 					const now = project()
-					if (!live || !next || now?.resolved !== resolved) return
-					if (sameNames(next, resolved)) return
-					show(next, now.location, "replace")
+					if (!live || now?.resolved !== resolved) return
+					if (!next) show(projectRoot(resolved), atRoot(now.location), "replace")
+					else if (!sameNames(next, resolved)) show(next, now.location, "replace")
 				})
 			for (const url of folders) {
-				void repo.find(url).then(handle => {
+				void scoped.provider.repo.find(url).then(handle => {
 					if (!live) return
 					handle.on("change", refresh)
 					stops.push(() => handle.off("change", refresh))
@@ -226,6 +372,19 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		if (mode === "push") history.pushState(null, "", url)
 		else history.replaceState(null, "", url)
 	}
+}
+
+/** The draft a provider is on, or is about to be on. */
+function draftOf(scoped: Attached) {
+	return scoped.checkedOut === undefined ? scoped.initial : scoped.checkedOut
+}
+
+function atRoot(location: Location): Location {
+	return {...location, segments: [], heads: undefined, toolId: undefined}
+}
+
+function projectUrlOf(location: Location) {
+	return `automerge:${location.projectId}` as AutomergeUrl
 }
 
 function sameNames(a: Resolved, b: Resolved) {

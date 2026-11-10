@@ -38,12 +38,22 @@ export class LocationError extends Error {
 
 export type FindDoc = (url: AutomergeUrl) => Promise<unknown>
 
-/** Follow a location down from its project. Only a folder can be a project. */
+/** The project a location is in. Only a folder can be a project. */
+export async function findProject(
+	location: Location,
+	find: FindDoc
+): Promise<AutomergeUrl> {
+	const projectUrl = projectUrlOf(location)
+	await findFolder(projectUrl, find, "not-a-project")
+	return projectUrl
+}
+
+/** Follow a location down from its project. */
 export async function resolveLocation(
 	location: Location,
 	find: FindDoc
 ): Promise<Resolved> {
-	const projectUrl = stringifyAutomergeUrl({documentId: location.projectId})
+	const projectUrl = projectUrlOf(location)
 	const project = await findFolder(projectUrl, find, "not-a-project")
 	const trail: Step[] = []
 	let folderUrl = projectUrl
@@ -118,6 +128,10 @@ async function findFolder(
 	}
 	if (!isFolder(doc)) throw new LocationError(otherwise)
 	return doc
+}
+
+function projectUrlOf(location: Location) {
+	return stringifyAutomergeUrl({documentId: location.projectId})
 }
 
 function withHeads(url: AutomergeUrl, heads?: string): AutomergeUrl {
