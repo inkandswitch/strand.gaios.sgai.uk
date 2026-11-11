@@ -4,10 +4,8 @@ import {
   type DocHandle,
 } from "@automerge/automerge-repo/slim";
 import { useDocument } from "solid-automerge";
-import type {
-  OpenDocumentEventDetail,
-  PatchworkViewElement,
-} from "@inkandswitch/patchwork-elements";
+import type { PatchworkViewElement } from "@inkandswitch/patchwork-elements";
+import type { OpenDetail } from "../events.ts";
 import type { FolderDoc } from "@inkandswitch/patchwork-filesystem";
 import {
   createEffect,
@@ -48,7 +46,7 @@ export default function Folder(props: {
   repo: Repo;
   depth?: number;
   removeFromParent(): void;
-  open(detail: OpenDocumentEventDetail): void;
+  open(detail: OpenDetail): void;
   /** Where this folder sits: it and its documents open by location. */
   location: string;
   name?: string;

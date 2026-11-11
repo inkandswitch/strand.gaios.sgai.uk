@@ -4,6 +4,7 @@ import type {
   DatatypeDescription,
   Plugin,
 } from "@inkandswitch/patchwork-plugins";
+import type { Placement } from "./events.ts";
 
 // A "new document" drag (or click) is asking for a doc to be created inside the
 // folder at `containerUrl`, inserted at `index`. The DocumentList whose handle
@@ -36,7 +37,7 @@ export interface MenuTarget {
   name: string;
   type: string;
   /** unset for folders, which only expand */
-  openWith?(toolId?: string): void;
+  openWith?(toolId?: string, placement?: Placement): void;
   startRenaming(): void;
   remove(): void;
   createInside?(datatype: Plugin<DatatypeDescription>): void;

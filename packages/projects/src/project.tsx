@@ -1,32 +1,27 @@
 import type {Repo} from "@automerge/automerge-repo/slim"
-import {createEffect, createSignal, For, Show} from "solid-js"
+import {createEffect, createSignal} from "solid-js"
+import {Dock} from "./dock.tsx"
 import {DraftStack, stripsWidth, useDraftLanes} from "./draft-stack.tsx"
 import {useDocTitle} from "./hooks.ts"
 import type {ProjectRoute} from "./navigation.ts"
 import {Provider} from "./provider.tsx"
 
-/** Each has to be installed: a tool `<patchwork-view>` can't find shows an error. */
-const TITLEBAR_TOOLS = [
-	"doc-openwith",
-	"doc-presence",
-	"sync-indicator",
-	"theme-titlebar",
-]
-
 /**
- * A project's folder tree beside the open document, both seen through the
+ * A project's folder tree beside its open documents, all seen through the
  * draft the provider around it has checked out: `repo` is that provider's.
  */
 export function ProjectView(props: {
 	route: ProjectRoute
 	repo: Repo
 	siteTitle: string
+	focus(panel: ProjectRoute | undefined): void
 	home(): void
 }) {
 	const docUrl = () => props.route.resolved.docUrl
 	const projectName = () => props.route.resolved.projectName
 	const draftKey = (): string => props.route.location.draft ?? "main"
 	const title = useDocTitle(props.repo, docUrl)
+	const [root, setRoot] = createSignal<HTMLElement>()
 	const [sidebar, setSidebar] = createSignal<HTMLElement>()
 	const lanes = useDraftLanes(sidebar)
 	createEffect(() => {
@@ -36,7 +31,7 @@ export function ProjectView(props: {
 	})
 
 	return (
-		<div class="projects__project">
+		<div ref={setRoot} class="projects__project">
 			<Provider component="patchwork-review-provider">
 				<aside
 					ref={setSidebar}
@@ -65,40 +60,13 @@ export function ProjectView(props: {
 			<Provider component="patchwork-comments-provider">
 				<Provider component="patchwork-focus-provider">
 					<main class="projects__main">
-						<Show
-							when={docUrl()}
-							fallback={
-								<p class="projects__empty">
-									Open something from the project, or make something new.
-								</p>
-							}>
-							{url => (
-								// Most tools keep showing what they first read when their
-								// handle moves onto another draft's copy, so each draft
-								// gets views of its own.
-								<Show when={draftKey()} keyed>
-									{_draft => (
-										<>
-											<header class="projects__titlebar">
-												<span class="projects__title">{title() ?? ""}</span>
-												<div class="projects__titlebar-tools">
-													<For each={TITLEBAR_TOOLS}>
-														{toolId => (
-															<patchwork-view tool-id={toolId} doc-url={url()} />
-														)}
-													</For>
-												</div>
-											</header>
-											<patchwork-view
-												class="projects__document"
-												doc-url={url()}
-												tool-id={props.route.location.toolId}
-											/>
-										</>
-									)}
-								</Show>
-							)}
-						</Show>
+						<Dock
+							route={props.route}
+							repo={props.repo}
+							draftKey={draftKey()}
+							focus={props.focus}
+							host={root()}
+						/>
 					</main>
 				</Provider>
 			</Provider>

@@ -361,25 +361,79 @@
 	flex-direction: column;
 	min-width: 0;
 	min-height: 0;
-	overflow: hidden;
-	background: var(--projects-surface);
-	border: 1px solid var(--projects-surface-edge);
-	border-radius: var(--projects-radius-lg);
-	box-shadow: var(--projects-elevation);
+	padding-bottom: var(--projects-space-sm);
+	box-sizing: border-box;
 }
 
-.projects__titlebar {
-	padding-inline: var(--projects-space);
+/* the dock: each group of tabs a surface raised above the ground, the gaps
+   between them the ground showing through */
+
+.projects__dock {
+	flex: 1;
+	min-height: 0;
+}
+
+.projects__dock-theme {
+	color-scheme: inherit;
+	--dv-group-view-background-color: var(--projects-surface);
+	--dv-tabs-and-actions-container-background-color: var(--projects-surface);
+	--dv-tabs-and-actions-container-height: 2.25rem;
+	--dv-tabs-and-actions-container-font-size: 0.85rem;
+	--dv-activegroup-visiblepanel-tab-background-color: var(--projects-surface);
+	--dv-activegroup-hiddenpanel-tab-background-color: var(--projects-surface);
+	--dv-inactivegroup-visiblepanel-tab-background-color: var(--projects-surface);
+	--dv-inactivegroup-hiddenpanel-tab-background-color: var(--projects-surface);
+	--dv-activegroup-visiblepanel-tab-color: var(--projects-fg);
+	--dv-activegroup-hiddenpanel-tab-color: var(--projects-muted);
+	--dv-inactivegroup-visiblepanel-tab-color: color-mix(in oklch, var(--projects-fg) 70%, transparent);
+	--dv-inactivegroup-hiddenpanel-tab-color: var(--projects-muted);
+	--dv-tab-divider-color: transparent;
+	--dv-separator-border: transparent;
+	--dv-paneview-header-border-color: var(--projects-surface-edge);
+	--dv-tabs-container-scrollbar-color: var(--projects-divider);
+	--dv-icon-hover-background-color: var(--projects-hover);
+	--dv-drag-over-background-color: color-mix(in oklch, var(--projects-lane-current) 16%, transparent);
+	--dv-drag-over-border-color: var(--projects-lane-current);
+	--dv-active-sash-color: var(--projects-divider);
+	--dv-context-menu-background-color: var(--projects-surface);
+	--dv-context-menu-color: var(--projects-fg);
+	background: var(--projects-ground);
+	font-family: var(--projects-family);
+}
+
+.projects__dock-theme .dv-groupview {
+	box-sizing: border-box;
+	overflow: hidden;
+	border: 1px solid var(--projects-surface-edge);
+	border-radius: var(--projects-radius-lg);
+	box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+}
+
+.projects__dock-theme .dv-tabs-and-actions-container {
 	border-bottom: 1px solid var(--projects-surface-edge);
 }
 
-.projects__title {
-	flex: 1;
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-weight: 500;
+.projects__dock-theme .dv-groupview.dv-active-group {
+	border-color: color-mix(in oklch, var(--projects-fg) 18%, transparent);
+}
+
+.projects__dock-theme .dv-watermark {
+	display: grid;
+	place-items: center;
+}
+
+.projects__dock-panel {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+}
+
+.projects__titlebar {
+	justify-content: flex-end;
+	min-height: 2.25rem;
+	padding-inline: var(--projects-space);
+	border-bottom: 1px solid var(--projects-surface-edge);
 }
 
 .projects__titlebar-tools {

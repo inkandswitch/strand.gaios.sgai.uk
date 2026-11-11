@@ -14,6 +14,15 @@ import {
 import { dragstack, clearDragstack } from "../dnd/dnd.ts";
 import { removeItemsByUrl } from "../dnd/operations.ts";
 import { menuTarget, setMenuTarget, type MenuTarget } from "../state.ts";
+import { subscribe } from "@inkandswitch/patchwork-providers-solid";
+import type { DockGroup } from "../events.ts";
+
+const SIDES = [
+  { to: "right", label: "Right" },
+  { to: "left", label: "Left" },
+  { to: "above", label: "Top" },
+  { to: "below", label: "Bottom" },
+] as const;
 
 /**
  * The one context menu shared by every row in a panel. A row opens it by
@@ -29,6 +38,11 @@ export function ItemMenu(props: {
     const t = menuTarget();
     return t && props.element.contains(t.element) ? t : null;
   };
+  const groups = subscribe<DockGroup[] | null>(
+    props.element,
+    { type: "dock:groups" },
+    null
+  );
 
   // Close the target this menu was opened for, not target(): by now the row
   // may have been removed (that's what Remove does), so it's no longer inside
@@ -50,6 +64,7 @@ export function ItemMenu(props: {
             target={t}
             repo={props.repo}
             rootFolderHandle={props.rootFolderHandle}
+            groups={groups()}
           />
         </Menu>
       )}
@@ -61,6 +76,8 @@ function MenuItems(props: {
   target: MenuTarget;
   repo: Repo;
   rootFolderHandle: DocHandle<FolderDoc>;
+  /** the frame's tiled groups, null when it doesn't tile */
+  groups: DockGroup[] | null;
 }) {
   const t = props.target;
   const tools = useSupportedToolsForType(t.type);
@@ -96,6 +113,41 @@ function MenuItems(props: {
             )}
           </For>
         </SubMenu>
+      </Show>
+      <Show when={t.openWith && props.groups}>
+        {(groups) => (
+          <>
+            <MenuItem onSelect={() => t.openWith?.(undefined, { to: "tab" })}>
+              Open in new tab
+            </MenuItem>
+            <SubMenu label="Open to the...">
+              <For each={SIDES}>
+                {(side) => (
+                  <MenuItem
+                    onSelect={() => t.openWith?.(undefined, { to: side.to })}
+                  >
+                    {side.label}
+                  </MenuItem>
+                )}
+              </For>
+            </SubMenu>
+            <Show when={groups().length > 1}>
+              <SubMenu label="Open in">
+                <For each={groups()}>
+                  {(group) => (
+                    <MenuItem
+                      onSelect={() =>
+                        t.openWith?.(undefined, { group: group.id })
+                      }
+                    >
+                      {group.title}
+                    </MenuItem>
+                  )}
+                </For>
+              </SubMenu>
+            </Show>
+          </>
+        )}
       </Show>
       <Show when={t.openWith && tools.length}>
         <SubMenu label="Open with...">

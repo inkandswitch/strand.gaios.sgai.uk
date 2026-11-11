@@ -21,6 +21,7 @@ import {
   rowSpot,
 } from "../dnd/dnd.ts";
 import { setMenuTarget } from "../state.ts";
+import type { Placement } from "../events.ts";
 import type {
   AutomergeUrl,
   DocHandle,
@@ -51,7 +52,7 @@ export default function Item(props: {
   changed?: boolean;
   children: JSX.Element;
   /** unset for folders: pressing a folder's row expands it instead */
-  openWith?(toolId?: string): void;
+  openWith?(toolId?: string, placement?: Placement): void;
   startRenaming(): void;
   remove(): void;
   element: PatchworkViewElement;

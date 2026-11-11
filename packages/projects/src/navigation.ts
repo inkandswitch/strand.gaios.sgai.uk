@@ -26,7 +26,24 @@ import {
 } from "./resolve.ts"
 import type {SelectedView} from "./selection.ts"
 
-export type ProjectRoute = {resolved: Resolved; location: Location}
+/**
+ * What's open in a project's focused panel. `placement` says where an open
+ * asked for it to go; once the dock has put it there, the route it reports
+ * back has none.
+ */
+export type ProjectRoute = {
+	resolved: Resolved
+	location: Location
+	placement?: Placement
+}
+
+/**
+ * Beside the focused panel, in a new tab in its group, or in a given group.
+ * Without one an open replaces what the focused panel shows.
+ */
+export type Placement =
+	| {to: "right" | "left" | "above" | "below" | "tab"}
+	| {group: string}
 
 export type Route =
 	| {page: "loading"}
@@ -43,7 +60,9 @@ export type Navigation = {
 	route: Accessor<Route>
 	project: Accessor<ProjectRoute | undefined>
 	selectedView: Accessor<SelectedView | undefined>
-	open(url: string, toolId?: string | null): void
+	open(url: string, toolId?: string | null, placement?: Placement): void
+	/** another panel took focus, or the last one closed */
+	focus(panel: ProjectRoute | undefined): void
 	home(): void
 	/** where a draft provider should be mounted, if anywhere */
 	scope: Accessor<DraftScope | undefined>
@@ -109,7 +128,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 
 	const onOpen = (event: OpenDocumentEvent) => {
 		event.stopPropagation()
-		open(event.detail.url, event.detail.toolId)
+		open(event.detail.url, event.detail.toolId, placementOf(event.detail))
 	}
 	const onHistory = () => {
 		if (currentHash() !== written) followHash()
@@ -134,20 +153,22 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		project,
 		selectedView,
 		open,
+		focus,
 		home,
 		scope,
 		projectRepo,
 		attach,
 	}
 
-	function open(url: string, toolId?: string | null) {
+	function open(url: string, toolId?: string | null, placement?: Placement) {
 		const current = project()
 		// The open document again, under another tool: "Open with".
 		if (current && url === current.resolved.docUrl) {
 			show(
 				current.resolved,
 				{...current.location, toolId: toolId ?? undefined},
-				"push"
+				"push",
+				placement
 			)
 			return
 		}
@@ -165,7 +186,29 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 				toolId: toolId ?? undefined,
 				draft: sameProject ? current.location.draft : undefined,
 			},
-			"push"
+			"push",
+			sameProject ? placement : undefined
+		)
+	}
+
+	// The hash follows the focused panel, so going back and forth between
+	// panels doesn't pile up history. Each panel keeps the place it was given,
+	// but they're all on the draft that's checked out.
+	function focus(panel: ProjectRoute | undefined) {
+		const current = project()
+		if (!current) return
+		if (!panel) {
+			if (current.resolved.docUrl)
+				show(projectRoot(current.resolved), atRoot(current.location), "replace")
+			return
+		}
+		if (panel.resolved.projectUrl !== current.resolved.projectUrl) return
+		if (samePlace(panel, current)) return
+		attempt++
+		show(
+			panel.resolved,
+			{...panel.location, draft: current.location.draft},
+			"replace"
 		)
 	}
 
@@ -192,7 +235,11 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 
 	// Folders only expand in the tree, they never open. Asking to open one does
 	// nothing; a hash naming one shows its project with nothing open.
-	async function go(location: Location, mode: HistoryMode) {
+	async function go(
+		location: Location,
+		mode: HistoryMode,
+		placement?: Placement
+	) {
 		const mine = ++attempt
 		const left = project()
 		try {
@@ -214,7 +261,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			const folder = await endsInFolder(resolved, scoped.find)
 			if (mine !== attempt) return
 			const shown = {...location, draft: draftOf(scoped) ?? undefined}
-			if (!folder) show(resolved, shown, mode)
+			if (!folder) show(resolved, shown, mode, placement)
 			else if (mode === "replace") show(projectRoot(resolved), atRoot(shown), mode)
 			else if (left?.resolved.projectUrl !== projectUrl) restore(left)
 		} catch (error) {
@@ -296,12 +343,17 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		)
 	}
 
-	function show(resolved: Resolved, location: Location, mode: HistoryMode) {
+	function show(
+		resolved: Resolved,
+		location: Location,
+		mode: HistoryMode,
+		placement?: Placement
+	) {
 		const canonical = {
 			...location,
 			segments: resolved.trail.map(step => step.segment),
 		}
-		setRoute({page: "project", resolved, location: canonical})
+		setRoute({page: "project", resolved, location: canonical, placement})
 		write(formatHash(canonical, resolved.projectName), mode)
 	}
 
@@ -378,6 +430,27 @@ function atRoot(location: Location): Location {
 function projectUrlOf(location: Location) {
 	return `automerge:${location.projectId}` as AutomergeUrl
 }
+
+function samePlace(a: ProjectRoute, b: ProjectRoute) {
+	return (
+		a.resolved.docUrl === b.resolved.docUrl &&
+		a.location.toolId === b.location.toolId &&
+		sameNames(a.resolved, b.resolved)
+	)
+}
+
+// Open events come from any tool, so their placement is checked, not trusted.
+function placementOf(detail: object): Placement | undefined {
+	const placement = "placement" in detail ? detail.placement : undefined
+	if (!placement || typeof placement !== "object") return undefined
+	if ("group" in placement && typeof placement.group === "string")
+		return {group: placement.group}
+	if ("to" in placement && SIDES.has(placement.to as string))
+		return {to: placement.to as Extract<Placement, {to: string}>["to"]}
+	return undefined
+}
+
+const SIDES = new Set(["right", "left", "above", "below", "tab"])
 
 function sameNames(a: Resolved, b: Resolved) {
 	return (

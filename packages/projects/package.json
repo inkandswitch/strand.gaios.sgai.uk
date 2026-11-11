@@ -22,6 +22,7 @@
 		"@inkandswitch/patchwork-filesystem": "^0.2.9",
 		"@inkandswitch/patchwork-plugins": "^1.2.5",
 		"@inkandswitch/patchwork-providers": "^0.5.2",
+		"dockview-core": "^8.9.0",
 		"solid-js": "^1.9.10"
 	},
 	"devDependencies": {

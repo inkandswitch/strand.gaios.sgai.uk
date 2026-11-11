@@ -80,6 +80,7 @@ function Frame(props: {
 												route={shown().project}
 												repo={shown().repo}
 												siteTitle={props.siteTitle}
+												focus={navigation.focus}
 												home={navigation.home}
 											/>
 										)}

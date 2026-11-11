@@ -1,7 +1,6 @@
 import { useDocument } from "solid-automerge";
 import type { AutomergeUrl, Repo } from "@automerge/automerge-repo/slim";
 import type { PatchworkViewElement } from "@inkandswitch/patchwork-elements";
-import type { OpenDocumentEventDetail } from "@inkandswitch/patchwork-elements";
 import type { FolderDoc } from "@inkandswitch/patchwork-filesystem";
 import {
   createEffect,
@@ -25,7 +24,7 @@ import {
   watchFolder,
 } from "./document-list/auto-expand.ts";
 import CreateNew from "./create-new.tsx";
-import { createOpenEvent } from "./events.ts";
+import { createOpenEvent, type OpenDetail } from "./events.ts";
 import { useChangeMarks } from "./document-list/changes.ts";
 import { DocumentList } from "./document-list/document-list.tsx";
 import { LoadingRows } from "./document-list/loading-row.tsx";
@@ -139,7 +138,7 @@ export function DocumentListPanel(props: {
     });
   });
 
-  function open(detail: OpenDocumentEventDetail) {
+  function open(detail: OpenDetail) {
     props.element.dispatchEvent(createOpenEvent(detail));
   }
 

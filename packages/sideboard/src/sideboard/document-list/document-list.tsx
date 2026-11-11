@@ -4,10 +4,8 @@ import {
   type DocHandle,
   type Repo,
 } from "@automerge/automerge-repo/slim";
-import type {
-  OpenDocumentEventDetail,
-  PatchworkViewElement,
-} from "@inkandswitch/patchwork-elements";
+import type { PatchworkViewElement } from "@inkandswitch/patchwork-elements";
+import type { OpenDetail } from "../events.ts";
 import type {
   DocLink,
   FolderDoc,
@@ -52,7 +50,7 @@ export interface DocumentListProps {
   docs?: DocLink[];
   depth: number;
   repo: Repo;
-  open(detail: OpenDocumentEventDetail): void;
+  open(detail: OpenDetail): void;
   /** Where this list's folder sits: documents open by location. */
   location: string;
   isSelected(url: AutomergeUrl): boolean;
@@ -284,10 +282,11 @@ export function DocumentList(props: DocumentListProps) {
                     rootFolderHandle={props.rootFolderHandle}
                     parentFolderHandle={props.handle}
                     itemIndex={index()}
-                    openWith={(toolId) =>
+                    openWith={(toolId, placement) =>
                       props.open({
                         url: childLocation(props.location, doc, props.docs),
                         toolId,
+                        placement,
                       })
                     }
                   >
