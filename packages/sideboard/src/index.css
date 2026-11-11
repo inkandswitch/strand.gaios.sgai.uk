@@ -532,6 +532,7 @@ button {
   overflow-y: auto;
   padding: 4px;
   background-color: var(--document-list-widget-fill);
+  font-family: var(--document-list-family);
   font-size: 0.8rem;
   border-radius: 6px;
   border: var(--studio-border-width, 1px) var(--studio-border-style, solid) var(--document-list-border);
@@ -641,6 +642,7 @@ button {
   width: 100%;
   box-sizing: border-box;
   padding: 6px 8px;
+  font-family: inherit;
   font-size: 0.8rem;
   border: var(--studio-border-width, 1px) var(--studio-border-style, solid) var(--document-list-border-strong);
   border-radius: 4px;
