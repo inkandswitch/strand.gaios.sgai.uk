@@ -19,7 +19,7 @@ import {
   mergeIntoParent,
   renameDraft,
 } from "../draft-actions.js";
-import { DraftRepo, baseRepo } from "../draft-repo.js";
+import { DraftRepo, baseRepo, type HandleDescriptor } from "../draft-repo.js";
 import { createDraftState, type DraftState } from "./draft-state.js";
 
 // How long the starting draft gets to show up among the root's drafts before
@@ -43,6 +43,9 @@ const VERIFY_TIMEOUT_MS = 5000;
 //     main); checks that out if the draft was checked out
 //   - `draft:rename { draft, name }` → renames it (null for main), answers
 //     the name
+//   - `repo:handle-descriptor { url }` → where the views beneath read and
+//     write `url` (see `DraftRepo.descriptorFor`), pushed again when that
+//     moves
 //
 // The selection starts from the `draft` attribute and is otherwise only
 // changed by `draft:select` and the commands above: the provider never reads
@@ -169,6 +172,30 @@ export const DraftProvider = (
             await select({ checkedOut: parent, at: null });
           }
           return parent;
+        });
+        return;
+      }
+
+      case "repo:handle-descriptor": {
+        const url = selector.url;
+        if (!isValidAutomergeUrl(url)) return;
+        accept<HandleDescriptor>(event, (respond) => {
+          let seq = 0;
+          let last: AutomergeUrl | undefined;
+          const answer = () => {
+            const run = ++seq;
+            draftRepo.descriptorFor(url).then(
+              (descriptor) => {
+                const backing = descriptor.cloneUrl ?? descriptor.url;
+                if (disposed || run !== seq || backing === last) return;
+                last = backing;
+                respond(descriptor);
+              },
+              (err) => console.error(`[drafts] couldn't resolve ${url}:`, err)
+            );
+          };
+          answer();
+          return draftRepo.onRemap(answer);
         });
         return;
       }

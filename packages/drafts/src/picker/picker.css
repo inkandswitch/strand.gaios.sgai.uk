@@ -5,6 +5,8 @@
   --draft-picker-divider: var(--studio-chrome-offset-20, #d4d4d4);
   --draft-picker-hover: var(--studio-chrome-offset-10, #ececec);
   --draft-picker-accent: var(--studio-primary-fill, var(--studio-primary, #35f7ca));
+  --draft-picker-path: var(--studio-draft-lane, #5a4bc2);
+  --draft-picker-line: var(--studio-chrome-offset-30, #cfcfcf);
   --draft-picker-danger: var(--studio-danger, #c62828);
   --draft-picker-radius: var(--studio-radius-sm, 4px);
   --draft-picker-space-xs: var(--studio-space-2xs, 0.25rem);
@@ -26,13 +28,15 @@
 .draft-picker__button {
   display: flex;
   align-items: center;
-  gap: var(--draft-picker-space-xs);
+  gap: 0.4em;
   min-width: 0;
-  max-width: 10rem;
+  max-width: 100%;
   padding: var(--draft-picker-space-xs) var(--draft-picker-space-sm);
-  border: 1px solid var(--draft-picker-divider);
+  border: none;
   border-radius: var(--draft-picker-radius);
   background: none;
+  font-size: 1rem;
+  font-weight: 600;
 }
 
 .draft-picker__button:hover,
@@ -40,12 +44,9 @@
   background: var(--draft-picker-hover);
 }
 
-.draft-picker__button--draft {
-  border-color: var(--draft-picker-accent);
-}
-
 .draft-picker__button svg {
   flex-shrink: 0;
+  opacity: 0.7;
 }
 
 .draft-picker__label {
@@ -59,8 +60,8 @@
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  min-width: 14rem;
-  max-width: 22rem;
+  min-width: 16rem;
+  max-width: 24rem;
   max-height: 60dvh;
   overflow: auto;
   padding: var(--draft-picker-space-xs);
@@ -78,33 +79,74 @@
   list-style: none;
 }
 
+/* Rows touch, so the lines between them join up. */
 .draft-picker__row {
   display: flex;
-  align-items: center;
-  padding-inline-start: calc(var(--draft-depth, 0) * 0.875rem);
+  align-items: stretch;
+  min-height: 2rem;
+  padding-inline-start: var(--draft-picker-space-sm);
   border-radius: var(--draft-picker-radius);
+  font-size: 0.95rem;
 }
 
-.draft-picker__row:hover {
+.draft-picker__row:hover,
+.draft-picker__row--current {
   background: var(--draft-picker-hover);
+}
+
+.draft-picker__row--current .draft-picker__name {
+  font-weight: 600;
 }
 
 .draft-picker__entry {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: var(--draft-picker-space-xs);
   min-width: 0;
-  padding: var(--draft-picker-space-xs) var(--draft-picker-space-sm);
+  padding: var(--draft-picker-space-xs);
   border: none;
   background: none;
   text-align: start;
 }
 
-.draft-picker__check {
-  width: 1em;
-  flex-shrink: 0;
-  color: var(--draft-picker-muted);
+.draft-tree__cell {
+  position: relative;
+  flex: none;
+  width: 1.25rem;
+}
+
+.draft-tree__up,
+.draft-tree__down,
+.draft-tree__tick {
+  position: absolute;
+  left: 0.375rem;
+}
+
+.draft-tree__up {
+  top: 0;
+  height: 50%;
+  border-left: 1.5px solid;
+}
+
+.draft-tree__down {
+  top: 50%;
+  bottom: 0;
+  border-left: 1.5px solid;
+}
+
+.draft-tree__tick {
+  top: calc(50% - 0.75px);
+  width: 0.625rem;
+  border-top: 1.5px solid;
+}
+
+.draft-tree--plain {
+  border-color: var(--draft-picker-line);
+}
+
+.draft-tree--path {
+  z-index: 1;
+  border-color: var(--draft-picker-path);
 }
 
 .draft-picker__name {

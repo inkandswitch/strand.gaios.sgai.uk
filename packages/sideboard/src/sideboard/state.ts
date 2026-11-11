@@ -13,17 +13,6 @@ export const [pendingNewDoc, setPendingNewDoc] = createSignal<{
   index: number;
 } | null>(null);
 
-export function filterMatches(filter: string, string?: string) {
-  const lower = string?.toLowerCase();
-  return (
-    !!lower &&
-    filter
-      .split(/\s+/)
-      .filter(Boolean)
-      .every((term) => lower.includes(term))
-  );
-}
-
 export const [renaming, setRenaming] = createSignal("");
 
 // The set of folder URLs that lie on the path from the root to a currently

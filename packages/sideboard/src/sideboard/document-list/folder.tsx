@@ -17,12 +17,12 @@ import {
   Suspense,
 } from "solid-js";
 import {
-  filterMatches,
   setRenaming,
   autoExpandedFolders,
 } from "../state.ts";
 import { DocumentList } from "./document-list.tsx";
 import { watchFolder } from "./auto-expand.ts";
+import type { ChangeMarks } from "./changes.ts";
 import Item from "./item.tsx";
 import { ItemName } from "./name.tsx";
 import { LoadingRow } from "./loading-row.tsx";
@@ -58,8 +58,7 @@ export default function Folder(props: {
   rootFolderHandle: DocHandle<FolderDoc>;
   parentFolderHandle?: DocHandle<FolderDoc>;
   itemIndex?: number;
-  filter: string;
-  clearFilter(): void;
+  changes: ChangeMarks;
 }) {
   const [expanded, setExpanded] = createSignal(false);
 
@@ -76,15 +75,11 @@ export default function Folder(props: {
   const depthStyle = () => ({ "--depth": depth() + 1 });
   const folderDepthStyle = () => ({ "--depth": depth() });
 
-  createEffect((last) => {
-    if (
-      !last &&
-      props.filter &&
-      filterMatches(props.filter, folder()!?.title ?? props.name)
-    ) {
+  // Showing only what changed opens the folders it's in.
+  createEffect(() => {
+    if (props.changes.onlyChanged() && props.changes.holdsChanges(props.url)) {
       setExpanded(true);
     }
-    return props.filter;
   });
 
   // Auto-expand when this folder lies on the path to a selected doc. The set is
@@ -102,7 +97,7 @@ export default function Folder(props: {
   onCleanup(dragOpen.stop);
 
   // Rename shows in two places: the folder's own title (what the row shows)
-  // and the parent's docref name (what the filter matches), so change both.
+  // and the parent's docref name, so change both.
   function rename(name: string) {
     handle()?.change((doc) => setText(doc, ["title"], name));
     const index = props.itemIndex;
@@ -122,7 +117,6 @@ export default function Folder(props: {
       folder.docs.push(freshy);
       newIndex = folder.docs.length - 1;
     });
-    props.clearFilter();
     setExpanded(true);
     props.open({ url: childLocation(props.location, freshy, h.doc()?.docs) });
     setRenaming(h.url + "/" + newIndex);
@@ -226,16 +220,16 @@ export default function Folder(props: {
       <div
         role="group"
         class="document-list-folder__contents"
-        classList={{ "document-list-folder__contents--hidden": !expanded() && !props.filter }}
+        classList={{ "document-list-folder__contents--hidden": !expanded() }}
         data-depth={depth()}
         style={depthStyle()}
       >
-        {/* Only mount (and thus load) children when the folder is open or a
-            filter is active. Otherwise a collapsed folder would recursively
-            find() its entire subtree on mount, loading the whole tree at once
-            and making the folder appear to suspend on its descendants rather
-            than just its own handle. */}
-        <Show when={expanded() || !!props.filter}>
+        {/* Only mount (and thus load) children when the folder is open.
+            Otherwise a collapsed folder would recursively find() its entire
+            subtree on mount, loading the whole tree at once and making the
+            folder appear to suspend on its descendants rather than just its
+            own handle. */}
+        <Show when={expanded()}>
           <Suspense fallback={<LoadingRow depth={depth() + 1} />}>
             <DocumentList
               docs={folder()?.docs}
@@ -248,8 +242,7 @@ export default function Folder(props: {
               visitedFolders={nextVisitedFolders}
               element={props.element}
               rootFolderHandle={props.rootFolderHandle}
-              filter={props.filter}
-              clearFilter={props.clearFilter}
+              changes={props.changes}
             />
           </Suspense>
         </Show>

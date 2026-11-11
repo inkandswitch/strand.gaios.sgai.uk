@@ -28,7 +28,6 @@ import {
   untrack,
 } from "solid-js";
 import {
-  filterMatches,
   setRenaming,
   pendingNewDoc,
   setPendingNewDoc,
@@ -36,6 +35,7 @@ import {
 import { asString, setText } from "../lib/text.ts";
 import { childLocation } from "../lib/location.ts";
 import { markMounted } from "./auto-expand.ts";
+import type { ChangeMarks } from "./changes.ts";
 import Folder from "./folder.tsx";
 import Item from "./item.tsx";
 import { ItemName } from "./name.tsx";
@@ -59,8 +59,7 @@ export interface DocumentListProps {
   visitedFolders?: Set<AutomergeUrl>;
   element: PatchworkViewElement;
   rootFolderHandle: DocHandle<FolderDoc>;
-  filter: string;
-  clearFilter(): void;
+  changes: ChangeMarks;
 }
 
 // Rows mounted per frame-budget slice while a big folder streams in.
@@ -121,7 +120,6 @@ export function DocumentList(props: DocumentListProps) {
         repo={props.repo}
         onCreate={commitPending}
         onDismiss={() => setPendingNewDoc(null)}
-        clearFilter={props.clearFilter}
       />
     </div>
   );
@@ -130,8 +128,11 @@ export function DocumentList(props: DocumentListProps) {
     <>
       <For each={docs()}>
         {(doc, index) => {
-          const visible = () =>
-            !props.filter.length || filterMatches(props.filter, doc.name);
+          const changed = () =>
+            doc.type == "folder"
+              ? props.changes.holdsChanges(doc.url)
+              : props.changes.changed(doc.url);
+          const visible = () => !props.changes.onlyChanged() || changed();
           const remove = () => removeItem(index());
           const relid = () => props.handle.url + "/" + index();
           onCleanup(markMounted(props.element, doc.url));
@@ -263,8 +264,7 @@ export function DocumentList(props: DocumentListProps) {
                       visitedFolders={visitedFolders}
                       element={props.element}
                       rootFolderHandle={props.rootFolderHandle}
-                      filter={props.filter}
-                      clearFilter={props.clearFilter}
+                      changes={props.changes}
                     />
                   </Show>
                 </Match>
@@ -277,6 +277,7 @@ export function DocumentList(props: DocumentListProps) {
                     startRenaming={() => setRenaming(relid())}
                     remove={remove}
                     pressed={props.isSelected(doc.url)}
+                    changed={changed()}
                     type={doc.type}
                     element={props.element}
                     repo={props.repo}

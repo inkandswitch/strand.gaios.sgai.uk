@@ -17,13 +17,18 @@ import {
 import { render } from "solid-js/web";
 
 import type { DraftList, DraftSelection } from "../draft-types.js";
+import { treeLines, type Cell } from "./tree-lines.js";
 import "./picker.css";
 
-/** One row of the picker. Main's `url` is null, as it is in a selection. */
+/**
+ * One row of the picker. Main's `url` is null, as it is in a selection, and
+ * so is the `parent` of a draft forked off main.
+ */
 export type Entry = {
   url: AutomergeUrl | null;
   name: string;
   depth: number;
+  parent: AutomergeUrl | null;
   parentName: string | null;
   childCount: number;
 };
@@ -49,6 +54,7 @@ function DraftPicker(props: { element: HTMLElement }) {
   const current = createMemo(
     () => entries().find((entry) => entry.url === checkedOut()) ?? entries()[0]
   );
+  const lines = createMemo(() => treeLines(entries(), checkedOut()));
 
   const [dropdown, setDropdown] = createSignal<{ x: number; y: number }>();
   const [menu, setMenu] = createSignal<Menu>();
@@ -120,7 +126,6 @@ function DraftPicker(props: { element: HTMLElement }) {
         ref={button}
         type="button"
         class="draft-picker__button"
-        classList={{ "draft-picker__button--draft": checkedOut() !== null }}
         aria-haspopup="menu"
         aria-expanded={!!dropdown()}
         title="Drafts"
@@ -129,9 +134,8 @@ function DraftPicker(props: { element: HTMLElement }) {
           const entry = current();
           if (entry) openMenu(entry, event);
         }}>
-        <BranchIcon />
         <span class="draft-picker__label">{current()?.name ?? MAIN}</span>
-        <ChevronIcon />
+        <CaretIcon />
       </button>
 
       <Show when={dropdown()}>
@@ -142,11 +146,12 @@ function DraftPicker(props: { element: HTMLElement }) {
             style={{ left: `${at().x}px`, top: `${at().y}px` }}>
             <ul class="draft-picker__list">
               <For each={entries()}>
-                {(entry) => (
+                {(entry, index) => (
                   <li
                     class="draft-picker__row"
-                    style={{ "--draft-depth": entry.depth }}
+                    classList={{ "draft-picker__row--current": entry.url === checkedOut() }}
                     onContextMenu={(event) => openMenu(entry, event)}>
+                    <TreeLines cells={lines()[index()] ?? []} />
                     <Show
                       when={renaming()?.url === entry.url}
                       fallback={
@@ -156,9 +161,6 @@ function DraftPicker(props: { element: HTMLElement }) {
                           aria-checked={entry.url === checkedOut()}
                           class="draft-picker__entry"
                           onClick={() => actions.select(entry)}>
-                          <span class="draft-picker__check">
-                            {entry.url === checkedOut() ? "✓" : ""}
-                          </span>
                           <span class="draft-picker__name">{entry.name}</span>
                         </button>
                       }>
@@ -248,6 +250,26 @@ function EntryMenu(props: {
   );
 }
 
+function TreeLines(props: { cells: Cell[] }) {
+  return (
+    <For each={props.cells}>
+      {(cell) => (
+        <span class="draft-tree__cell" aria-hidden="true">
+          <Show when={cell.up !== "none"}>
+            <span class={`draft-tree__up draft-tree--${cell.up}`} />
+          </Show>
+          <Show when={cell.down !== "none"}>
+            <span class={`draft-tree__down draft-tree--${cell.down}`} />
+          </Show>
+          <Show when={cell.tick !== "none"}>
+            <span class={`draft-tree__tick draft-tree--${cell.tick}`} />
+          </Show>
+        </span>
+      )}
+    </For>
+  );
+}
+
 function RenameInput(props: {
   value: string;
   commit(name: string): void;
@@ -290,6 +312,7 @@ export function draftEntries(list: DraftList | undefined): Entry[] {
     url: null,
     name: mainName,
     depth: 0,
+    parent: null,
     parentName: null,
     childCount: list?.main.childCount ?? 0,
   };
@@ -313,6 +336,7 @@ export function draftEntries(list: DraftList | undefined): Entry[] {
         url: draft.url,
         name: draft.name ?? "Draft",
         depth: depthOf(draft.parent),
+        parent: parent ? parent.url : null,
         parentName: parent ? (parent.name ?? "Draft") : mainName,
         childCount: draft.childCount,
       };
@@ -350,43 +374,16 @@ function useDismiss(element: HTMLElement, close: () => void) {
   });
 }
 
-// lucide `git-branch`
-function BranchIcon() {
+function CaretIcon() {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
+      width="8"
+      height="8"
+      viewBox="0 0 8 8"
+      fill="currentColor"
       aria-hidden="true">
-      <line x1="6" x2="6" y1="3" y2="15" />
-      <circle cx="18" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <path d="M18 9a9 9 0 0 1-9 9" />
-    </svg>
-  );
-}
-
-// lucide `chevron-down`
-function ChevronIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true">
-      <path d="m6 9 6 6 6-6" />
+      <path d="M0.5 2h7L4 6.5z" />
     </svg>
   );
 }

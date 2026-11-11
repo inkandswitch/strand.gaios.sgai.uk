@@ -7,7 +7,6 @@ import {
   createEffect,
   createMemo,
   createSelector,
-  createSignal,
   lazy,
   onCleanup,
   onMount,
@@ -27,7 +26,7 @@ import {
 } from "./document-list/auto-expand.ts";
 import CreateNew from "./create-new.tsx";
 import { createOpenEvent } from "./events.ts";
-import { SearchIcon } from "./icons.tsx";
+import { useChangeMarks } from "./document-list/changes.ts";
 import { DocumentList } from "./document-list/document-list.tsx";
 import { LoadingRows } from "./document-list/loading-row.tsx";
 import { subscribe } from "@inkandswitch/patchwork-providers-solid";
@@ -51,9 +50,10 @@ const ItemMenu = lazy(() =>
 );
 
 /**
- * The document-list panel: a sticky toolbar (new-doc button + filter) over a
+ * The document-list panel: a sticky toolbar (the new-doc button) over a
  * scrolling, recursive list of the folder's documents and subfolders. Renders a
- * single folder, given its url.
+ * single folder, given its url. Inside a review provider, the files the
+ * checked-out draft changed are marked, and can be all that's shown.
  *
  * Documents are opened by where they sit under the folder
  * (`automerge:<folder>/<name>/<name>`) rather than by their own url.
@@ -66,7 +66,7 @@ export function DocumentListPanel(props: {
   const [folder, folderHandle] = useDocument<FolderDoc>(() => props.folderUrl, {
     repo: props.repo,
   });
-  const [filter, setFilter] = createSignal("");
+  const changes = useChangeMarks(props.element);
 
   // The row menu is split out to keep it off the initial load, but fetching it
   // on the first right-click means that click does nothing until the chunk
@@ -201,22 +201,11 @@ export function DocumentListPanel(props: {
           <CreateNew
             square
             draggable
-            clearFilter={() => setFilter("")}
             changeFolder={(fn) => folderHandle()?.change(fn)}
             repo={props.repo}
             open={open}
             location={props.folderUrl}
           />
-          <div class="document-list__filter-container">
-            <SearchIcon />
-            <input
-              name="filter"
-              class="document-list__filter"
-              placeholder="Filter by title"
-              value={filter()}
-              onInput={(event) => setFilter(event.target.value.toLowerCase())}
-            />
-          </div>
         </div>
         <Show when={folderReady()} fallback={<LoadingRows depth={0} />}>
           <Suspense fallback={<LoadingRows depth={0} />}>
@@ -230,8 +219,7 @@ export function DocumentListPanel(props: {
               isSelected={isSelected}
               element={props.element}
               rootFolderHandle={folderHandle.latest!}
-              filter={filter()}
-              clearFilter={() => setFilter("")}
+              changes={changes}
             />
           </Suspense>
           <Show when={menuTarget()}>

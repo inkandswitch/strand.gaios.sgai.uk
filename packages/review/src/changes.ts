@@ -28,6 +28,8 @@ export type FileChange = Place & {
 
 export type DraftReview = {
   changes: FileChange[];
+  // The folders in the tree with a change somewhere beneath them.
+  folders: AutomergeUrl[];
   // The docs a change to which can change the review.
   watched: DocHandle<unknown>[];
 };
@@ -86,10 +88,18 @@ export async function reviewDraft(
     })
   );
 
-  return {
-    changes: [...changes.values()].sort((a, b) => a.path.localeCompare(b.path)),
-    watched,
-  };
+  const sorted = [...changes.values()].sort((a, b) => a.path.localeCompare(b.path));
+  return { changes: sorted, folders: foldersHolding(tree, sorted), watched };
+}
+
+// A change's location runs through every folder above it, a removed file's
+// too, so a folder holds the changes whose locations start with its own.
+function foldersHolding(tree: Tree, changes: FileChange[]): AutomergeUrl[] {
+  return [...tree].flatMap(([url, node]) => {
+    if (!node.folder || !node.path) return [];
+    const prefix = `${node.location}/`;
+    return changes.some((change) => change.location.startsWith(prefix)) ? [url] : [];
+  });
 }
 
 // Files a folder gained or lost on the draft. One that only moved elsewhere

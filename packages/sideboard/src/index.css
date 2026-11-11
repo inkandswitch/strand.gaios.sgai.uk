@@ -23,7 +23,8 @@
 
   --document-list-radius: 0.275rem;
   --placeholder-line: var(--studio-line-offset-50, #808e80);
-  --document-list-search-line: var(--studio-line, #000);
+  /* the mark on a file the checked-out draft changed */
+  --document-list-changed: var(--studio-draft-changed, #2f9e74);
 
   --document-list-primary: var(--studio-primary-fill, var(--studio-primary, #35f7ca));
   --document-list-primary-line: var(--studio-primary-line, var(--studio-line, black));
@@ -171,8 +172,8 @@ button {
 }
 
 
-/* sticky toolbar pinned to the top of the scrolling doclist: square new-doc
-   button + filter, laid out horizontally. */
+/* sticky toolbar pinned to the top of the scrolling doclist: the square
+   new-doc button. */
 .document-list__toolbar {
   position: sticky;
   top: 0;
@@ -185,57 +186,8 @@ button {
   border-bottom: var(--studio-border-width, 1px) var(--studio-border-style, solid) var(--document-list-divider);
 }
 
-.document-list__toolbar .document-list__filter-container {
-  flex: 1;
-  min-width: 0;
-}
-
 .icon {
   height: 1em;
-}
-
-.document-list__filter-container {
-  position: relative;
-  font-size: 0.875rem;
-  border-radius: var(--document-list-radius);
-  .search-icon {
-    height: 1em;
-    top: 0.4lh;
-    left: 2px;
-    position: absolute;
-    z-index: 1;
-    stroke: var(--placeholder-line);
-  }
-  &:focus-within {
-    .search-icon {
-      stroke: var(--document-list-line);
-    }
-  }
-}
-
-.document-list__filter {
-  width: 100%;
-
-  background: var(--document-list-widget-fill);
-  color: var(--document-list-widget-line);
-
-  padding-left: 2em;
-  padding-right: 0.75rem;
-  padding-top: 0.375rem;
-  padding-bottom: 0.375rem;
-  border: none;
-  border-radius: var(--document-list-radius);
-
-  &::placeholder {
-    color: var(--placeholder-line);
-  }
-
-  &:focus-visible {
-    outline-color: var(--sidebar-widget-line);
-    outline-offset: var(--studio-focus-ring-offset, 1px);
-    box-shadow: 0 0 0 4px #fff;
-    border-radius: var(--document-list-radius);
-  }
 }
 
 .document-list__doclist {
@@ -463,6 +415,26 @@ button {
   &:is(input) {
     padding: 4px;
     margin: -4px;
+  }
+}
+
+/* sits in the padding left of the name, so a changed file's name lines up
+   with the rest */
+.document-list-item__changed {
+  position: relative;
+  flex: none;
+  align-self: center;
+  width: 0;
+  margin-inline-end: -0.25ch;
+  &::before {
+    content: "";
+    position: absolute;
+    top: -3px;
+    right: 0.4rem;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--document-list-changed);
   }
 }
 

@@ -103,6 +103,39 @@ describe("reviewDraft", () => {
     ]);
   });
 
+  it("names the folders a change is somewhere beneath", async () => {
+    const base = new Repo();
+    const edited = base.create<File>({ content: "a\n" });
+    const removed = base.create<File>({ content: "b\n" });
+    const inner = base.create<Folder>({
+      docs: [{ url: edited.url, type: "txt", name: "edited.txt" }],
+    });
+    const outer = base.create<Folder>({
+      docs: [{ url: inner.url, type: "folder", name: "inner" }],
+    });
+    const other = base.create<Folder>({
+      docs: [{ url: removed.url, type: "txt", name: "removed.txt" }],
+    });
+    const quiet = base.create<Folder>({ docs: [] });
+    const root = base.create<Folder>({
+      docs: [
+        { url: outer.url, type: "folder", name: "outer" },
+        { url: other.url, type: "folder", name: "other" },
+        { url: quiet.url, type: "folder", name: "quiet" },
+      ],
+    });
+    const draft: DraftDoc = { clones: {} };
+    fork(base, draft, edited).change((d) => {
+      d.content = "A\n";
+    });
+    fork(base, draft, other).change((d) => {
+      d.docs.splice(0, 1);
+    });
+
+    const { folders } = await reviewDraft(throughDraft(base, draft), root.url, draft);
+    expect(new Set(folders)).toEqual(new Set([outer.url, inner.url, other.url]));
+  });
+
   it("leaves out a file edited back to how it was", async () => {
     const base = new Repo();
     const file = base.create<File>({ content: "a\n" });

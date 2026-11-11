@@ -26,6 +26,9 @@ export type DraftCheckout = {
   at: DraftCheckpoint | null;
 };
 
+/** The answer to `repo:handle-descriptor`: read `cloneUrl` when there is one. */
+export type HandleDescriptor = { url: AutomergeUrl; cloneUrl?: AutomergeUrl };
+
 // The members a draft repo changes. Everything else (clone, delete, flush,
 // the event emitter, ...) forwards to the base repo.
 const OWNED: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
@@ -37,6 +40,8 @@ const OWNED: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
   "create2",
   "checkout",
   "setRoot",
+  "descriptorFor",
+  "onRemap",
   "dispose",
 ]);
 
@@ -84,6 +89,7 @@ export class DraftRepo {
   // Docs created while a draft was checked out, by draft: they're the
   // draft's own, so they become its clone instead of being cloned.
   readonly #created = new Map<AutomergeUrl, AutomergeUrl>();
+  readonly #remapListeners = new Set<() => void>();
   #disposed = false;
 
   constructor(base: Repo, ready: Promise<unknown> = Promise.resolve()) {
@@ -172,7 +178,29 @@ export class DraftRepo {
     }
     const repointed = this.#repointAll();
     this.#tree?.refresh();
+    this.#notifyRemap();
     return repointed;
+  }
+
+  /**
+   * What a view resolving `url` through `repo:handle-descriptor` should read.
+   * Such a view writes to whatever it's handed, with no chance to clone first,
+   * so a doc the draft owns is forked now. Docs outside the draft's tree, and
+   * everything on main, read as they are.
+   */
+  async descriptorFor(url: AutomergeUrl): Promise<HandleDescriptor> {
+    await this.#ready;
+    await this.#tree?.settled();
+    const root = canonicalUrl(url);
+    await this.#forkForView(root);
+    const backing = this.#backingUrl(root, [], undefined);
+    return backing === root ? { url: root } : { url: root, cloneUrl: backing };
+  }
+
+  /** Calls `listener` whenever what `descriptorFor` answers may have changed. */
+  onRemap(listener: () => void): () => void {
+    this.#remapListeners.add(listener);
+    return () => this.#remapListeners.delete(listener);
   }
 
   /** The doc whose tree makes up a draft. */
@@ -198,6 +226,7 @@ export class DraftRepo {
     for (const entry of this.#entries.values()) entry.handle.dispose();
     this.#entries.clear();
     this.#resolving.clear();
+    this.#remapListeners.clear();
   }
 
   // Someone else may have cloned a doc into this draft, or a fork may have
@@ -205,7 +234,27 @@ export class DraftRepo {
   #onDraftChange = () => {
     void this.#repointAll();
     this.#tree?.refresh();
+    this.#notifyRemap();
   };
+
+  #notifyRemap(): void {
+    for (const listener of [...this.#remapListeners]) listener();
+  }
+
+  // The clone a write would make, made ahead of one, once its source is
+  // loaded.
+  async #forkForView(root: AutomergeUrl): Promise<void> {
+    const draft = this.#checkout.draft;
+    if (!draft || this.#checkout.at?.[root]?.to) return;
+    const recorded = draft.doc()?.clones?.[root];
+    if (recorded?.cloneUrl || (!recorded && !this.#belongs(root))) return;
+    try {
+      await this.base.find(recorded?.source ?? root);
+    } catch {
+      return;
+    }
+    if (this.#checkout.draft === draft && !this.#disposed) this.#cloneOnWrite(root);
+  }
 
   #noteCreated(url: AutomergeUrl): void {
     const draft = this.#checkout.draft;

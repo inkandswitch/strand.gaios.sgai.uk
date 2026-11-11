@@ -1,4 +1,4 @@
-import { createEffect, onCleanup, type JSX } from "solid-js";
+import { createEffect, onCleanup, Show, type JSX } from "solid-js";
 import type {
   DatatypeDescription,
   Plugin,
@@ -47,6 +47,8 @@ export default function Item(props: {
   name: string;
   type: string;
   pressed: boolean;
+  /** the checked-out draft changed it */
+  changed?: boolean;
   children: JSX.Element;
   /** unset for folders: pressing a folder's row expands it instead */
   openWith?(toolId?: string): void;
@@ -291,6 +293,9 @@ export default function Item(props: {
         }
       }}
     >
+      <Show when={props.changed}>
+        <span class="document-list-item__changed" title="Changed on this draft" />
+      </Show>
       {props.children}
     </div>
   );

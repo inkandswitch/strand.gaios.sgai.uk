@@ -190,7 +190,6 @@ describe("CreateNew", () => {
     repo: {} as any,
     changeFolder: vi.fn((fn: (doc: any) => void) => fn(folder)),
     open: vi.fn(),
-    clearFilter: vi.fn(),
     location: DOC_URL,
   });
   let folder: { docs: any[] };
@@ -265,7 +264,6 @@ describe("CreateNew", () => {
     expect(folder.docs).toEqual([
       { name: "Untitled Markdown", type: "md", url: FAKE_URL },
     ]);
-    expect(p.clearFilter).toHaveBeenCalled();
     expect(p.open).toHaveBeenCalledWith({
       url: `${DOC_URL}/Untitled%20Markdown`,
     });
@@ -320,15 +318,9 @@ describe("CreateNew", () => {
 describe("NewDocPlaceholder", () => {
   it("opens immediately and reports the created doc", async () => {
     const onCreate = vi.fn(),
-      onDismiss = vi.fn(),
-      clearFilter = vi.fn();
+      onDismiss = vi.fn();
     mount(() => (
-      <NewDocPlaceholder
-        repo={{} as any}
-        onCreate={onCreate}
-        onDismiss={onDismiss}
-        clearFilter={clearFilter}
-      />
+      <NewDocPlaceholder repo={{} as any} onCreate={onCreate} onDismiss={onDismiss} />
     ));
     await waitFor(menu);
     expect(itemTexts()).toEqual(["Markdown", "Zed"]);
@@ -339,18 +331,12 @@ describe("NewDocPlaceholder", () => {
       type: "zed",
       url: FAKE_URL,
     });
-    expect(clearFilter).toHaveBeenCalled();
   });
 
   it("reports dismissal when closed", async () => {
     const onDismiss = vi.fn();
     mount(() => (
-      <NewDocPlaceholder
-        repo={{} as any}
-        onCreate={vi.fn()}
-        onDismiss={onDismiss}
-        clearFilter={vi.fn()}
-      />
+      <NewDocPlaceholder repo={{} as any} onCreate={vi.fn()} onDismiss={onDismiss} />
     ));
     await waitFor(menu);
     key(filterInput()!, "Escape");

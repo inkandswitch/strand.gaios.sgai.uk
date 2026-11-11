@@ -168,13 +168,11 @@ export function NewDocPlaceholder(props: {
   repo: Repo;
   onCreate(docLink: DocLink): void;
   onDismiss(): void;
-  clearFilter(): void;
 }) {
   let row!: HTMLDivElement;
 
   async function pickDatatype(datatype: Plugin<DatatypeDescription>) {
     const freshy = await createNew(props.repo, datatype);
-    props.clearFilter();
     props.onCreate(freshy);
   }
 
@@ -182,7 +180,6 @@ export function NewDocPlaceholder(props: {
     const trimmed = url.trim();
     if (!isValidAutomergeUrl(trimmed)) return;
     const docLink = await docLinkFromUrl(props.repo, trimmed as AutomergeUrl);
-    props.clearFilter();
     props.onCreate(docLink);
   }
 

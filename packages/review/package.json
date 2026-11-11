@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "Review a draft: the files it changed, with how many lines each added and removed.",
+  "description": "Review a draft: a provider of the files it changed, and the folders they're in, for the file tree to mark and filter by.",
   "main": "./dist/index.js",
   "scripts": {
     "dev": "vite build --watch",

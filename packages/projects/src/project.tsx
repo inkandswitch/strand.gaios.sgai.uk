@@ -1,5 +1,6 @@
 import type {Repo} from "@automerge/automerge-repo/slim"
 import {createEffect, createSignal, For, Show} from "solid-js"
+import {DraftStack, stripsWidth, useDraftLanes} from "./draft-stack.tsx"
 import {useDocTitle} from "./hooks.ts"
 import type {ProjectRoute} from "./navigation.ts"
 import {Provider} from "./provider.tsx"
@@ -10,13 +11,6 @@ const TITLEBAR_TOOLS = [
 	"doc-presence",
 	"sync-indicator",
 	"theme-titlebar",
-]
-
-type Panel = "files" | "review"
-
-const PANELS: {id: Panel; label: string}[] = [
-	{id: "files", label: "Files"},
-	{id: "review", label: "Review"},
 ]
 
 /**
@@ -33,14 +27,8 @@ export function ProjectView(props: {
 	const projectName = () => props.route.resolved.projectName
 	const draftKey = (): string => props.route.location.draft ?? "main"
 	const title = useDocTitle(props.repo, docUrl)
-	// Both panels stay mounted once shown, so switching back keeps their state;
-	// the review only starts working things out once it's first opened.
-	const [tab, setTab] = createSignal<Panel>("files")
-	const [reviewOpened, setReviewOpened] = createSignal(false)
-	const openTab = (panel: Panel) => {
-		if (panel === "review") setReviewOpened(true)
-		setTab(panel)
-	}
+	const [sidebar, setSidebar] = createSignal<HTMLElement>()
+	const lanes = useDraftLanes(sidebar)
 	createEffect(() => {
 		document.title = [title(), projectName(), props.siteTitle]
 			.filter(Boolean)
@@ -49,48 +37,31 @@ export function ProjectView(props: {
 
 	return (
 		<div class="projects__project">
-			<aside class="projects__sidebar">
-				<header class="projects__sidebar-header">
-					<button
-						type="button"
-						class="projects__home"
-						title="All projects"
-						aria-label="All projects"
-						onClick={() => props.home()}>
-						<BackIcon />
-					</button>
-					<h1 class="projects__project-name">{projectName()}</h1>
-					<patchwork-view component="draft-picker" />
-				</header>
-				<div class="projects__tabs" role="tablist">
-					<For each={PANELS}>
-						{panel => (
-							<button
-								type="button"
-								role="tab"
-								class="projects__tab"
-								aria-selected={tab() === panel.id}
-								onClick={() => openTab(panel.id)}>
-								{panel.label}
-							</button>
-						)}
-					</For>
-				</div>
-				<patchwork-view
-					class="projects__panel"
-					classList={{"projects__panel--hidden": tab() !== "files"}}
-					tool-id="chee/document-list"
-					doc-url={props.route.resolved.projectUrl}
-				/>
-				<Show when={reviewOpened()}>
-					<patchwork-view
-						class="projects__panel"
-						classList={{"projects__panel--hidden": tab() !== "review"}}
-						tool-id="review"
-						doc-url={props.route.resolved.projectUrl}
-					/>
-				</Show>
-			</aside>
+			<Provider component="patchwork-review-provider">
+				<aside
+					ref={setSidebar}
+					class="projects__sidebar"
+					style={{"--projects-strips-width": stripsWidth(lanes())}}>
+					<header class="projects__sidebar-header">
+						<button
+							type="button"
+							class="projects__home"
+							title="All projects"
+							aria-label="All projects"
+							onClick={() => props.home()}>
+							<BackIcon />
+						</button>
+						<h1 class="projects__project-name">{projectName()}</h1>
+					</header>
+					<DraftStack element={sidebar} lanes={lanes()}>
+						<patchwork-view
+							class="projects__panel"
+							tool-id="chee/document-list"
+							doc-url={props.route.resolved.projectUrl}
+						/>
+					</DraftStack>
+				</aside>
+			</Provider>
 			<Provider component="patchwork-comments-provider">
 				<Provider component="patchwork-focus-provider">
 					<main class="projects__main">
