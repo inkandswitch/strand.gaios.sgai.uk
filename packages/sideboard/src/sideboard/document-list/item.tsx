@@ -21,7 +21,7 @@ import {
   rowSpot,
 } from "../dnd/dnd.ts";
 import { setMenuTarget } from "../state.ts";
-import { LOCATION_TYPE, nameType, type Placement } from "../events.ts";
+import { LOCATION_TYPE, type Placement } from "../events.ts";
 import type {
   AutomergeUrl,
   DocHandle,
@@ -166,10 +166,7 @@ export default function Item(props: {
       ondragstart={(event: DragEvent) => {
         cancelLongPress();
         startDrag(event, dnd(), props.element, dragOut);
-        if (props.location) {
-          event.dataTransfer?.setData(LOCATION_TYPE, props.location);
-          event.dataTransfer?.setData(nameType(props.name), props.name);
-        }
+        if (props.location) event.dataTransfer?.setData(LOCATION_TYPE, props.location);
       }}
       ondrag={(event: DragEvent) => {
         // Update copy mode if Alt key state changes during drag

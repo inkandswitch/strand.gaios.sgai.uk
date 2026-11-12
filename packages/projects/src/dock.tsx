@@ -38,8 +38,6 @@ const EMPTY = "Open something from the project, or make something new."
 
 /** what a sidebar row's drag carries its location as (sideboard's `LOCATION_TYPE`) */
 const LOCATION_TYPE = "text/x-patchwork-location"
-/** and its name (sideboard's `NAME_TYPE_PREFIX`) */
-const NAME_TYPE_PREFIX = "text/x-patchwork-name-"
 
 const THEME: DockviewTheme = {
 	...themeLight,
@@ -132,31 +130,27 @@ export function Dock(props: {
 
 	// A row dragged out of the sidebar opens where it's dropped: in the
 	// middle of a group in place of what it shows, on its tab bar or just
-	// under it as a new tab (shown there as one while it's over it), at its
-	// edges beside it. The dock's own edges only take a drop when it's empty:
-	// a group's edges already split.
+	// under it as a new tab (a line shows between which tabs), at its edges
+	// beside it. The dock's own edges only take a drop when it's empty: a
+	// group's edges already split.
 	function takeDrops(dock: DockviewApi) {
-		const ghost = ghostTab()
+		const marker = insertionMarker()
 		const onLeave = (event: DragEvent) => {
-			if (!element.contains(event.relatedTarget as Node | null)) ghost.clear()
+			if (!element.contains(event.relatedTarget as Node | null)) marker.clear()
 		}
 		element.addEventListener("dragleave", onLeave)
-		document.addEventListener("dragend", ghost.clear)
+		document.addEventListener("dragend", marker.clear)
 		return [
 			dock.onUnhandledDragOver(event => {
 				const native = event.nativeEvent
 				if (!(native instanceof DragEvent) || !carriesLocation(native)) return
-				if (event.target === "edge" && dock.totalPanels) return ghost.clear()
+				if (event.target === "edge" && dock.totalPanels) return marker.clear()
 				event.accept()
-				if (intoTabs(event)) {
-					ghost.show(event.group!, draggedName(native))
-					element.dataset.drop = "tab"
-				} else {
-					ghost.clear()
-				}
+				if (intoTabs(event)) marker.show(event.group!, tabIndex(event.group!, native.clientX))
+				else marker.clear()
 			}),
 			dock.onDidDrop(event => {
-				ghost.clear()
+				marker.clear()
 				if (event.getData() || !(event.nativeEvent instanceof DragEvent)) return
 				const url = event.nativeEvent.dataTransfer?.getData(LOCATION_TYPE)
 				if (url) open(url, dropPlacement(event))
@@ -164,29 +158,28 @@ export function Dock(props: {
 			{
 				dispose() {
 					element.removeEventListener("dragleave", onLeave)
-					document.removeEventListener("dragend", ghost.clear)
-					ghost.clear()
+					document.removeEventListener("dragend", marker.clear)
+					marker.clear()
 				},
 			},
 		]
 
-		function ghostTab() {
-			let shown: {group: string; tab: HTMLElement} | undefined
+		function insertionMarker() {
+			let shown: {group: string; index: number; line: HTMLElement} | undefined
 			const clear = () => {
 				delete element.dataset.drop
-				shown?.tab.remove()
+				shown?.line.remove()
 				shown = undefined
 			}
-			const show = (group: DockviewGroupPanel, name: string) => {
-				if (shown?.group === group.id) return
-				clear()
-				const tabs = group.element.querySelector(".dv-tabs-container")
-				if (!tabs) return
-				const tab = document.createElement("div")
-				tab.className = "dv-tab projects__ghost-tab"
-				tab.textContent = name
-				tabs.append(tab)
-				shown = {group: group.id, tab}
+			const show = (group: DockviewGroupPanel, index: number) => {
+				element.dataset.drop = "tab"
+				if (shown?.group === group.id && shown.index === index) return
+				const container = group.element.querySelector(".dv-tabs-container")
+				if (!container) return clear()
+				const line = shown?.line ?? document.createElement("div")
+				line.className = "projects__tab-insertion"
+				container.insertBefore(line, tabsOf(group)[index] ?? null)
+				shown = {group: group.id, index, line}
 			}
 			return {show, clear}
 		}
@@ -355,23 +348,28 @@ function positionFor(
 	if ("edge" in placement) return {direction: placement.to}
 	const named = placement.group
 	const referenceGroup = named && api.getGroup(named) ? named : focusedGroup
-	// a new tab goes last, where a drag shows it coming
-	const index = api.getGroup(referenceGroup)?.panels.length
-	return placement.to === "tab"
-		? {referenceGroup, index}
-		: {referenceGroup, direction: placement.to}
+	if (placement.to !== "tab") return {referenceGroup, direction: placement.to}
+	const last = api.getGroup(referenceGroup)?.panels.length
+	return {referenceGroup, index: "index" in placement ? placement.index : last}
 }
 
 function carriesLocation(event: DragEvent) {
 	return !!event.dataTransfer?.types.includes(LOCATION_TYPE)
 }
 
-// See sideboard's `nameType`.
-function draggedName(event: DragEvent) {
-	const type = event.dataTransfer?.types.find(type => type.startsWith(NAME_TYPE_PREFIX))
-	const hex = type?.slice(NAME_TYPE_PREFIX.length).match(/../g)
-	if (!hex) return "New tab"
-	return new TextDecoder().decode(new Uint8Array(hex.map(byte => parseInt(byte, 16))))
+// Where across a group's tabs `x` falls: before the first tab whose middle
+// it's left of, or after the last.
+function tabIndex(group: DockviewGroupPanel, x: number) {
+	const tabs = tabsOf(group)
+	const before = tabs.findIndex(tab => {
+		const box = tab.getBoundingClientRect()
+		return x < box.left + box.width / 2
+	})
+	return before < 0 ? tabs.length : before
+}
+
+function tabsOf(group: DockviewGroupPanel) {
+	return [...group.element.querySelectorAll<HTMLElement>(".dv-tabs-container > .dv-tab")]
 }
 
 type DropAt = {
@@ -383,7 +381,8 @@ type DropAt = {
 function dropPlacement(drop: DropAt): Placement | undefined {
 	const {position, group} = drop
 	if (!group) return position === "center" ? undefined : {to: SIDE_OF[position], edge: true}
-	if (intoTabs(drop)) return {to: "tab", group: group.id}
+	if (intoTabs(drop))
+		return {to: "tab", group: group.id, index: tabIndex(group, drop.nativeEvent.clientX)}
 	return position === "center" ? {group: group.id} : {to: SIDE_OF[position], group: group.id}
 }
 

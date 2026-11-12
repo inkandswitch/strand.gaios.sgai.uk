@@ -39,11 +39,13 @@ export type ProjectRoute = {
 
 /**
  * Beside a group or in a new tab in it (the focused panel's group unless one
- * is named), along an edge of the whole dock, or in place of what a group
- * shows. Without one an open replaces what the focused panel shows.
+ * is named; last among its tabs unless `index` says where), along an edge of
+ * the whole dock, or in place of what a group shows. Without one an open
+ * replaces what the focused panel shows.
  */
 export type Placement =
-	| {to: Side | "tab"; group?: string}
+	| {to: Side; group?: string}
+	| {to: "tab"; group?: string; index?: number}
 	| {to: Side; edge: true}
 	| {group: string}
 
@@ -453,7 +455,15 @@ function placementOf(detail: object): Placement | undefined {
 			: undefined
 	if (!("to" in placement)) return group ? {group} : undefined
 	const to = placement.to
-	if (to === "tab") return group ? {to, group} : {to}
+	if (to === "tab") {
+		const index =
+			"index" in placement &&
+			Number.isInteger(placement.index) &&
+			(placement.index as number) >= 0
+				? (placement.index as number)
+				: undefined
+		return {to, ...(group ? {group} : {}), ...(index === undefined ? {} : {index})}
+	}
 	if (!isSide(to)) return undefined
 	if ("edge" in placement && placement.edge === true) return {to, edge: true}
 	return group ? {to, group} : {to}
