@@ -12,7 +12,8 @@ async function loadStyles() {
 }
 
 function addStyles(textContent: string) {
-  const id = "sideboard-styles";
+  // pkg-base's sideboard writes its own stylesheet to "sideboard-styles"
+  const id = "gaios-sideboard-styles";
   const el =
     document.head.querySelector(`#${id}`) ?? document.createElement("style");
   Object.assign(el, { textContent, id });

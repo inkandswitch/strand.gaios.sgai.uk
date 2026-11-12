@@ -30,6 +30,9 @@
   --document-list-primary-line: var(--studio-primary-line, var(--studio-line, black));
   --document-list-selection-fill: var(--document-list-primary);
   --document-list-selection-line: var(--document-list-primary-line);
+  /* rows keep their own ink, so these stay light enough to read it on */
+  --document-list-row-selected-fill: color-mix(in oklch, var(--document-list-primary), transparent 86%);
+  --document-list-row-hover-fill: color-mix(in oklch, var(--document-list-primary), transparent 93%);
 
   --document-list-create-new-fill: var(--studio-fill, white);
   --document-list-create-new-line: color-mix(
@@ -59,7 +62,6 @@
   --document-list-divider: var(--studio-chrome-offset-20, #d4d4d4);
   --document-list-added: var(--studio-added, #35f7ca);
   --document-list-danger: var(--studio-danger-text, var(--studio-danger, #ff6a90));
-  --document-list-toggle-hover: color-mix(in oklch, var(--studio-line, black), transparent 93%);
   --account-bar-fill: var(--studio-chrome-offset-10);
   /* ink on the account-bar's chrome surface: rides the chrome ink ramp, not
      --document-list-line (which is content ink and tracks the list surface). */
@@ -194,6 +196,8 @@ button {
   --doclist-padding-x: 0.75rem;
   display: flex;
   flex-direction: column;
+  gap: 1px;
+  padding-block: 0.25rem;
   border-radius: var(--document-list-radius);
   box-shadow: 0 1px 2px rgba(0, 20, 50, 0.05);
   width: 100%;
@@ -231,11 +235,15 @@ button {
   font-size: 0.875rem;
 }
 
-.document-list-item {
+/* scoped to .document-list so these win over pkg-base's sideboard, whose
+   stylesheet can be on the page too and uses the same class names */
+.document-list .document-list-item {
   display: flex;
   gap: 0.25ch;
+  margin-inline: 0.375rem;
   padding-inline: var(--doclist-padding-x);
   padding-block: 0.5rem;
+  border-radius: var(--document-list-radius);
   font-weight: 400;
   color: var(--sidebar-widget-line);
   cursor: var(--studio-cursor-default, default);
@@ -253,20 +261,13 @@ button {
     box-shadow: 0;
   }
 
+  &:hover {
+    background: var(--document-list-row-hover-fill);
+  }
+
   &[aria-selected="true"] {
-    background: var(--document-list-selection-fill);
-    color: var(--document-list-selection-line);
-    .document-list-folder__toggle path {
-      stroke: var(--document-list-selection-line);
-    }
-    .document-list__doclist > &:first-child {
-      border-top-left-radius: var(--document-list-radius);
-      border-top-right-radius: var(--document-list-radius);
-    }
-    .document-list__doclist > &:last-child {
-      border-bottom-left-radius: var(--document-list-radius);
-      border-bottom-right-radius: var(--document-list-radius);
-    }
+    background: var(--document-list-row-selected-fill);
+    color: var(--sidebar-widget-line);
   }
   &[aria-checked="true"] {
     outline: 2px dashed
@@ -326,7 +327,7 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .document-list-item[data-dnd-landed] {
+  .document-list .document-list-item[data-dnd-landed] {
     animation: doclist-landed-still max(1ms, calc(600ms * var(--studio-motion-scale, 1) * var(--studio-motion-preference, 1))) linear both;
   }
 }
@@ -368,7 +369,7 @@ button {
   flex-direction: column;
 }
 
-.document-list-item--loading {
+.document-list .document-list-item--loading {
   pointer-events: none;
   padding-left: calc(1.8rem * var(--depth) + var(--doclist-padding-x));
 }
@@ -430,7 +431,7 @@ button {
     content: "";
     position: absolute;
     top: -3px;
-    right: 0.4rem;
+    right: 0.2rem;
     width: 6px;
     height: 6px;
     border-radius: 50%;
@@ -438,15 +439,14 @@ button {
   }
 }
 
-.document-list-folder__toggle {
+/* the whole row toggles the folder, so the caret has no hover of its own */
+.document-list .document-list-folder__toggle {
   display: inline-flex;
   align-items: center;
-  cursor: var(--studio-cursor-pointer, pointer);
+  cursor: inherit;
   margin-left: -0.75ch;
   padding-inline: 0.25ch;
-  &:hover {
-    background: var(--document-list-toggle-hover);
-  }
+  background: none;
 
   & svg {
     width: 14px;
@@ -484,7 +484,7 @@ button {
   display: block;
 }
 
-.document-list-folder__contents .document-list-item {
+.document-list .document-list-folder__contents .document-list-item {
   padding-left: calc(1.8rem * var(--depth));
 }
 
