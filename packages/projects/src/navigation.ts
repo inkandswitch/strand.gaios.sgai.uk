@@ -54,6 +54,7 @@ export type Side = "right" | "left" | "above" | "below"
 export type Route =
 	| {page: "loading"}
 	| {page: "splash"}
+	| {page: "packages"}
 	| ({page: "project"} & ProjectRoute)
 
 /** The project whose drafts are mounted, and the draft to start it on. */
@@ -70,6 +71,8 @@ export type Navigation = {
 	/** another panel took focus, or the last one closed */
 	focus(panel: ProjectRoute | undefined): void
 	home(): void
+	/** the page for installing packages: tools, datatypes */
+	packages(): void
 	/** where a draft provider should be mounted, if anywhere */
 	scope: Accessor<DraftScope | undefined>
 	/** the open project's repo, reading its checked-out draft */
@@ -79,6 +82,8 @@ export type Navigation = {
 }
 
 type HistoryMode = "push" | "replace"
+
+const PACKAGES_HASH = "packages"
 
 type Attached = {
 	projectUrl: AutomergeUrl
@@ -161,6 +166,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		open,
 		focus,
 		home,
+		packages,
 		scope,
 		projectRepo,
 		attach,
@@ -219,21 +225,27 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	}
 
 	function home() {
-		attempt++
-		setRoute({page: "splash"})
-		setScope(undefined)
+		leave("splash")
 		write("", "push")
+	}
+
+	function packages() {
+		leave("packages")
+		write(PACKAGES_HASH, "push")
+	}
+
+	// To a page outside any project, unmounting its drafts.
+	function leave(page: "splash" | "packages") {
+		attempt++
+		setRoute({page})
+		setScope(undefined)
 	}
 
 	function followHash() {
 		const hash = currentHash()
 		written = hash
-		if (!hash) {
-			attempt++
-			setRoute({page: "splash"})
-			setScope(undefined)
-			return
-		}
+		if (!hash) return leave("splash")
+		if (hash === PACKAGES_HASH) return leave("packages")
 		const location = parseHash(hash)
 		if (location) void go(location, "replace")
 		else reject(new LocationError("not-a-project"), "replace")

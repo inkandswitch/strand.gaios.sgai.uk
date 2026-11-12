@@ -9,4 +9,6 @@ export type AccountDoc = {
 	frameToolId?: string
 	rootFolderUrl?: AutomergeUrl
 	contactUrl?: AutomergeUrl
+	/** the packages installed on the account */
+	moduleSettingsUrl?: AutomergeUrl
 }

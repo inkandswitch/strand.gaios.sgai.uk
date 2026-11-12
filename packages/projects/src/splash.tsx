@@ -10,6 +10,7 @@ export function Splash(props: {
 	recents: Accessor<DocHandle<FolderDoc> | undefined>
 	repo: Repo
 	open(url: AutomergeUrl): void
+	packages(): void
 }) {
 	const list = useDoc(props.recents)
 	const projects = () =>
@@ -41,7 +42,15 @@ export function Splash(props: {
 
 	return (
 		<div class="projects__splash">
-			<h1 class="projects__splash-title">Projects</h1>
+			<header class="projects__splash-header">
+				<h1 class="projects__splash-title">Projects</h1>
+				<button
+					type="button"
+					class="projects__button"
+					onClick={() => props.packages()}>
+					Packages
+				</button>
+			</header>
 			<form class="projects__new" onSubmit={create}>
 				<input
 					class="projects__new-name"

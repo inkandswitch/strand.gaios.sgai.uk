@@ -6,6 +6,7 @@ import {render} from "solid-js/web"
 import {DraftScopeView} from "./drafts.tsx"
 import {useDoc, useHandle} from "./hooks.ts"
 import {createNavigation, type DraftScope} from "./navigation.ts"
+import {PackagesPage} from "./packages.tsx"
 import {ProjectView} from "./project.tsx"
 import {Provider} from "./provider.tsx"
 import {addToRecents} from "./recents.ts"
@@ -45,7 +46,9 @@ function Frame(props: {
 			)
 	})
 	createEffect(() => {
-		if (navigation.route().page === "splash") document.title = props.siteTitle
+		const page = navigation.route().page
+		if (page === "splash") document.title = props.siteTitle
+		if (page === "packages") document.title = `Packages | ${props.siteTitle}`
 	})
 
 	// The open project, once it's the one whose drafts are mounted.
@@ -69,6 +72,13 @@ function Frame(props: {
 								recents={recents}
 								repo={repo}
 								open={url => navigation.open(url)}
+								packages={navigation.packages}
+							/>
+						</Show>
+						<Show when={navigation.route().page === "packages"}>
+							<PackagesPage
+								url={account()?.moduleSettingsUrl}
+								home={navigation.home}
 							/>
 						</Show>
 						<Show when={navigation.scope()} keyed>
