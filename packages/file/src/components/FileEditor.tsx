@@ -46,7 +46,7 @@ export function FileEditor(props: {
 				{/* Media viewers are matched before text so a string-backed asset
 				    (e.g. an SVG) still renders as media rather than its markup. */}
 				<Match when={isImageFile(doc()!)}>
-					<ImageFileViewer doc={doc()!} />
+					<ImageFileViewer doc={doc()!} element={props.element} />
 				</Match>
 				<Match when={isPDFFile(doc()!)}>
 					<PDFFileViewer doc={doc()!} />

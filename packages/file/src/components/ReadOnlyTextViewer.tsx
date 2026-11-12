@@ -42,7 +42,7 @@ export function ReadOnlyTextViewer(props: {
 			: undefined
 	const diff =
 		props.handle && props.element
-			? createDraftDiff({handle: props.handle, element: props.element})
+			? createDraftDiff({element: props.element})
 			: undefined
 
 	const view = new EditorView({

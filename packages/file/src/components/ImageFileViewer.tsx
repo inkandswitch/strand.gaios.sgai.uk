@@ -1,4 +1,5 @@
 import {createMemo} from "solid-js"
+import {subscribe} from "@inkandswitch/patchwork-providers-solid"
 import type {FileDoc} from "../types"
 import {createBinaryUrl} from "../utils"
 import {isBinaryFileDoc} from "../datatype"
@@ -7,7 +8,15 @@ export type ImageFileDoc = FileDoc & {
 	extension: "svg" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
 }
 
-export function ImageFileViewer(props: {doc: FileDoc}) {
+export function ImageFileViewer(props: {doc: FileDoc; element?: HTMLElement}) {
+	// Two versions of an image line up laid over each other: the panel
+	// showing it can fade or swipe between them.
+	if (props.element)
+		subscribe(props.element, {
+			type: "compare:view",
+			modes: {"onion-skin": true, swipe: true},
+		})
+
 	const imgUrl = createMemo(() => {
 		if (isBinaryFileDoc(props.doc)) {
 			return createBinaryUrl(props.doc.content, props.doc.mimeType)
@@ -16,26 +25,15 @@ export function ImageFileViewer(props: {doc: FileDoc}) {
 	})
 
 	return imgUrl() ? (
-		<div
+		<img
+			src={imgUrl()}
+			alt={props.doc.name}
 			style={{
-				display: "flex",
-				"align-items": "center",
-				"justify-content": "center",
-				width: "100%",
-				height: "100%",
-				"box-sizing": "border-box",
-				overflow: "hidden",
-			}}>
-			<img
-				src={imgUrl()}
-				alt={props.doc.name}
-				style={{
-					"max-width": "100%",
-					"max-height": "100%",
-					"object-fit": "contain",
-				}}
-			/>
-		</div>
+				"max-width": "100%",
+				"max-height": "100%",
+				"object-fit": "contain",
+			}}
+		/>
 	) : (
 		<div
 			style={{
