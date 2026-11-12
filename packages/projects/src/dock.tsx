@@ -388,8 +388,9 @@ function dropPlacement(drop: DropAt): Placement | undefined {
 
 // On a group's tab bar, or in a band just under it where a split above would
 // otherwise start: that takes a new tab, and splitting above starts lower.
-function intoTabs({nativeEvent, position, group}: DropAt) {
-	if (!group || (position !== "top" && position !== "center")) return false
+// Only the height counts: over a tab, dockview says left or right of it.
+function intoTabs({nativeEvent, group}: DropAt) {
+	if (!group) return false
 	const tabs = group.element.querySelector(".dv-tabs-and-actions-container")
 	const bottom = (tabs ?? group.element).getBoundingClientRect().bottom
 	return nativeEvent.clientY < bottom + TAB_BAND
