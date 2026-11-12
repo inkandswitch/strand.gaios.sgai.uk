@@ -16,15 +16,26 @@ export function ImageFileViewer(props: {doc: FileDoc}) {
 	})
 
 	return imgUrl() ? (
-		<img
-			src={imgUrl()}
-			alt={props.doc.name}
+		<div
 			style={{
-				"max-width": "100%",
-				"max-height": "100%",
-				"object-fit": "contain",
-			}}
-		/>
+				display: "flex",
+				"align-items": "center",
+				"justify-content": "center",
+				width: "100%",
+				height: "100%",
+				"box-sizing": "border-box",
+				overflow: "hidden",
+			}}>
+			<img
+				src={imgUrl()}
+				alt={props.doc.name}
+				style={{
+					"max-width": "100%",
+					"max-height": "100%",
+					"object-fit": "contain",
+				}}
+			/>
+		</div>
 	) : (
 		<div
 			style={{
