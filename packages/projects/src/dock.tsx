@@ -14,7 +14,6 @@ import {createDockview, themeLight} from "dockview-core/dist/dockview-core.js"
 import {
 	createEffect,
 	createSignal,
-	For,
 	on,
 	onCleanup,
 	onMount,
@@ -27,9 +26,6 @@ import {useDocTitle} from "./hooks.ts"
 import type {Placement, ProjectRoute, Side} from "./navigation.ts"
 import {OpenWith} from "./open-with.tsx"
 import {projectRoot, relocate, type FindDoc} from "./resolve.ts"
-
-/** Each has to be installed: a tool `<patchwork-view>` can't find shows an error. */
-const TITLEBAR_TOOLS = ["doc-presence", "theme-titlebar"]
 
 const EMPTY = "Open something from the project, or make something new."
 
@@ -321,8 +317,7 @@ function DockPanel(props: {
 	const docUrl = () => props.route().resolved.docUrl
 	const title = useDocTitle(props.repo, docUrl)
 	createEffect(() => props.setTitle(docUrl() ? (title() ?? "") : "Nothing open"))
-	// Only the document's own view: the titlebar tools, and views inside the
-	// document, mount too.
+	// Only the document's own view: views inside the document mount too.
 	const reportTool = (view: HTMLElement) => {
 		view.addEventListener("patchwork:mounted", event => {
 			if (event.target !== view) return
@@ -338,21 +333,12 @@ function DockPanel(props: {
 				// own.
 				<Show when={props.draftKey()} keyed>
 					{_draft => (
-						<>
-							<header class="projects__titlebar">
-								<div class="projects__titlebar-tools">
-									<For each={TITLEBAR_TOOLS}>
-										{toolId => <patchwork-view tool-id={toolId} doc-url={url()} />}
-									</For>
-								</div>
-							</header>
-							<patchwork-view
-								ref={reportTool}
-								class="projects__document"
-								doc-url={url()}
-								tool-id={props.route().location.toolId}
-							/>
-						</>
+						<patchwork-view
+							ref={reportTool}
+							class="projects__document"
+							doc-url={url()}
+							tool-id={props.route().location.toolId}
+						/>
 					)}
 				</Show>
 			)}
