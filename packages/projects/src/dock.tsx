@@ -3,6 +3,7 @@ import {accept, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
 import type {
 	AddPanelPositionOptions,
 	DockviewApi,
+	DockviewGroupPanel,
 	DockviewTheme,
 	IContentRenderer,
 	IWatermarkRenderer,
@@ -127,20 +128,22 @@ export function Dock(props: {
 		}
 	}
 
-	// A row dragged out of the sidebar opens where it's dropped: on a tab
-	// bar as a new tab, at a group's edge or the dock's beside it. The middle
-	// of a document is left to the document, which may take drops itself.
+	// A row dragged out of the sidebar opens where it's dropped: in the
+	// middle of a group in place of what it shows, on its tab bar or just
+	// under it as a new tab, at its edges or the dock's beside it.
 	function takeDrops(dock: DockviewApi) {
 		return [
 			dock.onUnhandledDragOver(event => {
 				if (!carriesLocation(event.nativeEvent)) return
-				if (event.target === "content" && event.position === "center") return
 				event.accept()
+				if (intoTabs(event)) element.dataset.drop = "tab"
+				else delete element.dataset.drop
 			}),
 			dock.onDidDrop(event => {
+				delete element.dataset.drop
 				if (event.getData() || !(event.nativeEvent instanceof DragEvent)) return
 				const url = event.nativeEvent.dataTransfer?.getData(LOCATION_TYPE)
-				if (url) open(url, dropPlacement(event.position, event.group?.id))
+				if (url) open(url, dropPlacement(event))
 			}),
 		]
 	}
@@ -317,14 +320,29 @@ function carriesLocation(event: DragEvent | PointerEvent) {
 	return event instanceof DragEvent && !!event.dataTransfer?.types.includes(LOCATION_TYPE)
 }
 
-function dropPlacement(
-	position: Position,
-	group: string | undefined
-): Placement | undefined {
-	const to = position === "center" ? undefined : SIDE_OF[position]
-	if (!group) return to && {to, edge: true}
-	return to ? {to, group} : {to: "tab", group}
+type DropAt = {
+	nativeEvent: DragEvent | PointerEvent
+	position: Position
+	group?: DockviewGroupPanel
 }
+
+function dropPlacement(drop: DropAt): Placement | undefined {
+	const {position, group} = drop
+	if (!group) return position === "center" ? undefined : {to: SIDE_OF[position], edge: true}
+	if (intoTabs(drop)) return {to: "tab", group: group.id}
+	return position === "center" ? {group: group.id} : {to: SIDE_OF[position], group: group.id}
+}
+
+// On a group's tab bar, or in a band just under it where a split above would
+// otherwise start: that takes a new tab, and splitting above starts lower.
+function intoTabs({nativeEvent, position, group}: DropAt) {
+	if (!group || (position !== "top" && position !== "center")) return false
+	const tabs = group.element.querySelector(".dv-tabs-and-actions-container")
+	const bottom = (tabs ?? group.element).getBoundingClientRect().bottom
+	return nativeEvent.clientY < bottom + TAB_BAND
+}
+
+const TAB_BAND = 32
 
 const SIDE_OF: Record<Exclude<Position, "center">, Side> = {
 	top: "above",

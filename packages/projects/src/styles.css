@@ -417,6 +417,13 @@
 	border-color: color-mix(in oklch, var(--projects-fg) 18%, transparent);
 }
 
+/* a drop just under a tab bar adds a tab: the highlight shrinks to a line
+   under the tabs instead of the half a split above would take */
+.projects__dock[data-drop="tab"] .dv-drop-target-selection:is(.dv-drop-target-top, .dv-drop-target-center) {
+	top: 0 !important;
+	height: 3px !important;
+}
+
 .projects__dock-theme .dv-watermark {
 	display: grid;
 	place-items: center;
