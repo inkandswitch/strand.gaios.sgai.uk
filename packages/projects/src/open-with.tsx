@@ -117,7 +117,7 @@ function isWildcard(tool: ToolDescription) {
 }
 
 // lucide `chevron-down`
-function CaretIcon() {
+export function CaretIcon() {
 	return (
 		<svg
 			class="projects__open-with-caret"
@@ -137,7 +137,7 @@ function CaretIcon() {
 }
 
 // lucide `check`
-function CheckIcon() {
+export function CheckIcon() {
 	return (
 		<svg
 			xmlns="http://www.w3.org/2000/svg"

@@ -407,9 +407,141 @@
 /* the dock: each group of tabs a surface raised above the ground, the gaps
    between them the ground showing through */
 
+.projects__dock-area {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+
 .projects__dock {
 	flex: 1;
 	min-height: 0;
+}
+
+/* comparing two versions: the project's mode above the dock, a panel's in
+   its tab bar, and the two versions laid out in the panel */
+
+.projects__compare-bar {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--projects-space);
+	padding: var(--projects-space-xs) var(--projects-space-sm) var(--projects-space-sm);
+	font-size: 0.85rem;
+}
+
+.projects__compare-strip {
+	display: flex;
+	gap: 2px;
+	padding: 3px;
+	border: 1px solid var(--projects-surface-edge);
+	border-radius: var(--projects-radius-lg);
+	background: var(--projects-surface);
+}
+
+.projects__compare-mode {
+	display: grid;
+	place-items: center;
+	width: 2rem;
+	height: 1.75rem;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: var(--projects-radius);
+	background: none;
+	cursor: var(--studio-cursor-pointer, pointer);
+}
+
+.projects__compare-mode:hover {
+	background: var(--projects-hover);
+}
+
+.projects__compare-mode[aria-checked="true"] {
+	border-color: var(--projects-surface-edge);
+	background: var(--projects-bg);
+	box-shadow: var(--projects-elevation);
+}
+
+.projects__compare-icon {
+	display: block;
+	width: 20px;
+	height: 20px;
+	flex: none;
+}
+
+.projects__compare-controls {
+	display: flex;
+	align-items: center;
+	gap: var(--projects-space-sm);
+	color: var(--projects-muted);
+	font-size: 0.8rem;
+}
+
+.projects__open-with-menu .projects__compare-controls {
+	margin-top: var(--projects-space-xs);
+	padding: var(--projects-space-sm);
+	border-top: 1px solid var(--projects-surface-edge);
+}
+
+.projects__compare-controls label {
+	display: flex;
+	align-items: center;
+	gap: var(--projects-space-xs);
+}
+
+.projects__compare-picker {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 0.2rem;
+	padding: 0.2rem 0.3rem;
+	border: none;
+	border-radius: var(--projects-radius);
+	background: none;
+	color: var(--projects-muted);
+	cursor: var(--studio-cursor-pointer, pointer);
+}
+
+.projects__compare-picker:hover,
+.projects__compare-picker[aria-expanded="true"] {
+	background: var(--projects-hover);
+}
+
+.projects__compare-dot {
+	position: absolute;
+	top: 1px;
+	right: 1px;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--projects-lane-current);
+}
+
+.projects__open-with-item .projects__compare-icon {
+	width: 18px;
+	height: 18px;
+}
+
+.projects__compare {
+	position: relative;
+	display: grid;
+	grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+	gap: 1px;
+	flex: 1;
+	min-height: 0;
+	background: var(--projects-surface-edge);
+}
+
+.projects__compare-slot {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	background: var(--projects-surface);
+}
+
+.projects__compare-slot[hidden] {
+	display: none;
 }
 
 .projects__dock-theme {
