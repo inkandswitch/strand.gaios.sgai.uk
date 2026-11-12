@@ -426,6 +426,7 @@
 
 .projects__tab-insertion {
 	position: relative;
+	z-index: 1;
 	flex: none;
 	width: 0;
 	pointer-events: none;
@@ -439,6 +440,11 @@
 	width: 4px;
 	border-radius: 2px;
 	background: var(--projects-lane-current);
+}
+
+/* the tab strip clips what's past its start */
+.projects__tab-insertion:first-child::after {
+	left: 0;
 }
 
 .projects__dock-theme .dv-watermark {
