@@ -21,7 +21,7 @@ import {
   rowSpot,
 } from "../dnd/dnd.ts";
 import { setMenuTarget } from "../state.ts";
-import type { Placement } from "../events.ts";
+import { LOCATION_TYPE, type Placement } from "../events.ts";
 import type {
   AutomergeUrl,
   DocHandle,
@@ -53,6 +53,8 @@ export default function Item(props: {
   children: JSX.Element;
   /** unset for folders: pressing a folder's row expands it instead */
   openWith?(toolId?: string, placement?: Placement): void;
+  /** where it sits in the project, for opening it where it's dropped */
+  location?: string;
   startRenaming(): void;
   remove(): void;
   element: PatchworkViewElement;
@@ -164,6 +166,7 @@ export default function Item(props: {
       ondragstart={(event: DragEvent) => {
         cancelLongPress();
         startDrag(event, dnd(), props.element, dragOut);
+        if (props.location) event.dataTransfer?.setData(LOCATION_TYPE, props.location);
       }}
       ondrag={(event: DragEvent) => {
         // Update copy mode if Alt key state changes during drag

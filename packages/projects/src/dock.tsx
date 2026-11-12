@@ -6,6 +6,7 @@ import type {
 	DockviewTheme,
 	IContentRenderer,
 	IWatermarkRenderer,
+	Position,
 } from "dockview-core"
 import {createDockview, themeLight} from "dockview-core/dist/dockview-core.js"
 import {
@@ -21,7 +22,7 @@ import {
 } from "solid-js"
 import {render} from "solid-js/web"
 import {useDocTitle} from "./hooks.ts"
-import type {Placement, ProjectRoute} from "./navigation.ts"
+import type {Placement, ProjectRoute, Side} from "./navigation.ts"
 import {projectRoot, relocate, type FindDoc} from "./resolve.ts"
 
 /** Each has to be installed: a tool `<patchwork-view>` can't find shows an error. */
@@ -33,6 +34,9 @@ const TITLEBAR_TOOLS = [
 ]
 
 const EMPTY = "Open something from the project, or make something new."
+
+/** what a sidebar row's drag carries its location as (sideboard's `LOCATION_TYPE`) */
+const LOCATION_TYPE = "text/x-patchwork-location"
 
 const THEME: DockviewTheme = {
 	...themeLight,
@@ -86,6 +90,7 @@ export function Dock(props: {
 				if (!dock.totalPanels) props.focus(undefined)
 			}),
 			dock.onDidLayoutChange(refresh),
+			...takeDrops(dock),
 		]
 		onCleanup(() => {
 			for (const subscription of subscriptions) subscription.dispose()
@@ -108,17 +113,46 @@ export function Dock(props: {
 	function place(route: ProjectRoute) {
 		if (!api) return
 		const active = api.activePanel
-		const target = groupTarget(api, route.placement)
+		const placement = route.placement
+		const target = groupTarget(api, placement)
 		if (target) {
 			panels.get(target.id)?.setRoute(route)
 			target.api.setActive()
 		} else if (!active) {
 			if (route.resolved.docUrl) add(route)
-		} else if (route.placement && "to" in route.placement) {
-			add(route, beside(active.group, route.placement.to))
+		} else if (placement && "to" in placement) {
+			add(route, positionFor(api, placement, active.group.id))
 		} else {
 			panels.get(active.id)?.setRoute(route)
 		}
+	}
+
+	// A row dragged out of the sidebar opens where it's dropped: on a tab
+	// bar as a new tab, at a group's edge or the dock's beside it. The middle
+	// of a document is left to the document, which may take drops itself.
+	function takeDrops(dock: DockviewApi) {
+		return [
+			dock.onUnhandledDragOver(event => {
+				if (!carriesLocation(event.nativeEvent)) return
+				if (event.target === "content" && event.position === "center") return
+				event.accept()
+			}),
+			dock.onDidDrop(event => {
+				if (event.getData() || !(event.nativeEvent instanceof DragEvent)) return
+				const url = event.nativeEvent.dataTransfer?.getData(LOCATION_TYPE)
+				if (url) open(url, dropPlacement(event.position, event.group?.id))
+			}),
+		]
+	}
+
+	function open(url: string, placement: Placement | undefined) {
+		element.dispatchEvent(
+			new CustomEvent("patchwork:open-document", {
+				detail: {url, placement},
+				bubbles: true,
+				composed: true,
+			})
+		)
 	}
 
 	function add(route: ProjectRoute, position?: AddPanelPositionOptions) {
@@ -260,18 +294,43 @@ function groupsOf(api: DockviewApi): DockGroup[] {
 	})
 }
 
+// Only a placement naming a group and nothing else replaces what it shows.
 function groupTarget(api: DockviewApi, placement: Placement | undefined) {
-	if (!placement || !("group" in placement)) return undefined
+	if (!placement || "to" in placement) return undefined
 	return api.getGroup(placement.group)?.activePanel
 }
 
-function beside(
-	group: DockviewApi["groups"][number],
-	to: Extract<Placement, {to: string}>["to"]
+function positionFor(
+	api: DockviewApi,
+	placement: Extract<Placement, {to: string}>,
+	focusedGroup: string
 ): AddPanelPositionOptions {
-	return to === "tab"
-		? {referenceGroup: group}
-		: {referenceGroup: group, direction: to}
+	if ("edge" in placement) return {direction: placement.to}
+	const named = placement.group
+	const referenceGroup = named && api.getGroup(named) ? named : focusedGroup
+	return placement.to === "tab"
+		? {referenceGroup}
+		: {referenceGroup, direction: placement.to}
+}
+
+function carriesLocation(event: DragEvent | PointerEvent) {
+	return event instanceof DragEvent && !!event.dataTransfer?.types.includes(LOCATION_TYPE)
+}
+
+function dropPlacement(
+	position: Position,
+	group: string | undefined
+): Placement | undefined {
+	const to = position === "center" ? undefined : SIDE_OF[position]
+	if (!group) return to && {to, edge: true}
+	return to ? {to, group} : {to: "tab", group}
+}
+
+const SIDE_OF: Record<Exclude<Position, "center">, Side> = {
+	top: "above",
+	bottom: "below",
+	left: "left",
+	right: "right",
 }
 
 function watermark(): IWatermarkRenderer {

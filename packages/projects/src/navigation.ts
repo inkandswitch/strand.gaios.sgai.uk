@@ -38,12 +38,16 @@ export type ProjectRoute = {
 }
 
 /**
- * Beside the focused panel, in a new tab in its group, or in a given group.
- * Without one an open replaces what the focused panel shows.
+ * Beside a group or in a new tab in it (the focused panel's group unless one
+ * is named), along an edge of the whole dock, or in place of what a group
+ * shows. Without one an open replaces what the focused panel shows.
  */
 export type Placement =
-	| {to: "right" | "left" | "above" | "below" | "tab"}
+	| {to: Side | "tab"; group?: string}
+	| {to: Side; edge: true}
 	| {group: string}
+
+export type Side = "right" | "left" | "above" | "below"
 
 export type Route =
 	| {page: "loading"}
@@ -443,14 +447,23 @@ function samePlace(a: ProjectRoute, b: ProjectRoute) {
 function placementOf(detail: object): Placement | undefined {
 	const placement = "placement" in detail ? detail.placement : undefined
 	if (!placement || typeof placement !== "object") return undefined
-	if ("group" in placement && typeof placement.group === "string")
-		return {group: placement.group}
-	if ("to" in placement && SIDES.has(placement.to as string))
-		return {to: placement.to as Extract<Placement, {to: string}>["to"]}
-	return undefined
+	const group =
+		"group" in placement && typeof placement.group === "string"
+			? placement.group
+			: undefined
+	if (!("to" in placement)) return group ? {group} : undefined
+	const to = placement.to
+	if (to === "tab") return group ? {to, group} : {to}
+	if (!isSide(to)) return undefined
+	if ("edge" in placement && placement.edge === true) return {to, edge: true}
+	return group ? {to, group} : {to}
 }
 
-const SIDES = new Set(["right", "left", "above", "below", "tab"])
+const SIDES: readonly unknown[] = ["right", "left", "above", "below"]
+
+function isSide(value: unknown): value is Side {
+	return SIDES.includes(value)
+}
 
 function sameNames(a: Resolved, b: Resolved) {
 	return (

@@ -282,6 +282,7 @@ export function DocumentList(props: DocumentListProps) {
                     rootFolderHandle={props.rootFolderHandle}
                     parentFolderHandle={props.handle}
                     itemIndex={index()}
+                    location={childLocation(props.location, doc, props.docs)}
                     openWith={(toolId, placement) =>
                       props.open({
                         url: childLocation(props.location, doc, props.docs),

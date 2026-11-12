@@ -11,6 +11,12 @@ export type Placement =
 
 export type OpenDetail = OpenDocumentEventDetail & { placement?: Placement };
 
+/**
+ * The drag data type a dragged row's location travels as, so a frame can
+ * open it where it's dropped.
+ */
+export const LOCATION_TYPE = "text/x-patchwork-location";
+
 /** One of the tiling frame's groups of tabs, named after what it shows. */
 export type DockGroup = { id: string; title: string };
 
