@@ -452,6 +452,99 @@
 	place-items: center;
 }
 
+/* open with, at the end of each group's tab bar */
+
+.projects__group-actions {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	padding-inline: var(--projects-space-xs);
+}
+
+.projects__open-with {
+	display: flex;
+	align-items: center;
+	gap: 0.2rem;
+	max-width: 12rem;
+	padding: 0.2rem 0.35rem 0.2rem 0.55rem;
+	border: none;
+	border-radius: var(--projects-radius);
+	background: none;
+	color: var(--projects-muted);
+	font: inherit;
+	font-size: 0.8rem;
+	white-space: nowrap;
+	cursor: var(--studio-cursor-pointer, pointer);
+}
+
+.projects__open-with:hover,
+.projects__open-with[aria-expanded="true"] {
+	background: var(--projects-hover);
+	color: var(--projects-fg);
+}
+
+.projects__open-with-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.projects__open-with-caret {
+	flex: none;
+	opacity: 0.7;
+}
+
+.projects__open-with-menu[popover] {
+	position: fixed;
+	inset: unset;
+	min-width: 11rem;
+	max-height: min(20rem, 60vh);
+	margin: 0;
+	padding: var(--projects-space-xs);
+	overflow-y: auto;
+	box-sizing: border-box;
+	border: 1px solid var(--projects-surface-edge);
+	border-radius: var(--projects-radius-lg);
+	background: var(--projects-surface);
+	color: var(--projects-fg);
+	box-shadow: var(--projects-elevation);
+	font-family: var(--projects-family);
+}
+
+.projects__open-with-item {
+	display: flex;
+	align-items: center;
+	gap: var(--projects-space-sm);
+	width: 100%;
+	padding: 0.4rem var(--projects-space-sm);
+	border: none;
+	border-radius: var(--projects-radius);
+	background: none;
+	color: inherit;
+	font: inherit;
+	font-size: 0.85rem;
+	text-align: start;
+	white-space: nowrap;
+	cursor: var(--studio-cursor-pointer, pointer);
+}
+
+.projects__open-with-item:hover,
+.projects__open-with-item:focus-visible {
+	background: var(--projects-hover);
+	outline: none;
+}
+
+.projects__open-with-item[aria-checked="true"] {
+	font-weight: 600;
+}
+
+.projects__open-with-check {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 14px;
+	color: var(--projects-lane-current);
+}
+
 .projects__dock-panel {
 	display: flex;
 	flex-direction: column;

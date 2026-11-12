@@ -1,4 +1,4 @@
-import type {Repo} from "@automerge/automerge-repo/slim"
+import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
 import {accept, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
 import type {
 	AddPanelPositionOptions,
@@ -6,6 +6,7 @@ import type {
 	DockviewGroupPanel,
 	DockviewTheme,
 	IContentRenderer,
+	IHeaderActionsRenderer,
 	IWatermarkRenderer,
 	Position,
 } from "dockview-core"
@@ -24,15 +25,11 @@ import {
 import {render} from "solid-js/web"
 import {useDocTitle} from "./hooks.ts"
 import type {Placement, ProjectRoute, Side} from "./navigation.ts"
+import {OpenWith} from "./open-with.tsx"
 import {projectRoot, relocate, type FindDoc} from "./resolve.ts"
 
 /** Each has to be installed: a tool `<patchwork-view>` can't find shows an error. */
-const TITLEBAR_TOOLS = [
-	"doc-openwith",
-	"doc-presence",
-	"sync-indicator",
-	"theme-titlebar",
-]
+const TITLEBAR_TOOLS = ["doc-presence", "theme-titlebar"]
 
 const EMPTY = "Open something from the project, or make something new."
 
@@ -49,7 +46,13 @@ const THEME: DockviewTheme = {
 /** One of the dock's groups of tabs, named after what it shows. */
 export type DockGroup = {id: string; title: string}
 
-type Panel = {route: Accessor<ProjectRoute>; setRoute: Setter<ProjectRoute>}
+type Panel = {
+	route: Accessor<ProjectRoute>
+	setRoute: Setter<ProjectRoute>
+	/** the tool its document's view mounted, the route's or the fallback */
+	tool: Accessor<string | undefined>
+	setTool: Setter<string | undefined>
+}
 
 /**
  * The project's documents, tiled. Each panel shows a place in the project;
@@ -76,6 +79,7 @@ export function Dock(props: {
 			theme: THEME,
 			disableFloatingGroups: true,
 			createComponent: () => panelRenderer(),
+			createRightHeaderActionComponent: () => groupActions(),
 			createWatermarkComponent: () => watermark(),
 		})
 		api = dock
@@ -198,7 +202,8 @@ export function Dock(props: {
 	function add(route: ProjectRoute, position?: AddPanelPositionOptions) {
 		const id = `panel-${++count}`
 		const [shown, setShown] = createSignal(route)
-		panels.set(id, {route: shown, setRoute: setShown})
+		const [tool, setTool] = createSignal<string>()
+		panels.set(id, {route: shown, setRoute: setShown, tool, setTool})
 		api?.addPanel({id, component: "document", title: "", position})
 	}
 
@@ -240,6 +245,7 @@ export function Dock(props: {
 								panelApi.setTitle(title)
 								if (api) setGroups(groupsOf(api))
 							}}
+							setTool={panel.setTool}
 						/>
 					),
 					element
@@ -248,6 +254,61 @@ export function Dock(props: {
 			dispose: () => dispose?.(),
 		}
 	}
+
+	// The open-with menu in each group's tab bar, for the tab it's showing.
+	function groupActions(): IHeaderActionsRenderer {
+		const element = document.createElement("div")
+		element.className = "projects__group-actions"
+		let dispose: (() => void) | undefined
+		return {
+			element,
+			init({api: groupApi, group}) {
+				dispose = render(() => {
+					const [active, setActive] = createSignal(group.activePanel?.id)
+					const subscription = groupApi.onDidActivePanelChange(event =>
+						setActive(event.panel?.id)
+					)
+					onCleanup(() => subscription.dispose())
+					const panel = () => {
+						const id = active()
+						return id === undefined ? undefined : panels.get(id)
+					}
+					return (
+						<Show when={panel()}>
+							{panel => (
+								<Show when={panel().route().resolved.docUrl}>
+									{url => (
+										<OpenWith
+											docUrl={url()}
+											repo={props.repo}
+											toolId={panel().tool()}
+											pick={toolId => openWith(active(), url(), toolId)}
+										/>
+									)}
+								</Show>
+							)}
+						</Show>
+					)
+				}, element)
+			},
+			dispose: () => dispose?.(),
+		}
+	}
+
+	// "Open with" reopens the open document under another tool, and it's the
+	// focused panel that's open: focus this one first.
+	function openWith(panelId: string | undefined, url: AutomergeUrl, toolId: string) {
+		const panel = panelId === undefined ? undefined : api?.getPanel(panelId)
+		if (!panel) return
+		panel.api.setActive()
+		element.dispatchEvent(
+			new CustomEvent("patchwork:open-document", {
+				detail: {url, toolId},
+				bubbles: true,
+				composed: true,
+			})
+		)
+	}
 }
 
 function DockPanel(props: {
@@ -255,10 +316,20 @@ function DockPanel(props: {
 	repo: Repo
 	draftKey: Accessor<string>
 	setTitle(title: string): void
+	setTool(toolId: string | undefined): void
 }) {
 	const docUrl = () => props.route().resolved.docUrl
 	const title = useDocTitle(props.repo, docUrl)
 	createEffect(() => props.setTitle(docUrl() ? (title() ?? "") : "Nothing open"))
+	// Only the document's own view: the titlebar tools, and views inside the
+	// document, mount too.
+	const reportTool = (view: HTMLElement) => {
+		view.addEventListener("patchwork:mounted", event => {
+			if (event.target !== view) return
+			const detail = (event as CustomEvent<{toolId?: string}>).detail
+			props.setTool(detail?.toolId)
+		})
+	}
 	return (
 		<Show when={docUrl()} fallback={<p class="projects__empty">{EMPTY}</p>}>
 			{url => (
@@ -276,6 +347,7 @@ function DockPanel(props: {
 								</div>
 							</header>
 							<patchwork-view
+								ref={reportTool}
 								class="projects__document"
 								doc-url={url()}
 								tool-id={props.route().location.toolId}
