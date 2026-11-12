@@ -1,0 +1,27 @@
+{
+  "name": "@gaios/compare-modes",
+  "title": "Compare modes",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Ways to show two versions of a document: one of them, side by side, stacked, onion skin, swipe, inline.",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@inkandswitch/patchwork-bootloader": "^0.7.2",
+    "@inkandswitch/patchwork-plugins": "^1.2.5",
+    "happy-dom": "^15.11.7",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.4"
+  }
+}
