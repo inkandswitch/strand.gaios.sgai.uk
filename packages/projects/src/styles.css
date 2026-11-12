@@ -417,11 +417,22 @@
 	border-color: color-mix(in oklch, var(--projects-fg) 18%, transparent);
 }
 
-/* a drop just under a tab bar adds a tab: the highlight shrinks to a line
-   under the tabs instead of the half a split above would take */
-.projects__dock[data-drop="tab"] .dv-drop-target-selection:is(.dv-drop-target-top, .dv-drop-target-center) {
-	top: 0 !important;
-	height: 3px !important;
+/* a drop on a tab bar, or just under it, adds a tab: a ghost of it shows at
+   the end of the tabs instead of dockview's highlight */
+.projects__dock[data-drop="tab"] .dv-drop-target-selection {
+	visibility: hidden !important;
+}
+
+.projects__dock-theme .projects__ghost-tab {
+	pointer-events: none;
+	max-width: 12rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--projects-fg);
+	background: color-mix(in oklch, var(--projects-lane-current) 12%, var(--projects-surface));
+	box-shadow: inset 0 -2px 0 var(--projects-lane-current);
+	opacity: 0.8;
 }
 
 .projects__dock-theme .dv-watermark {

@@ -38,6 +38,8 @@ const EMPTY = "Open something from the project, or make something new."
 
 /** what a sidebar row's drag carries its location as (sideboard's `LOCATION_TYPE`) */
 const LOCATION_TYPE = "text/x-patchwork-location"
+/** and its name (sideboard's `NAME_TYPE_PREFIX`) */
+const NAME_TYPE_PREFIX = "text/x-patchwork-name-"
 
 const THEME: DockviewTheme = {
 	...themeLight,
@@ -130,22 +132,64 @@ export function Dock(props: {
 
 	// A row dragged out of the sidebar opens where it's dropped: in the
 	// middle of a group in place of what it shows, on its tab bar or just
-	// under it as a new tab, at its edges or the dock's beside it.
+	// under it as a new tab (shown there as one while it's over it), at its
+	// edges beside it. The dock's own edges only take a drop when it's empty:
+	// a group's edges already split.
 	function takeDrops(dock: DockviewApi) {
+		const ghost = ghostTab()
+		const onLeave = (event: DragEvent) => {
+			if (!element.contains(event.relatedTarget as Node | null)) ghost.clear()
+		}
+		element.addEventListener("dragleave", onLeave)
+		document.addEventListener("dragend", ghost.clear)
 		return [
 			dock.onUnhandledDragOver(event => {
-				if (!carriesLocation(event.nativeEvent)) return
+				const native = event.nativeEvent
+				if (!(native instanceof DragEvent) || !carriesLocation(native)) return
+				if (event.target === "edge" && dock.totalPanels) return ghost.clear()
 				event.accept()
-				if (intoTabs(event)) element.dataset.drop = "tab"
-				else delete element.dataset.drop
+				if (intoTabs(event)) {
+					ghost.show(event.group!, draggedName(native))
+					element.dataset.drop = "tab"
+				} else {
+					ghost.clear()
+				}
 			}),
 			dock.onDidDrop(event => {
-				delete element.dataset.drop
+				ghost.clear()
 				if (event.getData() || !(event.nativeEvent instanceof DragEvent)) return
 				const url = event.nativeEvent.dataTransfer?.getData(LOCATION_TYPE)
 				if (url) open(url, dropPlacement(event))
 			}),
+			{
+				dispose() {
+					element.removeEventListener("dragleave", onLeave)
+					document.removeEventListener("dragend", ghost.clear)
+					ghost.clear()
+				},
+			},
 		]
+
+		function ghostTab() {
+			let shown: {group: string; tab: HTMLElement} | undefined
+			const clear = () => {
+				delete element.dataset.drop
+				shown?.tab.remove()
+				shown = undefined
+			}
+			const show = (group: DockviewGroupPanel, name: string) => {
+				if (shown?.group === group.id) return
+				clear()
+				const tabs = group.element.querySelector(".dv-tabs-container")
+				if (!tabs) return
+				const tab = document.createElement("div")
+				tab.className = "dv-tab projects__ghost-tab"
+				tab.textContent = name
+				tabs.append(tab)
+				shown = {group: group.id, tab}
+			}
+			return {show, clear}
+		}
 	}
 
 	function open(url: string, placement: Placement | undefined) {
@@ -311,13 +355,23 @@ function positionFor(
 	if ("edge" in placement) return {direction: placement.to}
 	const named = placement.group
 	const referenceGroup = named && api.getGroup(named) ? named : focusedGroup
+	// a new tab goes last, where a drag shows it coming
+	const index = api.getGroup(referenceGroup)?.panels.length
 	return placement.to === "tab"
-		? {referenceGroup}
+		? {referenceGroup, index}
 		: {referenceGroup, direction: placement.to}
 }
 
-function carriesLocation(event: DragEvent | PointerEvent) {
-	return event instanceof DragEvent && !!event.dataTransfer?.types.includes(LOCATION_TYPE)
+function carriesLocation(event: DragEvent) {
+	return !!event.dataTransfer?.types.includes(LOCATION_TYPE)
+}
+
+// See sideboard's `nameType`.
+function draggedName(event: DragEvent) {
+	const type = event.dataTransfer?.types.find(type => type.startsWith(NAME_TYPE_PREFIX))
+	const hex = type?.slice(NAME_TYPE_PREFIX.length).match(/../g)
+	if (!hex) return "New tab"
+	return new TextDecoder().decode(new Uint8Array(hex.map(byte => parseInt(byte, 16))))
 }
 
 type DropAt = {
