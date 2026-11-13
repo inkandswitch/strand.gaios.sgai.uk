@@ -1,4 +1,4 @@
-import {onCleanup} from "solid-js"
+import {createMemo, onCleanup, Show, type Accessor} from "solid-js"
 import {
 	EditorView,
 	lineNumbers,
@@ -31,7 +31,7 @@ import {automergeSyncPlugin} from "@automerge/automerge-codemirror"
 import {isImmutableStringFileDoc} from "../datatype"
 import {collectExtensions} from "./codemirror-extensions"
 import {createFileComments} from "./comments"
-import {createDraftDiff} from "./draft-diff"
+import {diffEditor, useDraftCompare, type DraftCompare} from "./draft-diff"
 import codemirrorTheme from "../codemirror-theme"
 import {getLanguageExtension} from "../languages"
 import type {FileDoc} from "../types"
@@ -85,13 +85,38 @@ const lspLanguage = (extension?: string): string | undefined => {
 	return LSP_LANGUAGES[ext.toLowerCase()]
 }
 
-export function TextFileEditor(props: {
+type EditorProps = {
 	doc: FileDoc
 	handle: any
 	element?: HTMLElement
-}) {
-	let container!: HTMLDivElement
+}
 
+// Side by side, the other version is laid out beside the editor, so it's
+// rebuilt going in or out of it.
+export function TextFileEditor(props: EditorProps) {
+	const compare =
+		props.handle && props.element ? useDraftCompare(props.element) : () => undefined
+	const beside = createMemo(() => compare()?.mode === "side-by-side")
+	return (
+		<Show
+			when={beside()}
+			fallback={
+				<Editor doc={props.doc} handle={props.handle} element={props.element} compare={compare} />
+			}>
+			<Editor
+				doc={props.doc}
+				handle={props.handle}
+				element={props.element}
+				compare={compare}
+				beside
+			/>
+		</Show>
+	)
+}
+
+function Editor(
+	props: EditorProps & {compare: Accessor<DraftCompare | undefined>; beside?: boolean},
+) {
 	const languageExtension = getLanguageExtension(
 		props.doc.extension,
 		props.doc.mimeType,
@@ -105,13 +130,18 @@ export function TextFileEditor(props: {
 		props.handle && props.element
 			? createFileComments({handle: props.handle, element: props.element})
 			: undefined
-	const diff =
-		props.handle && props.element
-			? createDraftDiff({element: props.element})
-			: undefined
-
-	const view = new EditorView({
+	const editor = diffEditor({
 		doc: props.doc.content?.toString() || "",
+		compare: props.compare,
+		beside: !!props.beside,
+		besideExtensions: [
+			lineNumbers(),
+			highlightSpecialChars(),
+			EditorState.tabSize.of(2),
+			EditorView.lineWrapping,
+			languageExtension,
+			...codemirrorTheme,
+		],
 		extensions: [
 			lineNumbers(),
 			highlightSpecialChars(),
@@ -152,13 +182,12 @@ export function TextFileEditor(props: {
 			...codemirrorTheme,
 			automergeSyncPlugin({handle: props.handle, path: ["content"]}),
 			comments?.extension ?? [],
-			diff?.extension ?? [],
 			// last, so they can override anything above
 			collectExtensions(props.element, props.handle, props.doc, false),
 		],
 	})
+	const view = editor.view
 	comments?.attach(view)
-	diff?.attach(view)
 
 	// For code files, connect to the shared TypeScript language server (tsgo,
 	// in a worker) and add its features to the editor in place. Each document
@@ -188,7 +217,7 @@ export function TextFileEditor(props: {
 	}
 
 	onCleanup(() => {
-		view.destroy()
+		editor.destroy()
 	})
 
 	// cmd+= / cmd+- / cmd+0 (ctrl off a Mac) resize the editor's text instead
@@ -207,21 +236,19 @@ export function TextFileEditor(props: {
 		else return
 		event.preventDefault()
 		event.stopPropagation()
-		if (step == 0) {
-			view.dom.style.fontSize = ""
-		} else {
-			const size = parseFloat(getComputedStyle(view.dom).fontSize)
-			view.dom.style.fontSize = `${Math.max(MIN_FONT_SIZE, size + step)}px`
+		const size = parseFloat(getComputedStyle(view.dom).fontSize)
+		for (const each of editor.views) {
+			each.dom.style.fontSize =
+				step == 0 ? "" : `${Math.max(MIN_FONT_SIZE, size + step)}px`
+			each.requestMeasure()
 		}
-		view.requestMeasure()
 	}
 
 	return (
 		<div
 			onKeyDown={zoom}
 			ref={(el) => {
-				container = el
-				el.appendChild(view.dom)
+				el.appendChild(editor.dom)
 			}}
 			style={{
 				width: "100%",

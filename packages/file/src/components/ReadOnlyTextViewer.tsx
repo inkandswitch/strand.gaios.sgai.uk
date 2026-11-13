@@ -1,4 +1,4 @@
-import {onCleanup} from "solid-js"
+import {createMemo, onCleanup, Show, type Accessor} from "solid-js"
 import type {DocHandle} from "@automerge/automerge-repo/slim"
 import {
 	EditorView,
@@ -19,16 +19,42 @@ import type {FileDoc} from "../types"
 import {fileText} from "../datatype"
 import {collectExtensions} from "./codemirror-extensions"
 import {createFileComments} from "./comments"
-import {createDraftDiff} from "./draft-diff"
+import {diffEditor, useDraftCompare, type DraftCompare} from "./draft-diff"
 
-// Read-only text: ImmutableString files, and any text file opened through a
-// read-only handle. It follows the file as it changes (an ImmutableString is
-// replaced whole, so the view is too).
-export function ReadOnlyTextViewer(props: {
+type ViewerProps = {
 	doc: FileDoc
 	handle?: DocHandle<FileDoc>
 	element?: HTMLElement
-}) {
+}
+
+// Read-only text: ImmutableString files, and any text file opened through a
+// read-only handle. It follows the file as it changes (an ImmutableString is
+// replaced whole, so the view is too). Side by side, the other version is
+// laid out beside it, so it's rebuilt going in or out of it.
+export function ReadOnlyTextViewer(props: ViewerProps) {
+	const compare =
+		props.handle && props.element ? useDraftCompare(props.element) : () => undefined
+	const beside = createMemo(() => compare()?.mode === "side-by-side")
+	return (
+		<Show
+			when={beside()}
+			fallback={
+				<Viewer doc={props.doc} handle={props.handle} element={props.element} compare={compare} />
+			}>
+			<Viewer
+				doc={props.doc}
+				handle={props.handle}
+				element={props.element}
+				compare={compare}
+				beside
+			/>
+		</Show>
+	)
+}
+
+function Viewer(
+	props: ViewerProps & {compare: Accessor<DraftCompare | undefined>; beside?: boolean},
+) {
 	const languageExtension = getLanguageExtension(
 		props.doc.extension,
 		props.doc.mimeType,
@@ -40,13 +66,19 @@ export function ReadOnlyTextViewer(props: {
 		props.handle && props.element
 			? createFileComments({handle: props.handle, element: props.element})
 			: undefined
-	const diff =
-		props.handle && props.element
-			? createDraftDiff({element: props.element})
-			: undefined
 
-	const view = new EditorView({
+	const editor = diffEditor({
 		doc: fileText(props.handle?.doc() ?? props.doc),
+		compare: props.compare,
+		beside: !!props.beside,
+		besideExtensions: [
+			lineNumbers(),
+			highlightSpecialChars(),
+			EditorState.tabSize.of(2),
+			EditorView.lineWrapping,
+			languageExtension,
+			...codemirrorTheme,
+		],
 		extensions: [
 			EditorState.readOnly.of(true),
 			EditorView.editable.of(false),
@@ -64,12 +96,11 @@ export function ReadOnlyTextViewer(props: {
 			languageExtension,
 			...codemirrorTheme,
 			comments?.extension ?? [],
-			diff?.extension ?? [],
 			// last, so they can override anything above
 			collectExtensions(props.element, props.handle, props.doc, true),
 		],
 	})
-	diff?.attach(view)
+	const view = editor.view
 
 	const follow = () => {
 		const text = fileText(props.handle?.doc())
@@ -81,13 +112,13 @@ export function ReadOnlyTextViewer(props: {
 
 	onCleanup(() => {
 		props.handle?.off("change", follow)
-		view.destroy()
+		editor.destroy()
 	})
 
 	return (
 		<div
 			ref={(el) => {
-				el.appendChild(view.dom)
+				el.appendChild(editor.dom)
 			}}
 			style={{
 				width: "100%",
