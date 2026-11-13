@@ -13,8 +13,15 @@ import {
 // each segment an entry's name, or its document id when the name is empty or
 // a sibling's too.
 type Place = { path: string; location: AutomergeUrl };
-type Link = { url: AutomergeUrl; name: string; folder: boolean };
-export type Node = Place & { folder: DocHandle<unknown> | null };
+type Link = { url: AutomergeUrl; name: string; folder: boolean; type?: string };
+// `parent` is the folder linking it, null for the root; `type` the one its
+// link gives, if any.
+export type Node = Place & {
+  name: string;
+  type: string | undefined;
+  parent: AutomergeUrl | null;
+  folder: DocHandle<unknown> | null;
+};
 export type Tree = Map<AutomergeUrl, Node>;
 
 /**
@@ -29,7 +36,8 @@ export function linksOf(doc: unknown): Link[] {
       const url = asUrl(entry?.url);
       if (!url) return [];
       const type = asString(entry?.type);
-      return [{ url, name: asString(entry?.name) ?? "", folder: isFolderType(type) }];
+      const link: Link = { url, name: asString(entry?.name) ?? "", folder: isFolderType(type) };
+      return [type ? { ...link, type } : link];
     });
   }
   if (isDirectory(d)) {
@@ -44,8 +52,7 @@ export function linksOf(doc: unknown): Link[] {
 // The tree under `root` as the draft has it, by doc. Only folders are loaded.
 export async function walkTree(repo: Repo, root: AutomergeUrl): Promise<Tree> {
   const tree: Tree = new Map();
-  const visit = async (url: AutomergeUrl, place: Place): Promise<void> => {
-    const node: Node = { ...place, folder: null };
+  const visit = async (url: AutomergeUrl, node: Node): Promise<void> => {
     tree.set(url, node);
     const handle = await find(repo, url);
     if (!handle) return;
@@ -55,13 +62,26 @@ export async function walkTree(repo: Repo, root: AutomergeUrl): Promise<Tree> {
     const folders: Promise<void>[] = [];
     for (const link of links) {
       if (tree.has(link.url)) continue;
-      const child = childPlace(place, link, links);
+      const child: Node = {
+        ...childPlace(node, link, links),
+        name: link.name || "Untitled",
+        type: link.type,
+        parent: url,
+        folder: null,
+      };
       if (link.folder) folders.push(visit(link.url, child));
-      else tree.set(link.url, { ...child, folder: null });
+      else tree.set(link.url, child);
     }
     await Promise.all(folders);
   };
-  await visit(root, { path: "", location: root });
+  await visit(root, {
+    path: "",
+    location: root,
+    name: "",
+    type: undefined,
+    parent: null,
+    folder: null,
+  });
   return tree;
 }
 

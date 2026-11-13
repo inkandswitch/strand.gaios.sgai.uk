@@ -14,4 +14,4 @@ export const plugins: Plugin<any>[] = [
 ];
 
 export type { CompareAgainst, CompareChanges, ComparedVersion } from "./provider.js";
-export type { Side } from "./compare.js";
+export type { CompareMark, Ghost, Mark, MergeMark } from "./compare.js";
