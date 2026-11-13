@@ -1,16 +1,17 @@
 import type { Plugin } from "@inkandswitch/patchwork-plugins";
 
 export const plugins: Plugin<any>[] = [
-  // Mounts inside the draft provider: what the checked-out draft changed.
+  // Mounts inside the draft provider: the checked-out draft compared with another.
   {
     type: "patchwork:component",
-    id: "patchwork-review-provider",
-    name: "Review Provider",
+    id: "patchwork-compare-provider",
+    name: "Compare Provider",
     async load() {
-      const { ReviewProvider } = await import("./provider.js");
-      return ReviewProvider;
+      const { CompareProvider } = await import("./provider.js");
+      return CompareProvider;
     },
   },
 ];
 
-export type { ChangeView } from "./provider.js";
+export type { CompareAgainst, CompareChanges, ComparedVersion } from "./provider.js";
+export type { Side } from "./compare.js";

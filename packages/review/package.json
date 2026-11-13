@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "Review a draft: a provider of the files it changed, and the folders they're in, for the file tree to mark and filter by.",
+  "description": "Compare the checked-out draft with another: a provider that mounts the other draft beside it, and answers which files differ, whose changes they are, and the other draft's version of a document.",
   "main": "./dist/index.js",
   "scripts": {
     "dev": "vite build --watch",
@@ -13,9 +13,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@automerge/automerge": "3.3.2",
     "@automerge/automerge-repo": "2.6.0-subduction.47",
     "@inkandswitch/patchwork-providers": "^0.5.2",
-    "diff": "^8.0.2",
     "solid-js": "^1.9.14"
   },
   "devDependencies": {
