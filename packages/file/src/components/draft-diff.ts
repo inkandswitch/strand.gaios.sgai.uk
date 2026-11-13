@@ -37,14 +37,17 @@ export function createDraftDiff(props: {element: HTMLElement}) {
 					effects: compartment.reconfigure(
 						current === undefined
 							? []
-							: unifiedMergeView({
-									original: current.original,
-									mergeControls: false,
-									syntaxHighlightDeletions: true,
-									collapseUnchanged: current.collapsed
-										? {margin: 3, minSize: 4}
-										: undefined,
-								}),
+							: [
+									unifiedMergeView({
+										original: current.original,
+										mergeControls: false,
+										syntaxHighlightDeletions: true,
+										collapseUnchanged: current.collapsed
+											? {margin: 3, minSize: 4}
+											: undefined,
+									}),
+									DIFF_COLOURS,
+								],
 					),
 				})
 				if (current === undefined || scrolled) return
@@ -60,6 +63,26 @@ export function createDraftDiff(props: {element: HTMLElement}) {
 
 	return {extension: compartment.of([]), attach}
 }
+
+// What's only in this version and only in the other, in the colours the
+// panel showing it gives them.
+const INSERTED = "var(--compare-inserted, #22bb22)"
+const DELETED = "var(--compare-deleted, #ee4433)"
+const tint = (colour: string, amount: number) =>
+	`color-mix(in srgb, ${colour} ${amount}%, transparent)`
+const underline = (colour: string) =>
+	`linear-gradient(${tint(colour, 60)}, ${tint(colour, 60)}) bottom/100% 2px no-repeat !important`
+
+const DIFF_COLOURS = EditorView.theme({
+	".cm-changedLine, .cm-inlineChangedLine": {
+		backgroundColor: `${tint(INSERTED, 10)} !important`,
+	},
+	".cm-changedText": {background: underline(INSERTED)},
+	".cm-deletedChunk": {backgroundColor: `${tint(DELETED, 9)} !important`},
+	".cm-deletedChunk .cm-deletedText": {background: underline(DELETED)},
+	".cm-changedLineGutter": {background: `${INSERTED} !important`},
+	".cm-deletedLineGutter": {background: `${DELETED} !important`},
+})
 
 // The text to show changes against, and whether to fold what didn't change:
 // undefined outside the two modes; empty when the other draft doesn't have
