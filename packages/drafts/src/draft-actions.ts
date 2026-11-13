@@ -53,6 +53,22 @@ export async function mergeIntoParent(
   return landedOn(repo, draft.doc()?.parent);
 }
 
+// Merge a draft into another live draft (null = main) that isn't forked from
+// it, and return that draft.
+export async function mergeInto(
+  repo: Repo,
+  root: DocHandle<HasDrafts>,
+  draftUrl: AutomergeUrl,
+  intoUrl: AutomergeUrl | null
+): Promise<AutomergeUrl | null> {
+  const [draft, into] = await Promise.all([
+    repo.find<DraftDoc>(draftUrl),
+    intoUrl ? repo.find<DraftDoc>(intoUrl) : ensureMainDraft(repo, root),
+  ]);
+  await mergeDraft(repo, draft, into);
+  return intoUrl;
+}
+
 // Unlink a draft from its parent, which drops it, and every draft forked
 // from it, out of the list. Nothing is merged and its docs stay where they
 // are. Returns the parent, or null for main.

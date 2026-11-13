@@ -84,19 +84,21 @@ function forkEntry(
   return from && from !== url ? { source: from, clonedAt } : { clonedAt };
 }
 
-// Merges every cloned doc back into the parent draft's copy of it — the
-// parent's clone, or the original when the parent never forked the doc —
-// recording per-clone merge heads for auditing, and marks the draft as merged
-// (which hides it from the list). A parent that only recorded a fork point
-// for the doc is cloned there first, so the merge lands in the parent rather
-// than the original. The merged draft's children are handed up to the merge
-// target, so they never dangle under a hidden draft.
+// Merges every cloned doc into the target draft's copy of it — the target's
+// clone, or the original when the target never forked the doc — recording
+// per-clone merge heads for auditing, and marks the draft as merged (which
+// hides it from the list). The target is `into`, or else the parent. A
+// target that only recorded a fork point for the doc is cloned there first,
+// so the merge lands in the target rather than the original. The merged
+// draft's children are handed to the target, so they never dangle under a
+// hidden draft; `into` mustn't be one of them.
 export async function mergeDraft(
   repo: Repo,
-  draftHandle: DocHandle<DraftDoc>
+  draftHandle: DocHandle<DraftDoc>,
+  into?: DocHandle<DraftDoc>
 ): Promise<void> {
   const doc = draftHandle.doc();
-  const parentHandle = await findMergeTarget(repo, doc?.parent);
+  const parentHandle = into ?? (await findMergeTarget(repo, doc?.parent));
   const entries = Object.entries(doc?.clones ?? {}) as [
     AutomergeUrl,
     CloneEntry,

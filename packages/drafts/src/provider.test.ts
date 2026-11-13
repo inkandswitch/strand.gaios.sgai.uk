@@ -122,6 +122,36 @@ describe("the draft provider", () => {
     dispose();
   });
 
+  it("merges a draft into a sibling, handing it the draft's children", async () => {
+    const { child, dispose } = workspace();
+    const drafts = watch(child);
+    const { main } = await drafts.until((s) => s.status === "ready");
+    const create = (from: AutomergeUrl) =>
+      request<{ draft: AutomergeUrl }>(child, { type: "draft:create", from });
+    const { draft: sibling } = await create(main);
+    const { draft } = await create(main);
+    const { draft: grandchild } = await create(draft);
+    await drafts.until((s) => s.drafts.length === 4);
+
+    const refused = await Promise.race([
+      request(child, { type: "draft:merge", draft, into: grandchild }),
+      new Promise((wake) => setTimeout(() => wake("unanswered"), 50)),
+    ]);
+    expect(refused).toBe("unanswered");
+
+    await request(child, { type: "draft:checkout", draft });
+    const { into } = await request<{ into: AutomergeUrl }>(child, {
+      type: "draft:merge",
+      draft,
+      into: sibling,
+    });
+    expect(into).toBe(sibling);
+    const state = await drafts.until((s) => s.drafts.length === 3 && s.checkedOut === sibling);
+    expect(state.drafts.find((entry) => entry.url === grandchild)?.parent).toBe(sibling);
+    drafts.stop();
+    dispose();
+  });
+
   it("renames drafts, main included", async () => {
     const { child, dispose } = workspace();
     const drafts = watch(child);

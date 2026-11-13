@@ -8,6 +8,7 @@ import { accept, type SubscribeEvent } from "@inkandswitch/patchwork-providers";
 
 import type {
   DraftDoc,
+  DraftEntry,
   DraftSelection,
   DraftStatus,
   DraftsState,
@@ -15,7 +16,7 @@ import type {
 import {
   deleteDraft,
   forkDraft,
-  mergeIntoParent,
+  mergeInto,
   renameDraft,
 } from "../draft-actions.js";
 import { DraftRepo, baseRepo, type HandleDescriptor } from "../draft-repo.js";
@@ -33,8 +34,9 @@ const VERIFY_TIMEOUT_MS = 5000;
 //     every handle reads it
 //   - `draft:create { from }` → forks `from`, checks the new draft out,
 //     answers `{ draft }`
-//   - `draft:merge { draft }` → merges it into its parent, answers
-//     `{ into }`; checks that out if the draft was checked out
+//   - `draft:merge { draft, into? }` → merges it into `into`, or its parent,
+//     answers `{ into }`; checks that out if the draft was checked out.
+//     `into` can't be the draft or forked from it
 //   - `draft:delete { draft }` → unlinks it, answers `{ parent }`; checks
 //     that out if the draft was checked out
 //   - `draft:rename { draft, name }` → renames it, answers `{ name }`
@@ -135,9 +137,12 @@ export const DraftProvider = (
       case "draft:merge": {
         const target = draftIn(selector.draft);
         if (!drafts || !target) return;
+        const into = selector.into === undefined ? parentOf(target) : draftIn(selector.into);
+        if (into === undefined || !canMergeInto(target, into)) return;
+        // Checked out first: a checked-out draft that goes away falls back to main.
         command(event, async () => {
-          const into = await mergeIntoParent(repo, target);
           if (selection.checkedOut === target) await select(into);
+          await mergeInto(repo, await drafts.root(), target, into);
           return { into: external(into) };
         });
         return;
@@ -145,10 +150,11 @@ export const DraftProvider = (
 
       case "draft:delete": {
         const target = draftIn(selector.draft);
-        if (!drafts || !target) return;
+        const parent = target ? parentOf(target) : undefined;
+        if (!drafts || !target || parent === undefined) return;
         command(event, async () => {
-          const parent = await deleteDraft(repo, target);
           if (selection.checkedOut === target) await select(parent);
+          await deleteDraft(repo, target);
           return { parent: external(parent) };
         });
         return;
@@ -229,6 +235,30 @@ export const DraftProvider = (
 
   function external(url: AutomergeUrl | null): AutomergeUrl {
     return url ?? drafts?.list().main ?? rootUrl!;
+  }
+
+  // The listed draft `draft` was forked off: null for main, undefined when
+  // `draft` isn't listed.
+  function parentOf(draft: AutomergeUrl): AutomergeUrl | null | undefined {
+    const parent = listed().get(draft)?.parent;
+    return parent ? draftIn(parent) : undefined;
+  }
+
+  // Whether `draft` can merge into `into` (null for main): a listed draft
+  // that isn't `draft` or forked from it.
+  function canMergeInto(draft: AutomergeUrl, into: AutomergeUrl | null): boolean {
+    const byUrl = listed();
+    let cursor = byUrl.get(external(into));
+    if (!cursor) return false;
+    while (cursor) {
+      if (cursor.url === draft) return false;
+      cursor = cursor.parent ? byUrl.get(cursor.parent) : undefined;
+    }
+    return true;
+  }
+
+  function listed(): Map<AutomergeUrl, DraftEntry> {
+    return new Map(drafts!.list().drafts.map((entry) => [entry.url, entry]));
   }
 
   // Both the draft router (the starting draft confirmed, or a draft gone)
