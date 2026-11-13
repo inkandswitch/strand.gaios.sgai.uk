@@ -102,8 +102,9 @@ export const Swipe: CompareModeImplementation<At> = {
   },
 };
 
-// Drawn by the view: the other version's changes marked in this one.
-export const Inline: CompareModeImplementation = {};
+// Drawn by the view: both versions in one, the other's changes marked in
+// this one.
+export const Combined: CompareModeImplementation = {};
 
 function hide(element: HTMLElement) {
   element.hidden = true;

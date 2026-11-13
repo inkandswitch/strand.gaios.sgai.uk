@@ -24,7 +24,7 @@ export const plugins: Mode[] = [
     "OnionSkin"
   ),
   mode("swipe", "Swipe", new URL("./icons/swipe.svg", import.meta.url), false, "Swipe"),
-  mode("inline", "Inline", new URL("./icons/inline.svg", import.meta.url), false, "Inline"),
+  mode("inline", "Combined", new URL("./icons/combined.svg", import.meta.url), false, "Combined"),
 ];
 
 function mode(
