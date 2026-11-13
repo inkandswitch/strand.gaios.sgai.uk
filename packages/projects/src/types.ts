@@ -33,3 +33,10 @@ export type DraftEntry = {
 
 /** The compare provider's `compare:against`. */
 export type CompareAgainst = {draft: AutomergeUrl; previewing: boolean} | null
+
+/** The compare provider's `compare:changes`: what differs, by file and folder. */
+export type CompareChanges = {
+	status: "off" | "loading" | "ready"
+	files: Record<AutomergeUrl, "ours" | "theirs" | "both">
+	folders: Record<AutomergeUrl, "ours" | "theirs" | "both">
+}
