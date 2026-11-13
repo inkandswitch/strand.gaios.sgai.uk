@@ -3,7 +3,7 @@ import {request, subscribe, type Selector} from "@inkandswitch/patchwork-provide
 import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type JSX} from "solid-js"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 import type {CompareAgainst, CompareChanges, DraftEntry, DraftsState} from "./types.ts"
-import {NameInput, SidebarIcon} from "./workspaces.tsx"
+import {NameInput, ShowWorkspaces} from "./workspaces.tsx"
 
 /**
  * The workspace card's header: its name, then the checked-out draft as a
@@ -19,7 +19,8 @@ export function WorkspaceHeader(props: {
 	compared: AutomergeUrl | undefined
 	/** inside the compare provider, where requests go from */
 	element: HTMLElement
-	toggleSidebar(): void
+	/** unset while the workspace list is shown */
+	showSidebar: (() => void) | undefined
 }) {
 	const [renaming, setRenaming] = createSignal(false)
 	const [changes, setChanges] = createSignal<CompareChanges>()
@@ -48,14 +49,7 @@ export function WorkspaceHeader(props: {
 
 	return (
 		<header class="projects__card-header">
-			<button
-				type="button"
-				class="projects__icon-button"
-				title="Workspaces"
-				aria-label="Show or hide workspaces"
-				onClick={() => props.toggleSidebar()}>
-				<SidebarIcon />
-			</button>
+			<ShowWorkspaces show={props.showSidebar} />
 			<h1 class="projects__workspace-title">{props.name}</h1>
 			<Show when={ours()}>
 				{checkedOut => (
@@ -94,6 +88,7 @@ export function WorkspaceHeader(props: {
 										class="projects__token projects__token--theirs"
 										classList={{"projects__token--preview": props.against?.previewing}}
 										title="Compared with">
+										<span class="projects__token-dot" aria-hidden="true" />
 										<span class="projects__token-name">{compared().name}</span>
 										<button
 											type="button"
@@ -206,6 +201,9 @@ function DraftMenu(props: {
 				aria-haspopup="menu"
 				title="Drafts"
 				popovertarget={id}>
+				<Show when={props.comparing}>
+					<span class="projects__token-dot" aria-hidden="true" />
+				</Show>
 				<span class="projects__token-name">{props.ours.name}</span>
 				<CaretIcon />
 			</button>

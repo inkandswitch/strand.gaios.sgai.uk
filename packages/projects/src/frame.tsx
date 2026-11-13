@@ -13,7 +13,7 @@ import {addToRecents} from "./recents.ts"
 import {provideSelection} from "./selection.ts"
 import styles from "./styles.css?inline"
 import type {AccountDoc} from "./types.ts"
-import {SidebarIcon, WorkspaceList} from "./workspaces.tsx"
+import {ShowWorkspaces, WorkspaceList} from "./workspaces.tsx"
 
 const SIDEBAR_KEY = "gaios-projects:workspaces"
 
@@ -59,6 +59,7 @@ function Frame(props: {
 		setSidebar(open)
 		localStorage.setItem(SIDEBAR_KEY, open ? "shown" : "hidden")
 	}
+	const showSidebar = () => (sidebar() ? undefined : toggleSidebar)
 
 	// The open project, once it's the one whose drafts are mounted.
 	const shown = (scope: DraftScope) => {
@@ -90,14 +91,7 @@ function Frame(props: {
 						<Show when={navigation.route().page === "home"}>
 							<div class="projects__card projects__card--empty">
 								<header class="projects__card-header">
-									<button
-										type="button"
-										class="projects__icon-button"
-										title="Workspaces"
-										aria-label="Show or hide workspaces"
-										onClick={toggleSidebar}>
-										<SidebarIcon />
-									</button>
+									<ShowWorkspaces show={showSidebar()} />
 								</header>
 								<p class="projects__empty">Open a workspace, or make a new one.</p>
 							</div>
@@ -105,7 +99,7 @@ function Frame(props: {
 						<Show when={navigation.route().page === "packages"}>
 							<PackagesPage
 								url={account()?.moduleSettingsUrl}
-								toggleSidebar={toggleSidebar}
+								showSidebar={showSidebar()}
 							/>
 						</Show>
 						<Show when={navigation.scope()} keyed>
@@ -119,7 +113,7 @@ function Frame(props: {
 												siteTitle={props.siteTitle}
 												focus={navigation.focus}
 												compare={navigation.compare}
-												toggleSidebar={toggleSidebar}
+												showSidebar={showSidebar()}
 											/>
 										)}
 									</Show>

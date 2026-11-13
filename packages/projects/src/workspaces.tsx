@@ -161,8 +161,26 @@ function ChevronLeftIcon() {
 	)
 }
 
+/** Brings the workspace list back, while it's collapsed: `show` is unset otherwise. */
+export function ShowWorkspaces(props: {show: (() => void) | undefined}) {
+	return (
+		<Show when={props.show}>
+			{show => (
+				<button
+					type="button"
+					class="projects__icon-button"
+					title="Show workspaces"
+					aria-label="Show workspaces"
+					onClick={() => show()()}>
+					<SidebarIcon />
+				</button>
+			)}
+		</Show>
+	)
+}
+
 // lucide `panel-left`
-export function SidebarIcon() {
+function SidebarIcon() {
 	return (
 		<svg
 			xmlns="http://www.w3.org/2000/svg"

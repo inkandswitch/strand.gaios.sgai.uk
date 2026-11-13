@@ -21,7 +21,8 @@ export function ProjectView(props: {
 	siteTitle: string
 	focus(panel: ProjectRoute | undefined): void
 	compare(draft: AutomergeUrl | undefined): void
-	toggleSidebar(): void
+	/** unset while the workspace list is shown */
+	showSidebar: (() => void) | undefined
 }) {
 	const docUrl = () => props.route.resolved.docUrl
 	const projectName = () => props.route.resolved.projectName
@@ -103,11 +104,10 @@ export function ProjectView(props: {
 									against={against()}
 									compared={compared()}
 									element={at()}
-									toggleSidebar={props.toggleSidebar}
+									showSidebar={props.showSidebar}
 								/>
 								<div class="projects__body">
-									<aside class="projects__files">
-										<h2 class="projects__label">Files</h2>
+									<aside class="projects__files" aria-label="Files">
 										<patchwork-view
 											class="projects__panel"
 											tool-id="chee/document-list"

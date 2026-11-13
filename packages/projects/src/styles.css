@@ -74,7 +74,7 @@
 	font-family: var(--projects-family);
 }
 
-.projects button {
+:where(.projects) button {
 	font: inherit;
 	color: inherit;
 	cursor: var(--studio-cursor-pointer, pointer);
@@ -310,21 +310,20 @@ button.projects__token:hover {
 	background: var(--projects-hover);
 }
 
-.projects__token--ours {
-	border-color: var(--projects-ours);
-	background: var(--projects-ours-fill);
-	color: var(--projects-ours-ink);
-}
-
-button.projects__token--ours:hover {
-	background: color-mix(in oklch, var(--projects-ours) 22%, var(--projects-surface));
+.projects__token-dot {
+	flex: none;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--projects-ours);
 }
 
 .projects__token--theirs {
 	padding-right: 0;
-	border-color: var(--projects-theirs);
-	background: var(--projects-theirs-fill);
-	color: var(--projects-theirs-ink);
+}
+
+.projects__token--theirs .projects__token-dot {
+	background: var(--projects-theirs);
 }
 
 .projects__token--preview {
@@ -351,7 +350,7 @@ button.projects__token--ours:hover {
 	border: none;
 	border-radius: 0 var(--projects-radius-lg) var(--projects-radius-lg) 0;
 	background: none;
-	color: color-mix(in oklch, var(--projects-theirs) 70%, black);
+	color: var(--projects-muted);
 	font-size: 0.95rem;
 	line-height: 1;
 }
@@ -526,10 +525,16 @@ button.projects__token--ours:hover {
 	--document-list-ours: var(--projects-ours);
 	--document-list-theirs: var(--projects-theirs);
 	--document-list-danger: var(--projects-danger);
+	--document-list-padding-x: 0;
+	--document-list-top-margin: var(--projects-space-xs);
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	padding: var(--projects-space-sm) var(--projects-space-xs) 0;
+}
+
+.projects__files .document-list__doclist {
+	border-radius: 0;
+	box-shadow: none;
 }
 
 .projects__panel {
