@@ -20,24 +20,13 @@ export const plugins: Plugin<any>[] = [
     },
     unlisted: true,
   },
-  // Takes no document: it reads everything from the draft provider above it.
-  {
-    type: "patchwork:component",
-    id: "draft-picker",
-    name: "Draft Picker",
-    async load() {
-      const { renderDraftPicker } = await import("./picker/picker.js");
-      return renderDraftPicker;
-    },
-  },
 ];
 
 export type {
   CloneEntry,
   DraftDoc,
-  DraftList,
-  DraftSelection,
+  DraftEntry,
   DraftStatus,
-  DraftSummary,
+  DraftsState,
 } from "./draft-types.js";
 export { isDraftDoc } from "./draft-types.js";

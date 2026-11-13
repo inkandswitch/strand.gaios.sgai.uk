@@ -7,12 +7,14 @@ import {
 
 import type {
   DraftDoc,
-  DraftList,
+  DraftEntry,
   DraftSelection,
-  DraftSummary,
   HasDrafts,
 } from "../draft-types.js";
 import { createDraftRouter } from "../draft-routing.js";
+
+const MAIN = "Main";
+const DRAFT = "Draft";
 
 export type DraftStateOptions = {
   repo: Repo;
@@ -25,17 +27,24 @@ export type DraftStateOptions = {
   select: (draftUrl: AutomergeUrl | null) => void;
 };
 
+// Main's url and every draft's entry, main first.
+export type DraftList = {
+  main: AutomergeUrl;
+  drafts: DraftEntry[];
+};
+
 export type DraftState = {
   subscribeList: (respond: (list: DraftList) => void) => () => void;
+  list: () => DraftList;
   // The root's handle, once it has loaded.
   root: () => Promise<DocHandle<HasDrafts>>;
   selectionChanged: () => void;
   dispose: () => void;
 };
 
-// The drafts of one root, behind `draft:list`: the main entry plus one
-// summary per draft that hasn't been merged, depth first, so a fork lists
-// directly beneath the draft it was forked off.
+// The drafts of one root: main plus one entry per draft that hasn't been
+// merged, depth first, so a fork lists directly beneath the draft it was
+// forked off.
 //
 // The link from a root to its drafts is `@patchwork.mainDraftUrl` → the main
 // draft, whose `drafts` roots the tree; each `DraftDoc` may have its own
@@ -50,8 +59,8 @@ export function createDraftState(options: DraftStateOptions): DraftState {
   const listSubscribers = new Set<(list: DraftList) => void>();
   let orderedDraftUrls: AutomergeUrl[] = [];
   let draftList: DraftList = {
-    main: { url: docUrl, parent: null, childCount: 0, name: null },
-    drafts: [],
+    main: docUrl,
+    drafts: [{ url: docUrl, name: MAIN, parent: null, depth: 0 }],
   };
 
   const router = createDraftRouter({
@@ -94,6 +103,7 @@ export function createDraftState(options: DraftStateOptions): DraftState {
         listSubscribers.delete(respond);
       };
     },
+    list: () => draftList,
     root: () => ready,
     selectionChanged() {
       if (disposed) return;
@@ -173,27 +183,22 @@ export function createDraftState(options: DraftStateOptions): DraftState {
   }
 
   function computeList(): DraftList {
-    const drafts: DraftSummary[] = [];
+    const main = mainDraftHandle?.url ?? docUrl;
+    const mainName = mainDraftHandle?.doc()?.name ?? MAIN;
+    const entries: DraftEntry[] = [
+      { url: main, name: mainName, parent: null, depth: 0 },
+    ];
+    const depths = new Map<AutomergeUrl, number>([[main, 0]]);
     for (const url of orderedDraftUrls) {
       const doc = trackedDrafts.get(url)?.doc();
       if (!doc || doc.mergedAt !== undefined) continue;
-      drafts.push({
-        url,
-        parent: effectiveParent(doc.parent),
-        childCount: doc.drafts.length,
-        name: doc.name ?? null,
-      });
+      const parent = effectiveParent(doc.parent) ?? main;
+      const known = depths.has(parent) ? parent : main;
+      const depth = (depths.get(known) ?? 0) + 1;
+      depths.set(url, depth);
+      entries.push({ url, name: doc.name ?? DRAFT, parent: known, depth });
     }
-    const main = mainDraftHandle?.doc();
-    return {
-      main: {
-        url: mainDraftHandle?.url ?? docUrl,
-        parent: null,
-        childCount: main?.drafts.length ?? 0,
-        name: main?.name ?? null,
-      },
-      drafts,
-    };
+    return { main, drafts: entries };
   }
 
   // The nearest ancestor that hasn't been merged. Merging re-parents
@@ -259,16 +264,15 @@ async function collectAllDrafts(
 }
 
 function draftListsEqual(a: DraftList, b: DraftList): boolean {
-  if (!summariesEqual(a.main, b.main)) return false;
-  if (a.drafts.length !== b.drafts.length) return false;
-  return a.drafts.every((draft, i) => summariesEqual(draft, b.drafts[i]));
+  if (a.main !== b.main || a.drafts.length !== b.drafts.length) return false;
+  return a.drafts.every((draft, i) => entriesEqual(draft, b.drafts[i]));
 }
 
-function summariesEqual(a: DraftSummary, b: DraftSummary): boolean {
+function entriesEqual(a: DraftEntry, b: DraftEntry): boolean {
   return (
     a.url === b.url &&
     a.parent === b.parent &&
-    a.childCount === b.childCount &&
+    a.depth === b.depth &&
     a.name === b.name
   );
 }

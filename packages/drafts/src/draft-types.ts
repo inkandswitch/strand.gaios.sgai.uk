@@ -53,40 +53,39 @@ export type DocCheckpoint = {
 // original url to the heads to view it at.
 export type DraftCheckpoint = Record<AutomergeUrl, DocCheckpoint>;
 
-// What the draft provider has checked out, answered for `draft:selection` and
-// set with `draft:select`. In memory only. `checkedOut = null` means main,
-// the root itself.
-export type DraftSelection = {
-  checkedOut: AutomergeUrl | null;
-  at: DraftCheckpoint | null;
+// Everything about a workspace's drafts, answered for `drafts` and pushed on
+// every change. Main is a draft like the others: `main` is its url (the main
+// draft's, or the workspace's until the first fork makes one), and that's
+// what `checkedOut` is while main is checked out.
+export type DraftsState = {
+  workspace: AutomergeUrl;
+  main: AutomergeUrl;
+  checkedOut: AutomergeUrl;
+  status: DraftStatus;
+  // Main first, then every draft that hasn't been merged, each beneath the
+  // one it was forked off.
+  drafts: DraftEntry[];
 };
 
-// Answered for `draft:status`. `verifying` while the starting draft (the
-// provider's `draft` attribute) hasn't been confirmed as a live draft of the
-// root yet (documents wait), `unavailable` once that has taken too long,
-// `ready` once a selection holds.
+export type DraftEntry = {
+  url: AutomergeUrl;
+  // The user's name for it, or the default label ("Main", "Draft").
+  name: string;
+  // The draft it was forked off; null for main.
+  parent: AutomergeUrl | null;
+  // 0 for main, 1 for a draft forked off main, and so on.
+  depth: number;
+};
+
+// `verifying` while the starting draft (the provider's `draft` attribute)
+// hasn't been confirmed as a live draft of the workspace yet (documents wait),
+// `unavailable` once that has taken too long, `ready` once a checkout holds.
 export type DraftStatus = "verifying" | "ready" | "unavailable";
 
-// One entry in the `draft:list` push.
-export type DraftSummary = {
-  // The `DraftDoc` url for a real draft; the main draft's url (or the root's,
-  // before there is one) for `main`.
-  url: AutomergeUrl;
-  // What this draft was forked off: the main draft's url for a top-level
-  // draft, another draft's url for a sub-fork. `null` on main itself.
-  parent: AutomergeUrl | null;
-  // Number of sub-drafts (`DraftDoc.drafts.length`).
-  childCount: number;
-  // User-given display name; `null` (not optional, to stay
-  // structured-cloneable) means unnamed.
-  name: string | null;
-};
-
-// Response shape for `draft:list`: the root's `main` entry plus the flat,
-// depth-first list of its (non-merged) drafts.
-export type DraftList = {
-  main: DraftSummary;
-  drafts: DraftSummary[];
+// What the provider has checked out, in memory only: null for main, the root
+// itself.
+export type DraftSelection = {
+  checkedOut: AutomergeUrl | null;
 };
 
 // A document that has been drafted carries `@patchwork.mainDraftUrl`

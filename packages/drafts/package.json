@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "Drafts of a whole project: a provider that checks a draft out for everything beneath it, and a picker to switch, fork, merge, rename and delete them.",
+  "description": "Drafts of a whole workspace: a provider that checks a draft out for everything beneath it, and creates, merges, renames and deletes drafts.",
   "main": "./dist/index.js",
   "scripts": {
     "dev": "vite build --watch",

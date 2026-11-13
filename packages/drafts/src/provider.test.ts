@@ -1,0 +1,140 @@
+import { beforeAll, describe, expect, it } from "vitest";
+import {
+  Repo,
+  initSubduction,
+  type AutomergeUrl,
+} from "@automerge/automerge-repo";
+import { request, subscribe } from "@inkandswitch/patchwork-providers";
+
+import { DraftProvider } from "./providers/DraftProvider.js";
+import type { DraftsState, HasDrafts } from "./draft-types.js";
+
+beforeAll(() => initSubduction());
+
+function workspace() {
+  const repo = new Repo();
+  const root = repo.create<HasDrafts>({ "@patchwork": { type: "folder" } });
+  const provider = document.createElement("div");
+  provider.setAttribute("doc-url", root.url);
+  const child = document.createElement("div");
+  provider.append(child);
+  const dispose = DraftProvider(provider, repo);
+  return { root, child, dispose };
+}
+
+// The latest state, once `ready` says it has caught up.
+function watch(element: HTMLElement) {
+  let latest: DraftsState | undefined;
+  const waiters: (() => void)[] = [];
+  const stop = subscribe<DraftsState>(element, { type: "drafts" }, (state) => {
+    latest = state;
+    for (const wake of waiters.splice(0)) wake();
+  });
+  const until = async (ready: (state: DraftsState) => boolean) => {
+    while (!latest || !ready(latest)) {
+      await new Promise<void>((wake) => waiters.push(wake));
+    }
+    return latest;
+  };
+  return { until, stop };
+}
+
+describe("the draft provider", () => {
+  it("starts on main, named by the workspace's url", async () => {
+    const { root, child, dispose } = workspace();
+    const drafts = watch(child);
+    const state = await drafts.until((s) => s.status === "ready");
+    expect(state).toEqual({
+      workspace: root.url,
+      main: root.url,
+      checkedOut: root.url,
+      status: "ready",
+      drafts: [{ url: root.url, name: "Main", parent: null, depth: 0 }],
+    });
+    drafts.stop();
+    dispose();
+  });
+
+  it("creates drafts off main and off drafts, checking each out", async () => {
+    const { child, dispose } = workspace();
+    const drafts = watch(child);
+    const { main } = await drafts.until((s) => s.status === "ready");
+
+    const first = await request<{ draft: AutomergeUrl }>(child, {
+      type: "draft:create",
+      from: main,
+    });
+    const second = await request<{ draft: AutomergeUrl }>(child, {
+      type: "draft:create",
+      from: first.draft,
+    });
+    const state = await drafts.until((s) => s.drafts.length === 3);
+
+    expect(state.checkedOut).toBe(second.draft);
+    expect(state.main).not.toBe(state.workspace);
+    expect(state.drafts).toEqual([
+      { url: state.main, name: "Main", parent: null, depth: 0 },
+      { url: first.draft, name: "Draft 1", parent: state.main, depth: 1 },
+      { url: second.draft, name: "Draft 2", parent: first.draft, depth: 2 },
+    ]);
+    drafts.stop();
+    dispose();
+  });
+
+  it("checks main out by its url or the workspace's", async () => {
+    const { root, child, dispose } = workspace();
+    const drafts = watch(child);
+    const { main } = await drafts.until((s) => s.status === "ready");
+    const { draft } = await request<{ draft: AutomergeUrl }>(child, {
+      type: "draft:create",
+      from: main,
+    });
+    const state = await drafts.until((s) => s.checkedOut === draft);
+
+    const back = await request<{ draft: AutomergeUrl }>(child, {
+      type: "draft:checkout",
+      draft: root.url,
+    });
+    expect(back.draft).toBe(state.main);
+    await drafts.until((s) => s.checkedOut === state.main);
+    drafts.stop();
+    dispose();
+  });
+
+  it("merges a draft into its parent and checks the parent out", async () => {
+    const { child, dispose } = workspace();
+    const drafts = watch(child);
+    const { main } = await drafts.until((s) => s.status === "ready");
+    const { draft } = await request<{ draft: AutomergeUrl }>(child, {
+      type: "draft:create",
+      from: main,
+    });
+    const { main: mainDraft } = await drafts.until((s) => s.checkedOut === draft);
+
+    const { into } = await request<{ into: AutomergeUrl }>(child, {
+      type: "draft:merge",
+      draft,
+    });
+    expect(into).toBe(mainDraft);
+    const state = await drafts.until((s) => s.drafts.length === 1);
+    expect(state.checkedOut).toBe(mainDraft);
+    drafts.stop();
+    dispose();
+  });
+
+  it("renames drafts, main included", async () => {
+    const { child, dispose } = workspace();
+    const drafts = watch(child);
+    const { main } = await drafts.until((s) => s.status === "ready");
+
+    const { name } = await request<{ name: string }>(child, {
+      type: "draft:rename",
+      draft: main,
+      name: "Published",
+    });
+    expect(name).toBe("Published");
+    await drafts.until((s) => s.drafts[0].name === "Published");
+    drafts.stop();
+    dispose();
+  });
+});
