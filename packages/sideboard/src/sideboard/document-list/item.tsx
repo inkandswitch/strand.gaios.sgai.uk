@@ -260,7 +260,7 @@ export default function Item(props: {
       on:click={(event: MouseEvent) => {
         if (event.ctrlKey || event.metaKey) return;
         const target = event.target as Element;
-        if (target.closest(".document-list-folder__toggle, .create-new-button, input")) {
+        if (target.closest(".document-list-folder__toggle, input")) {
           return;
         }
         open();
@@ -307,15 +307,19 @@ export default function Item(props: {
         }
       }}
     >
+      {props.children}
       <Show when={props.side}>
         {(side) => (
-          <span
-            class={`document-list-item__changed document-list-item__changed--${side()}`}
-            title={SIDE_TITLES[side()]}
-          />
+          <span class="document-list-item__changes" title={SIDE_TITLES[side()]}>
+            <Show when={side() !== "theirs"}>
+              <span class="document-list-item__changed document-list-item__changed--ours" />
+            </Show>
+            <Show when={side() !== "ours"}>
+              <span class="document-list-item__changed document-list-item__changed--theirs" />
+            </Show>
+          </span>
         )}
       </Show>
-      {props.children}
     </div>
   );
 }

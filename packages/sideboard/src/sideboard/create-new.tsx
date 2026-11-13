@@ -12,17 +12,12 @@ import {
   isLoadablePlugin,
   isLoadedPlugin,
 } from "@inkandswitch/patchwork-plugins";
-import { createSignal, lazy, onCleanup, onMount, Show } from "solid-js";
-import { NewDocIcon } from "./icons.tsx";
+import { lazy } from "solid-js";
 import type { DocLink, FolderDoc } from "@inkandswitch/patchwork-filesystem";
 import { docLinkFromUrl } from "./lib/doc-link.ts";
 import { childLocation } from "./lib/location.ts";
 import type { OpenDocumentEventDetail } from "@inkandswitch/patchwork-elements";
-import {
-  NEW_DOC_DND_TYPE,
-  setNewDocDragging,
-  clearDropTarget,
-} from "./dnd/dnd.ts";
+import type { Anchor } from "./popmenu.tsx";
 
 export async function createNew(
   repo: Repo,
@@ -53,41 +48,33 @@ const CreateNewMenu = lazy(() =>
   import("./create-new-menu.tsx").then((m) => ({ default: m.CreateNewMenu }))
 );
 
+/** Fetch the menu ahead of the first right-click, so that click isn't dead. */
+export function preloadCreateNew() {
+  void CreateNewMenu.preload();
+}
+
 export interface CreateNewProps {
   repo: Repo;
   changeFolder(fn: ChangeFn<FolderDoc>): void;
   open(detail: OpenDocumentEventDetail): void;
   /** Where the folder sits: new documents open by location under it. */
   location: string;
-  context?: string;
-  /** render as a square, icon-only button (e.g. in the doclist toolbar) */
-  square?: boolean;
-  /** allow dragging the button onto a folder/item to create a doc there */
-  draggable?: boolean;
+  /** where the menu was asked for: the pointer, for a right-click */
+  at: Anchor;
+  onClose(): void;
 }
 
+/**
+ * The menu for a new document in a folder: a filter that also takes an
+ * automerge url to add, and the datatypes. Picking one adds it to the end of
+ * the folder and opens it.
+ */
 export default function CreateNew(props: CreateNewProps) {
-  const [open, setOpen] = createSignal(false);
-
-  // The menu is split out to keep it off the initial load, but fetching it on
-  // the first click makes that click feel dead. Fetch it once things are idle
-  // so it's already there by the time anyone reaches for the button.
-  onMount(() => {
-    const preload = () => void CreateNewMenu.preload();
-    if (typeof requestIdleCallback === "function") {
-      const id = requestIdleCallback(preload);
-      onCleanup(() => cancelIdleCallback(id));
-    } else {
-      const id = setTimeout(preload, 0);
-      onCleanup(() => clearTimeout(id));
-    }
-  });
-
   async function selectDatatype(datatype: Plugin<DatatypeDescription>) {
     const freshy = await createNew(props.repo, datatype);
     const url = addToFolder(freshy);
     props.open({ url });
-    setOpen(false);
+    props.onClose();
   }
 
   async function handleUrlSubmit(url: string) {
@@ -96,7 +83,7 @@ export default function CreateNew(props: CreateNewProps) {
     const docLink = await docLinkFromUrl(props.repo, trimmed as AutomergeUrl);
     const location = addToFolder(docLink);
     props.open({ url: location });
-    setOpen(false);
+    props.onClose();
   }
 
   // Push `link` onto the folder and say where it landed. The location is worked
@@ -110,84 +97,12 @@ export default function CreateNew(props: CreateNewProps) {
     return childLocation(props.location, link, siblings);
   }
 
-  // Kobalte's menu trigger opens on pointerdown, which swallows the start of a
-  // native drag. So the visible button is a plain draggable <button> that we
-  // open the menu from on click; a 0-size aria-hidden trigger overlapping it
-  // serves only as the dropdown's anchor.
-  //
-  // Kobalte's interact-outside listener closes the menu on a capture-phase
-  // pointerdown (before our click fires), so a click on the open button closes
-  // it. Guarding the click against a just-happened close keeps that click from
-  // immediately re-opening it.
-  let lastCloseAt = 0;
-
-  function handleDragStart(event: DragEvent) {
-    setOpen(false);
-    setNewDocDragging(true);
-    event.dataTransfer!.setData(NEW_DOC_DND_TYPE, "1");
-    // "all" keeps move/copy dropEffects (set by the list's dragover handlers)
-    // valid so the drop event actually fires.
-    event.dataTransfer!.effectAllowed = "all";
-
-    const preview = document.createElement("div");
-    preview.style.cssText = `
-      position: absolute;
-      top: -1000px;
-      background: var(--document-list-primary);
-      padding: 0.5rem 0.75rem;
-      border-radius: var(--document-list-radius);
-      font-family: inherit;
-      font-size: 0.9rem;
-      pointer-events: none;
-      color: var(--document-list-primary-line);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    `;
-    preview.textContent = "new doc";
-    document.body.appendChild(preview);
-    event.dataTransfer!.setDragImage(preview, 10, 10);
-    setTimeout(() => preview.remove(), 0);
-  }
-
-  let anchor!: HTMLDivElement;
-
   return (
-    <div ref={anchor} class="create-new-button-anchor">
-      <button
-        type="button"
-        class="create-new-button"
-        classList={{ "create-new-button--square": props.square }}
-        aria-label="create new"
-        // in case idle never came: start the fetch as the pointer or focus arrives
-        onPointerEnter={() => void CreateNewMenu.preload()}
-        onFocus={() => void CreateNewMenu.preload()}
-        draggable={props.draggable}
-        onClick={() => {
-          // skip the click that immediately follows an outside-close
-          if (performance.now() - lastCloseAt > 200) setOpen(true);
-        }}
-        on:dragstart={props.draggable ? handleDragStart : undefined}
-        on:dragend={() => {
-          setNewDocDragging(false);
-          clearDropTarget();
-        }}
-      >
-        <NewDocIcon class="create-new-button__icon" />
-        <Show when={!props.square}>
-          {" "}
-          <span class="create-new-button__text">Create new</span>
-        </Show>
-      </button>
-      <Show when={open()}>
-        <CreateNewMenu
-          anchor={anchor.getBoundingClientRect()}
-          onClose={() => {
-            setOpen(false);
-            lastCloseAt = performance.now();
-          }}
-          onPickDatatype={selectDatatype}
-          onSubmitUrl={handleUrlSubmit}
-        />
-      </Show>
-    </div>
+    <CreateNewMenu
+      anchor={props.at}
+      onClose={props.onClose}
+      onPickDatatype={selectDatatype}
+      onSubmitUrl={handleUrlSubmit}
+    />
   );
 }

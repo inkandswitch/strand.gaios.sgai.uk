@@ -6,6 +6,7 @@ import {
   createEffect,
   createMemo,
   createSelector,
+  createSignal,
   lazy,
   onCleanup,
   onMount,
@@ -23,7 +24,7 @@ import {
   isMounted,
   watchFolder,
 } from "./document-list/auto-expand.ts";
-import CreateNew from "./create-new.tsx";
+import CreateNew, { preloadCreateNew } from "./create-new.tsx";
 import { createOpenEvent, type OpenDetail } from "./events.ts";
 import { useChangeMarks } from "./document-list/changes.ts";
 import { DocumentList } from "./document-list/document-list.tsx";
@@ -49,9 +50,9 @@ const ItemMenu = lazy(() =>
 );
 
 /**
- * The document-list panel: a sticky toolbar (the new-doc button) over a
- * scrolling, recursive list of the folder's documents and subfolders. Renders a
- * single folder, given its url. Inside a compare provider, the files the
+ * The document-list panel: a scrolling, recursive list of the folder's
+ * documents and subfolders, where a right-click outside the rows makes a new
+ * document. Renders a single folder, given its url. Inside a compare provider, the files the
  * checked-out draft and the compared one differ on are marked.
  *
  * Documents are opened by where they sit under the folder
@@ -72,7 +73,10 @@ export function DocumentListPanel(props: {
   // arrives (and with a slow module load, looks like it never opened). Fetch
   // it once things are idle so it's there before anyone right-clicks.
   onMount(() => {
-    const preload = () => void ItemMenu.preload();
+    const preload = () => {
+      void ItemMenu.preload();
+      preloadCreateNew();
+    };
     if (typeof requestIdleCallback === "function") {
       const id = requestIdleCallback(preload);
       onCleanup(() => cancelIdleCallback(id));
@@ -158,8 +162,17 @@ export function DocumentListPanel(props: {
     onCleanup(createTreeNav(el));
   };
 
+  // Rows open their own menu and stop the event, so a right-click that gets
+  // here is past them: it makes a new document in the folder.
+  const [newAt, setNewAt] = createSignal<{ x: number; y: number }>();
+  function openNewMenu(event: MouseEvent) {
+    if ((event.target as Element).closest("input")) return;
+    event.preventDefault();
+    setNewAt({ x: event.clientX, y: event.clientY });
+  }
+
   return (
-    <aside class="document-list">
+    <aside class="document-list" on:contextmenu={openNewMenu}>
       <nav
         ref={attachMarquee}
         class="document-list__doclist document-list-widget"
@@ -196,16 +209,6 @@ export function DocumentListPanel(props: {
           });
         }}
       >
-        <div class="document-list__toolbar">
-          <CreateNew
-            square
-            draggable
-            changeFolder={(fn) => folderHandle()?.change(fn)}
-            repo={props.repo}
-            open={open}
-            location={props.folderUrl}
-          />
-        </div>
         <Show when={folderReady()} fallback={<LoadingRows depth={0} />}>
           <Suspense fallback={<LoadingRows depth={0} />}>
             <DocumentList
@@ -235,6 +238,18 @@ export function DocumentListPanel(props: {
           </p>
         </Show>
       </nav>
+      <Show when={newAt()}>
+        {(at) => (
+          <CreateNew
+            at={at()}
+            onClose={() => setNewAt()}
+            changeFolder={(fn) => folderHandle()?.change(fn)}
+            repo={props.repo}
+            open={open}
+            location={props.folderUrl}
+          />
+        )}
+      </Show>
     </aside>
   );
 }

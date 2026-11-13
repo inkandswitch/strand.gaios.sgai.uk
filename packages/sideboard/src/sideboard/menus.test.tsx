@@ -191,21 +191,16 @@ describe("CreateNew", () => {
     changeFolder: vi.fn((fn: (doc: any) => void) => fn(folder)),
     open: vi.fn(),
     location: DOC_URL,
+    at: { x: 10, y: 10 },
+    onClose: vi.fn(),
   });
   let folder: { docs: any[] };
   beforeEach(() => {
     folder = { docs: [] };
   });
 
-  it("shows only the button until clicked", () => {
+  it("lists listed datatypes sorted by name, with a filter input", async () => {
     mount(() => <CreateNew {...props()} />);
-    expect(container.querySelector(".create-new-button")).toBeTruthy();
-    expect(menu()).toBeNull();
-  });
-
-  it("opens a menu listing listed datatypes sorted by name, with a filter input", async () => {
-    mount(() => <CreateNew {...props()} />);
-    container.querySelector<HTMLElement>(".create-new-button")!.click();
     await waitFor(menu);
     expect(itemTexts()).toEqual(["Markdown", "Zed"]);
     expect(filterInput()).toBeTruthy();
@@ -228,8 +223,7 @@ describe("CreateNew", () => {
     await getRegistry("patchwork:datatype").load("nameless");
     try {
       mount(() => <CreateNew {...props()} />);
-      container.querySelector<HTMLElement>(".create-new-button")!.click();
-      await waitFor(menu);
+        await waitFor(menu);
       expect(itemTexts()).toEqual(["Markdown", "nameless", "Zed"]);
     } finally {
       unregisterPlugins(importUrl);
@@ -238,7 +232,6 @@ describe("CreateNew", () => {
 
   it("filters datatypes as you type", async () => {
     mount(() => <CreateNew {...props()} />);
-    container.querySelector<HTMLElement>(".create-new-button")!.click();
     await waitFor(menu);
     typeInto(filterInput()!, "ze");
     expect(itemTexts()).toEqual(["Zed"]);
@@ -247,16 +240,14 @@ describe("CreateNew", () => {
   it("offers to add by url when the query is an automerge url", async () => {
     const p = props();
     mount(() => <CreateNew {...p} />);
-    container.querySelector<HTMLElement>(".create-new-button")!.click();
     await waitFor(menu);
     typeInto(filterInput()!, DOC_URL);
     expect(itemTexts()[0]).toBe("Add by URL");
   });
 
-  it("creates a doc of the picked datatype, adds it to the folder, opens it and closes", async () => {
+  it("creates a doc of the picked datatype, adds it to the folder, opens it and asks to close", async () => {
     const p = props();
     mount(() => <CreateNew {...p} />);
-    container.querySelector<HTMLElement>(".create-new-button")!.click();
     await waitFor(menu);
     click(item("Markdown"));
     await waitFor(() => p.open.mock.calls.length);
@@ -267,14 +258,13 @@ describe("CreateNew", () => {
     expect(p.open).toHaveBeenCalledWith({
       url: `${DOC_URL}/Untitled%20Markdown`,
     });
-    await waitFor(() => menu() === null);
+    await waitFor(() => p.onClose.mock.calls.length);
   });
 
   it("opens a doc whose name another entry already has by its document id", async () => {
     folder.docs.push({ name: "Untitled Markdown", type: "md", url: DOC_URL });
     const p = props();
     mount(() => <CreateNew {...p} />);
-    container.querySelector<HTMLElement>(".create-new-button")!.click();
     await waitFor(menu);
     click(item("Markdown"));
     await waitFor(() => p.open.mock.calls.length);
@@ -286,7 +276,6 @@ describe("CreateNew", () => {
   it("picks the highlighted datatype with arrow keys + enter from the filter input", async () => {
     const p = props();
     mount(() => <CreateNew {...p} />);
-    container.querySelector<HTMLElement>(".create-new-button")!.click();
     await waitFor(menu);
     key(filterInput()!, "ArrowDown");
     key(filterInput()!, "Enter");
@@ -294,25 +283,14 @@ describe("CreateNew", () => {
     expect(createDocOfDatatype2.mock.calls[0][0].id).toBe("zed");
   });
 
-  it("closes on escape", async () => {
-    mount(() => <CreateNew {...props()} />);
-    container.querySelector<HTMLElement>(".create-new-button")!.click();
+  it("asks to close on escape", async () => {
+    const p = props();
+    mount(() => <CreateNew {...p} />);
     await waitFor(menu);
     key(filterInput()!, "Escape");
-    await waitFor(() => menu() === null);
+    await waitFor(() => p.onClose.mock.calls.length);
   });
 
-  it("closes on pointerdown outside, and the click that follows doesn't reopen it", async () => {
-    mount(() => <CreateNew {...props()} />);
-    const button = container.querySelector<HTMLElement>(".create-new-button")!;
-    button.click();
-    await waitFor(menu);
-    pointerDown(button);
-    await waitFor(() => menu() === null);
-    button.click();
-    await new Promise((r) => setTimeout(r, 50));
-    expect(menu()).toBeNull();
-  });
 });
 
 describe("NewDocPlaceholder", () => {

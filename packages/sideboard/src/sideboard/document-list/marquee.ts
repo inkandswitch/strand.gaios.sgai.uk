@@ -87,8 +87,6 @@ export function createMarquee(opts: {
 
   function onMouseDown(event: MouseEvent) {
     if (event.button !== 0 || !(event.metaKey || event.ctrlKey)) return;
-    // Don't start a band from the toolbar (filter input / create button).
-    if ((event.target as Element).closest(".document-list__toolbar")) return;
     startX = event.clientX;
     startY = event.clientY;
     active = false;
