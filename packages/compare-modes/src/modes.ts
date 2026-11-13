@@ -20,9 +20,10 @@ export const Stacked: CompareModeImplementation = {
 type Mix = { mix: number };
 
 // B lies over A and shows as the mix moves towards it. A stays the one that
-// takes the pointer.
+// takes the pointer. One mix for the whole workspace.
 export const OnionSkin: CompareModeImplementation<Mix> = {
   options: { mix: 0.5 },
+  scope: "workspace",
   compose(slots, options) {
     const restore = overlay(slots);
     const apply = ({ mix }: Mix) => (slots.b.style.opacity = String(mix));
@@ -101,11 +102,8 @@ export const Swipe: CompareModeImplementation<At> = {
   },
 };
 
-// Both drawn by the view: the other version's changes marked in this one,
-// and those alone, with what's the same on both folded away.
+// Drawn by the view: the other version's changes marked in this one.
 export const Inline: CompareModeImplementation = {};
-
-export const ChangesOnly: CompareModeImplementation = {};
 
 function hide(element: HTMLElement) {
   element.hidden = true;

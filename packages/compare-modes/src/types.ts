@@ -18,6 +18,12 @@ export type CompareModeDescription = PluginDescription & {
 export type CompareModeImplementation<O = unknown> = {
   /** what the options start as */
   options?: O;
+  /**
+   * Where its controls show and how far its options reach: one set for the
+   * whole workspace, its controls with the workspace's, or one per panel,
+   * its controls with the panel's (the default).
+   */
+  scope?: "workspace" | "panel";
   /** lays out the two versions; absent means the view draws the mode */
   compose?(slots: Slots, options: Options<O>): () => void;
   /** renders the mode's controls */
