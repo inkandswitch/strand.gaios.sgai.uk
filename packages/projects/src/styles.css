@@ -37,6 +37,13 @@
 	--projects-theirs: #d85a30;
 	--projects-theirs-fill: #faece7;
 	--projects-theirs-ink: #712b13;
+	/* What a merge does: adds, removes, changes, and what both drafts
+	   changed, to review. */
+	--projects-added: #3b8f4f;
+	--projects-removed: #c4473a;
+	--projects-changed: #8a8883;
+	--projects-review: #854f0b;
+	--projects-review-fill: #faeeda;
 	--projects-danger: #a32d2d;
 	--projects-lane-current: var(--projects-ours);
 }
@@ -57,6 +64,8 @@
 	--projects-ours-ink: color-mix(in oklch, var(--projects-ours) 45%, white);
 	--projects-theirs-fill: color-mix(in oklch, var(--projects-theirs) 20%, var(--projects-surface));
 	--projects-theirs-ink: color-mix(in oklch, var(--projects-theirs) 45%, white);
+	--projects-review: color-mix(in oklch, #ef9f27 60%, white);
+	--projects-review-fill: color-mix(in oklch, #ef9f27 20%, var(--projects-surface));
 	--projects-danger: var(--studio-danger);
 }
 
@@ -326,6 +335,10 @@ button.projects__token:hover {
 	background: var(--projects-theirs);
 }
 
+.projects__token--into .projects__token-dot {
+	background: var(--projects-theirs);
+}
+
 .projects__token--preview {
 	border-style: dashed;
 	background: var(--projects-surface);
@@ -353,6 +366,65 @@ button.projects__token:hover {
 	color: var(--projects-muted);
 	font-size: 0.95rem;
 	line-height: 1;
+}
+
+/* in place of the tokens while a merge is looked over */
+
+.projects__merge {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	gap: var(--projects-space-sm);
+	min-width: 0;
+}
+
+.projects__merge-title {
+	display: flex;
+	align-items: center;
+	gap: var(--projects-space-sm);
+	min-width: 0;
+	color: var(--projects-secondary);
+}
+
+.projects__merge-summary {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	color: var(--projects-muted);
+	font-size: 0.85rem;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.projects__merge-count--added {
+	color: var(--projects-added);
+}
+
+.projects__merge-count--removed {
+	color: var(--projects-removed);
+}
+
+.projects__merge-count--review {
+	color: var(--projects-review);
+}
+
+.projects__merge .projects__button {
+	padding: 0.3rem var(--projects-space);
+	font-size: 0.9rem;
+}
+
+.projects__merge .projects__button--primary {
+	border-color: var(--projects-fg);
+	background: var(--projects-fg);
+	color: var(--projects-surface);
+}
+
+.projects__merge .projects__button--primary:hover:not(:disabled) {
+	background: color-mix(in oklch, var(--projects-fg) 85%, var(--projects-surface));
+}
+
+.projects__merge .projects__button:disabled {
+	opacity: 0.5;
 }
 
 .projects__token-rename {
@@ -524,6 +596,11 @@ button.projects__token:hover {
 	--document-list-row-hover-fill: color-mix(in oklch, var(--projects-hover) 55%, transparent);
 	--document-list-ours: var(--projects-ours);
 	--document-list-theirs: var(--projects-theirs);
+	--document-list-added: var(--projects-added);
+	--document-list-removed: var(--projects-removed);
+	--document-list-changed: var(--projects-changed);
+	--document-list-review: var(--projects-review);
+	--document-list-review-fill: var(--projects-review-fill);
 	--document-list-danger: var(--projects-danger);
 	--document-list-padding-x: 0;
 	--document-list-top-margin: var(--projects-space-xs);
@@ -584,6 +661,22 @@ button.projects__token:hover {
 	flex: 1;
 	min-height: 0;
 	overflow: auto;
+}
+
+/* inline diffs mark what's only on each side: the drafts' colours compared,
+   added and removed merging */
+.projects__compare {
+	--compare-inserted: var(--projects-ours);
+	--compare-deleted: var(--projects-theirs);
+}
+
+.projects__compare--merge {
+	--compare-inserted: var(--projects-added);
+	--compare-deleted: var(--projects-removed);
+}
+
+.projects__read-only {
+	display: contents;
 }
 
 .projects__other-draft {

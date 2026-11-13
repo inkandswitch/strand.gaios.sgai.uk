@@ -36,20 +36,31 @@ export function ProjectView(props: {
 	const [heard, setHeard] = createSignal(false)
 	const compared = createMemo<AutomergeUrl | undefined>(previous => {
 		const current = against()
-		return current?.previewing ? previous : current?.draft
+		return current?.previewing || current?.merging ? previous : current?.draft
 	})
 	// The draft provider names it by its url, and checks views out of it by
 	// that, but main is the draft provider's own `doc-url`.
 	const comparing = createMemo<Comparing | undefined>(() => {
 		const state = drafts()
-		const draft = against()?.draft
+		const current = against()
+		const draft = current?.draft
 		if (!state || !draft) return undefined
 		const main = draft === state.main || draft === state.workspace
 		const name = state.drafts.find(entry => entry.url === draft)?.name ?? ""
-		return {workspace: state.workspace, draft: main ? undefined : draft, name}
+		return {
+			workspace: state.workspace,
+			draft: main ? undefined : draft,
+			name,
+			merging: !!current.merging,
+			after: current.after ?? undefined,
+		}
 	}, undefined, {
 		equals: (a, b) =>
-			a?.workspace === b?.workspace && a?.draft === b?.draft && a?.name === b?.name,
+			a?.workspace === b?.workspace &&
+			a?.draft === b?.draft &&
+			a?.name === b?.name &&
+			a?.merging === b?.merging &&
+			a?.after === b?.after,
 	})
 
 	createEffect(() => {

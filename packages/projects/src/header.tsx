@@ -2,7 +2,7 @@ import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
 import {request, subscribe, type Selector} from "@inkandswitch/patchwork-providers"
 import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type JSX} from "solid-js"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
-import type {CompareAgainst, CompareChanges, DraftEntry, DraftsState} from "./types.ts"
+import type {CompareAgainst, CompareChanges, DraftEntry, DraftsState, Mark} from "./types.ts"
 import {NameInput, ShowWorkspaces} from "./workspaces.tsx"
 
 /**
@@ -47,11 +47,27 @@ export function WorkspaceHeader(props: {
 		return count === 1 ? "1 file differs" : `${count} files differ`
 	}
 
+	const merging = () => {
+		const from = ours()
+		const into = theirs()
+		return props.against?.merging && from && into ? {from, into} : undefined
+	}
+
 	return (
 		<header class="projects__card-header">
 			<ShowWorkspaces show={props.showSidebar} />
 			<h1 class="projects__workspace-title">{props.name}</h1>
-			<Show when={ours()}>
+			<Show when={merging()}>
+				{merge => (
+					<MergeBar
+						from={merge().from}
+						into={merge().into}
+						changes={changes()}
+						element={props.element}
+					/>
+				)}
+			</Show>
+			<Show when={!merging() && ours()}>
 				{checkedOut => (
 					<div class="projects__tokens">
 						<Show
@@ -169,10 +185,8 @@ function DraftMenu(props: {
 			props.send({type: "compare:set", draft})
 		},
 		merge(into: AutomergeUrl) {
-			const target = byUrl(into)
 			close()
-			if (!target || !window.confirm(`Merge “${props.ours.name}” into “${target.name}”?`)) return
-			props.send({type: "draft:merge", draft: props.ours.url, into})
+			props.send({type: "merge:start", into})
 		},
 		copy() {
 			close()
@@ -311,6 +325,98 @@ function DraftMenu(props: {
 				/>
 			</div>
 		</>
+	)
+}
+
+/**
+ * While the checked-out draft's merge into another is looked over: what it
+ * does, and the choice to merge, which hides the merged draft and checks the
+ * other out, or not.
+ */
+function MergeBar(props: {
+	from: DraftEntry
+	into: DraftEntry
+	changes: CompareChanges | undefined
+	element: HTMLElement
+}) {
+	const [merging, setMerging] = createSignal(false)
+	const ready = () => props.changes?.mode === "merge" && props.changes.status === "ready"
+	const counts = () => {
+		const found = props.changes
+		if (!ready() || !found) return undefined
+		const marks = Object.values(found.files)
+		const count = (mark: Mark) => marks.filter(each => each === mark).length
+		return {
+			added: count("added"),
+			removed: count("removed"),
+			changed: count("changed") + count("both"),
+			review: count("both"),
+		}
+	}
+	const cancel = () => void request(props.element, {type: "merge:cancel"})
+	const merge = async () => {
+		setMerging(true)
+		try {
+			await request(props.element, {type: "merge:commit"})
+		} finally {
+			setMerging(false)
+		}
+	}
+
+	return (
+		<div class="projects__merge" role="group" aria-label="Merge">
+			<span class="projects__merge-title">
+				Merge
+				<span class="projects__token">
+					<span class="projects__token-dot" aria-hidden="true" />
+					<span class="projects__token-name">{props.from.name}</span>
+				</span>
+				into
+				<span class="projects__token projects__token--into">
+					<span class="projects__token-dot" aria-hidden="true" />
+					<span class="projects__token-name">{props.into.name}</span>
+				</span>
+			</span>
+			<span class="projects__merge-summary">
+				<Show when={counts()} fallback="Working out the merge…">
+					{found => <MergeCounts {...found()} />}
+				</Show>
+			</span>
+			<button type="button" class="projects__button" onClick={cancel}>
+				Cancel
+			</button>
+			<button
+				type="button"
+				class="projects__button projects__button--primary"
+				disabled={!ready() || merging()}
+				onClick={merge}>
+				Merge
+			</button>
+		</div>
+	)
+}
+
+function MergeCounts(props: {added: number; removed: number; changed: number; review: number}) {
+	const parts = () =>
+		[
+			{count: props.added, label: "added", kind: "added"},
+			{count: props.removed, label: "removed", kind: "removed"},
+			{count: props.changed, label: "changed", kind: "changed"},
+			{count: props.review, label: "to review", kind: "review"},
+		].filter(part => part.count > 0)
+	return (
+		<Show when={parts().length > 0} fallback="Nothing changes">
+			<For each={parts()}>
+				{(part, index) => (
+					<>
+						<Show when={index() > 0}> · </Show>
+						<span class={`projects__merge-count--${part.kind}`}>
+							{part.count} {part.label}
+						</span>
+					</>
+				)}
+			</For>
+		</Show>
 	)
 }
 

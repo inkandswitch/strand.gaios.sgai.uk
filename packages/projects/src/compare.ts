@@ -52,8 +52,12 @@ export type CompareView = {
 	missing: boolean
 }
 
-/** The compare provider's `compare:version`: null when nothing's compared. */
-export type ComparedVersion = {draft: AutomergeUrl; doc: Uint8Array | null} | null
+/**
+ * The compare provider's `compare:version`: null when nothing's compared.
+ * Merging, it's the target's version before the merge, and `removed` says
+ * the merge takes the document out.
+ */
+export type ComparedVersion = {draft: AutomergeUrl; doc: Uint8Array | null; removed?: boolean} | null
 
 /** The registered compare modes, loaded, kept current as packages come and go. */
 export function useCompareModes(): Accessor<Mode[]> {

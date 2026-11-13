@@ -31,12 +31,28 @@ export type DraftEntry = {
 	depth: number
 }
 
-/** The compare provider's `compare:against`. */
-export type CompareAgainst = {draft: AutomergeUrl; previewing: boolean} | null
+/**
+ * The compare provider's `compare:against`. `merging` while the checked-out
+ * draft's merge into `draft` is looked over; `after` is the hidden draft
+ * showing what the merge leaves it as, once it's made.
+ */
+export type CompareAgainst = {
+	draft: AutomergeUrl
+	previewing: boolean
+	merging: boolean
+	after: AutomergeUrl | null
+} | null
+
+/**
+ * How a file differs: compared, on both drafts and different, or only on
+ * ours or theirs; merging, what the merge does to the target's.
+ */
+export type Mark = "differs" | "ours" | "theirs" | "added" | "removed" | "changed" | "both"
 
 /** The compare provider's `compare:changes`: what differs, by file and folder. */
 export type CompareChanges = {
 	status: "off" | "loading" | "ready"
-	files: Record<AutomergeUrl, "ours" | "theirs" | "both">
-	folders: Record<AutomergeUrl, "ours" | "theirs" | "both">
+	mode: "compare" | "merge"
+	files: Record<AutomergeUrl, Mark>
+	folders: Record<AutomergeUrl, Mark>
 }

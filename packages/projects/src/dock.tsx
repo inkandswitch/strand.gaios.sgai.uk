@@ -58,12 +58,16 @@ export type DockGroup = {id: string; title: string}
 /**
  * The draft the checked-out one is compared with: views of it are checked
  * out of the workspace by a draft provider of their own. `draft` is unset
- * for main.
+ * for main. `merging` while the checked-out draft's merge into it is looked
+ * over: then the document shows as `after`, the hidden draft the merge's
+ * preview is on, once it's made, read-only, beside the draft as it is.
  */
 export type Comparing = {
 	workspace: AutomergeUrl
 	draft: AutomergeUrl | undefined
 	name: string
+	merging: boolean
+	after: AutomergeUrl | undefined
 }
 
 type Panel = {
@@ -467,6 +471,7 @@ function Compared(props: {
 		return current
 	}
 	const missing = () => version()?.doc === null
+	const merging = () => !!comparing()?.merging
 
 	onMount(() => {
 		createEffect(() => {
@@ -539,14 +544,42 @@ function Compared(props: {
 	}
 
 	return (
-		<div ref={host} class="projects__compare">
+		<div ref={host} class="projects__compare" classList={{"projects__compare--merge": merging()}}>
 			<div ref={slotA} class="projects__compare-slot" data-version="a">
-				<patchwork-view
-					ref={reportTool}
-					class="projects__document"
-					doc-url={props.url}
-					tool-id={props.toolId}
-				/>
+				<Show
+					when={merging() && comparing()}
+					fallback={
+						<patchwork-view
+							ref={reportTool}
+							class="projects__document"
+							doc-url={props.url}
+							tool-id={props.toolId}
+						/>
+					}>
+					{merge => (
+						<Show
+							when={merge().after}
+							keyed
+							fallback={<p class="projects__empty">Working out the merge…</p>}>
+							{after => (
+								<Show
+									when={!version()?.removed}
+									fallback={<p class="projects__empty">Removed by the merge</p>}>
+									<ReadOnly>
+										<OtherDraft workspace={merge().workspace} draft={after}>
+											<patchwork-view
+												ref={reportTool}
+												class="projects__document"
+												doc-url={props.url}
+												tool-id={props.tool() ?? props.toolId}
+											/>
+										</OtherDraft>
+									</ReadOnly>
+								</Show>
+							)}
+						</Show>
+					)}
+				</Show>
 			</div>
 			<Show when={laidOut() && comparing()}>
 				{other => (
@@ -592,6 +625,57 @@ function OtherDraft(props: {
 		</patchwork-view>
 	)
 }
+
+/**
+ * Views inside can be read, scrolled, searched and copied from, but nothing
+ * typed, pasted or dropped reaches them.
+ */
+function ReadOnly(props: {children: JSX.Element}) {
+	let element!: HTMLDivElement
+	onMount(() => {
+		const block = (event: Event) => {
+			event.preventDefault()
+			event.stopPropagation()
+		}
+		const onKey = (event: KeyboardEvent) => {
+			const reading =
+				READING_KEYS.has(event.key) ||
+				((event.metaKey || event.ctrlKey) && READING_SHORTCUTS.has(event.key.toLowerCase()))
+			if (!reading) block(event)
+		}
+		const blocked = ["beforeinput", "paste", "cut", "drop"] as const
+		for (const type of blocked) element.addEventListener(type, block, true)
+		element.addEventListener("keydown", onKey, true)
+		onCleanup(() => {
+			for (const type of blocked) element.removeEventListener(type, block, true)
+			element.removeEventListener("keydown", onKey, true)
+		})
+	})
+	return (
+		<div ref={element} class="projects__read-only">
+			{props.children}
+		</div>
+	)
+}
+
+const READING_KEYS = new Set([
+	"ArrowUp",
+	"ArrowDown",
+	"ArrowLeft",
+	"ArrowRight",
+	"PageUp",
+	"PageDown",
+	"Home",
+	"End",
+	"Tab",
+	"Escape",
+	"Shift",
+	"Meta",
+	"Control",
+	"Alt",
+])
+
+const READING_SHORTCUTS = new Set(["a", "c", "f", "g"])
 
 const NOT_COMPARED: CompareView = {mode: null, options: null, other: null, missing: false}
 
