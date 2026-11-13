@@ -67,6 +67,7 @@ export function CompareProvider(element: HTMLElement & { repo: Repo }): () => vo
   let theirs: Theirs | null = null;
   let checkedOut: AutomergeUrl | undefined;
   let current: CompareAgainst = null;
+  let settled = false;
   let changes: CompareChanges = { status: "off", files: {}, folders: {} };
   let comparison: Promise<Comparison | null> = Promise.resolve(null);
   let stopComparing = () => {};
@@ -79,7 +80,8 @@ export function CompareProvider(element: HTMLElement & { repo: Repo }): () => vo
     switch (selector.type) {
       case "compare:against":
         accept<CompareAgainst>(event, (respond) => {
-          respond(current);
+          // Until the drafts are in, `against` may still be dropped.
+          if (settled) respond(current);
           againstSubscribers.add(respond);
           return () => againstSubscribers.delete(respond);
         });
@@ -159,7 +161,10 @@ export function CompareProvider(element: HTMLElement & { repo: Repo }): () => vo
       theirs = draft ? mountTheirs(draft, state) : null;
     }
     if (switched || moved) compare();
-    if (next?.draft !== current?.draft || next?.previewing !== current?.previewing) {
+    const announce =
+      !settled || next?.draft !== current?.draft || next?.previewing !== current?.previewing;
+    settled = true;
+    if (announce) {
       current = next;
       for (const respond of againstSubscribers) respond(current);
     }
