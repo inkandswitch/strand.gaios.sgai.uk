@@ -1,10 +1,11 @@
-// Inline diff markers for a text file, in the "inline" compare mode: what
-// changed against the version the panel showing the file compares it with.
-// Only shows inside something answering `compare:view`, like the GAIOS dock
-// on a draft that changed the file.
+// Inline diff markers for a text file, in the "inline" and "changes only"
+// compare modes: what differs from the other draft's version of the file,
+// which the panel showing it compares it with. Only shows inside something
+// answering `compare:view`, like the GAIOS dock while the checked-out draft is
+// compared with another.
 
-import {createEffect, createSignal, on, onCleanup} from "solid-js"
-import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
+import {createEffect, createMemo, on} from "solid-js"
+import {Automerge} from "@automerge/automerge-repo/slim"
 import {Compartment} from "@codemirror/state"
 import {EditorView} from "@codemirror/view"
 import {getChunks, unifiedMergeView} from "@codemirror/merge"
@@ -14,15 +15,17 @@ import type {FileDoc} from "../types"
 
 // The compare view the dock answers with, as this reads it.
 type CompareView = {
-	base: AutomergeUrl | null
-	created: boolean
 	mode: string | null
-	options: {collapsed?: boolean} | null
+	options: unknown
+	other: Uint8Array | null
+	missing: boolean
 }
 
 type Inline = {original: string; collapsed: boolean}
 
-export function createDraftDiff(props: {element: HTMLElement & {repo?: Repo}}) {
+const MODES = ["inline", "changes-only"]
+
+export function createDraftDiff(props: {element: HTMLElement}) {
 	const compartment = new Compartment()
 	const inline = inlineDiff(props)
 
@@ -59,35 +62,29 @@ export function createDraftDiff(props: {element: HTMLElement & {repo?: Repo}}) {
 }
 
 // The text to show changes against, and whether to fold what didn't change:
-// undefined outside the inline mode; an empty original for a file the draft
-// created.
-function inlineDiff(props: {element: HTMLElement & {repo?: Repo}}) {
-	const [inline, setInline] = createSignal<Inline | undefined>(undefined, {
-		equals: (a, b) => a?.original === b?.original && a?.collapsed === b?.collapsed,
-	})
-	const compare = subscribe<CompareView>(props.element, {
+// undefined outside the two modes; empty when the other draft doesn't have
+// the file.
+function inlineDiff(props: {element: HTMLElement}) {
+	const compare = subscribe(props.element, {
 		type: "compare:view",
-		modes: {inline: true},
+		modes: {inline: true, "changes-only": true},
+		prefers: "inline",
 	})
-
-	createEffect(() => {
-		const view = compare()
-		const repo = props.element.repo
-		if (view?.mode !== "inline" || !repo) return setInline(undefined)
-		const collapsed = !!view.options?.collapsed
-		if (view.created) return setInline({original: "", collapsed})
-		if (!view.base) return setInline(undefined)
-		let cancelled = false
-		repo.find<FileDoc>(view.base).then(
-			handle => {
-				if (!cancelled) setInline({original: fileText(handle.doc()), collapsed})
-			},
-			error => console.warn("[file] couldn't read the version compared against", error),
-		)
-		onCleanup(() => {
-			cancelled = true
-		})
-	})
-
-	return inline
+	return createMemo<Inline | undefined>(
+		() => {
+			const view = compare() as unknown as CompareView | undefined
+			if (!view?.mode || !MODES.includes(view.mode)) return undefined
+			const collapsed = view.mode === "changes-only"
+			if (view.missing) return {original: "", collapsed}
+			if (!view.other) return undefined
+			try {
+				return {original: fileText(Automerge.load<FileDoc>(view.other)), collapsed}
+			} catch (error) {
+				console.warn("[file] couldn't read the version compared with", error)
+				return undefined
+			}
+		},
+		undefined,
+		{equals: (a, b) => a?.original === b?.original && a?.collapsed === b?.collapsed},
+	)
 }
