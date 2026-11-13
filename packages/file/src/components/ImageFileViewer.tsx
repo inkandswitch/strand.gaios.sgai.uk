@@ -15,6 +15,7 @@ export function ImageFileViewer(props: {doc: FileDoc; element?: HTMLElement}) {
 		subscribe(props.element, {
 			type: "compare:view",
 			modes: {"onion-skin": true, swipe: true},
+			prefers: "swipe",
 		})
 
 	const imgUrl = createMemo(() => {
