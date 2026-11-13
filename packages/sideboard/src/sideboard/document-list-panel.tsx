@@ -51,8 +51,8 @@ const ItemMenu = lazy(() =>
 /**
  * The document-list panel: a sticky toolbar (the new-doc button) over a
  * scrolling, recursive list of the folder's documents and subfolders. Renders a
- * single folder, given its url. Inside a review provider, the files the
- * checked-out draft changed are marked, and can be all that's shown.
+ * single folder, given its url. Inside a compare provider, the files the
+ * checked-out draft and the compared one differ on are marked.
  *
  * Documents are opened by where they sit under the folder
  * (`automerge:<folder>/<name>/<name>`) rather than by their own url.

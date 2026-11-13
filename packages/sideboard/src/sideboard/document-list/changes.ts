@@ -1,35 +1,36 @@
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { subscribe } from "@inkandswitch/patchwork-providers-solid";
-import { createMemo, createSelector } from "solid-js";
+import { createMemo } from "solid-js";
+
+// Which draft has changes to a file that the other doesn't: ours (the
+// checked-out draft), theirs (the compared one), or both.
+export type Side = "ours" | "theirs" | "both";
 
 /**
- * What the checked-out draft changed, as the rows read it: a changed file is
- * marked, and with `onlyChanged` on, only changed files and the folders
- * holding them show.
+ * The checked-out draft compared with another, as the rows read it: a file
+ * that differs is marked with whose changes it has, a folder with whose
+ * changes are beneath it, and while comparing everything else is quieter.
  */
 export type ChangeMarks = {
-  changed(url: AutomergeUrl): boolean;
-  holdsChanges(url: AutomergeUrl): boolean;
-  onlyChanged(): boolean;
+  side(url: AutomergeUrl): Side | undefined;
+  comparing(): boolean;
 };
 
-// The review provider's `review:changes`. Without one above (outside a draft)
-// nothing is marked.
-type ChangeView = {
-  files: AutomergeUrl[];
-  folders: AutomergeUrl[];
-  onlyChanged: boolean;
+// The compare provider's `compare:changes`. Without one above (outside a
+// draft) nothing is marked.
+type CompareChanges = {
+  status: "off" | "loading" | "ready";
+  files: Record<AutomergeUrl, Side>;
+  folders: Record<AutomergeUrl, Side>;
 };
 
-const NONE: ChangeView = { files: [], folders: [], onlyChanged: false };
+const NONE: CompareChanges = { status: "off", files: {}, folders: {} };
 
 export function useChangeMarks(element: HTMLElement): ChangeMarks {
-  const view = subscribe<ChangeView>(element, { type: "review:changes" }, NONE);
-  const files = createMemo(() => new Set(view().files));
-  const folders = createMemo(() => new Set(view().folders));
+  const changes = subscribe<CompareChanges>(element, { type: "compare:changes" }, NONE);
+  const sides = createMemo(() => ({ ...changes().folders, ...changes().files }));
   return {
-    changed: createSelector(files, (url: AutomergeUrl, set) => set.has(url)),
-    holdsChanges: createSelector(folders, (url: AutomergeUrl, set) => set.has(url)),
-    onlyChanged: () => view().onlyChanged,
+    side: (url) => sides()[url],
+    comparing: () => changes().status === "ready",
   };
 }

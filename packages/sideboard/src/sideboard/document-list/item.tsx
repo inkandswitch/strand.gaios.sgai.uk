@@ -33,6 +33,7 @@ import { startDrag } from "../dnd/drag-start.ts";
 import { createDragOut } from "../dnd/drag-out.ts";
 import { createHoverTimer } from "../lib/hover-timer.ts";
 import { revealSelectedRow } from "./reveal.ts";
+import type { Side } from "./changes.ts";
 
 // Spring-loading: while a drag is in progress, hovering it over a document
 // row for a moment opens that document in the main view *without ending the
@@ -41,6 +42,12 @@ import { revealSelectedRow } from "./reveal.ts";
 // folder.tsx), and the rows being dragged never spring-load themselves.
 const SPRING_LOAD_MS = 1500;
 
+const SIDE_TITLES: Record<Side, string> = {
+  ours: "Changed on this draft",
+  theirs: "Changed on the compared draft",
+  both: "Changed on both drafts",
+};
+
 export default function Item(props: {
   "aria-label": string;
   id: string;
@@ -48,8 +55,10 @@ export default function Item(props: {
   name: string;
   type: string;
   pressed: boolean;
-  /** the checked-out draft changed it */
-  changed?: boolean;
+  /** whose changes it has, compared with another draft */
+  side?: Side;
+  /** compared with another draft, and the same on both */
+  unchanged?: boolean;
   children: JSX.Element;
   /** unset for folders: pressing a folder's row expands it instead */
   openWith?(toolId?: string, placement?: Placement): void;
@@ -142,6 +151,7 @@ export default function Item(props: {
       aria-selected={props.pressed ? "true" : undefined}
       aria-expanded={isFolder() ? !!props.isExpanded : undefined}
       class="popmenu__trigger document-list-item"
+      classList={{ "document-list-item--unchanged": props.unchanged }}
       draggable="true"
       data-dnd-item={props.id}
       data-dnd-parent={parentUrl()}
@@ -297,8 +307,13 @@ export default function Item(props: {
         }
       }}
     >
-      <Show when={props.changed}>
-        <span class="document-list-item__changed" title="Changed on this draft" />
+      <Show when={props.side}>
+        {(side) => (
+          <span
+            class={`document-list-item__changed document-list-item__changed--${side()}`}
+            title={SIDE_TITLES[side()]}
+          />
+        )}
       </Show>
       {props.children}
     </div>

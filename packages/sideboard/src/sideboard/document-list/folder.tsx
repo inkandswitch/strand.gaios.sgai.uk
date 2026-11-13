@@ -73,13 +73,6 @@ export default function Folder(props: {
   const depthStyle = () => ({ "--depth": depth() + 1 });
   const folderDepthStyle = () => ({ "--depth": depth() });
 
-  // Showing only what changed opens the folders it's in.
-  createEffect(() => {
-    if (props.changes.onlyChanged() && props.changes.holdsChanges(props.url)) {
-      setExpanded(true);
-    }
-  });
-
   // Auto-expand when this folder lies on the path to a selected doc. The set is
   // computed from folder data by the panel (see auto-expand.ts), so it reveals
   // deeply nested selections without us having to eagerly mount the subtree:
@@ -182,6 +175,8 @@ export default function Folder(props: {
         url={props.url}
         name={folder()?.title ?? props.name ?? ""}
         pressed={props.isSelected(props.url)}
+        side={props.changes.side(props.url)}
+        unchanged={props.changes.comparing() && !props.changes.side(props.url)}
         type="folder"
         element={props.element}
         repo={props.repo}

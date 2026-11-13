@@ -126,11 +126,7 @@ export function DocumentList(props: DocumentListProps) {
     <>
       <For each={docs()}>
         {(doc, index) => {
-          const changed = () =>
-            doc.type == "folder"
-              ? props.changes.holdsChanges(doc.url)
-              : props.changes.changed(doc.url);
-          const visible = () => !props.changes.onlyChanged() || changed();
+          const side = () => props.changes.side(doc.url);
           const remove = () => removeItem(index());
           const relid = () => props.handle.url + "/" + index();
           onCleanup(markMounted(props.element, doc.url));
@@ -226,11 +222,7 @@ export function DocumentList(props: DocumentListProps) {
                 {placeholder()}
               </Show>
               <div
-                classList={{
-                  "document-list__item": true,
-                  "document-list__item--visible": visible(),
-                  "document-list__item--invisible": !visible(),
-                }}
+                class="document-list__item"
               >
                 {/* Per-row boundary: a folder still loading its handle shows a
                     skeleton here without blocking its siblings. */}
@@ -275,7 +267,8 @@ export function DocumentList(props: DocumentListProps) {
                     startRenaming={() => setRenaming(relid())}
                     remove={remove}
                     pressed={props.isSelected(doc.url)}
-                    changed={changed()}
+                    side={side()}
+                    unchanged={props.changes.comparing() && !side()}
                     type={doc.type}
                     element={props.element}
                     repo={props.repo}

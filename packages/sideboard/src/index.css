@@ -23,8 +23,10 @@
 
   --document-list-radius: 0.275rem;
   --placeholder-line: var(--studio-line-offset-50, #808e80);
-  /* the mark on a file the checked-out draft changed */
-  --document-list-changed: var(--studio-draft-changed, #2f9e74);
+  /* the marks on a file that differs from the compared draft: changed on
+     the checked-out draft, on the compared one */
+  --document-list-ours: var(--studio-compare-ours, #7f77dd);
+  --document-list-theirs: var(--studio-compare-theirs, #d85a30);
 
   --document-list-primary: var(--studio-primary-fill, var(--studio-primary, #35f7ca));
   --document-list-primary-line: var(--studio-primary-line, var(--studio-line, black));
@@ -431,8 +433,27 @@ button {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--document-list-changed);
   }
+}
+
+.document-list-item__changed--ours::before {
+  background: var(--document-list-ours);
+}
+
+.document-list-item__changed--theirs::before {
+  background: var(--document-list-theirs);
+}
+
+.document-list-item__changed--both::before {
+  background: linear-gradient(
+    90deg,
+    var(--document-list-ours) 50%,
+    var(--document-list-theirs) 50%
+  );
+}
+
+.document-list-item--unchanged {
+  opacity: 0.55;
 }
 
 /* the whole row toggles the folder, so the caret has no hover of its own */
@@ -469,15 +490,6 @@ button {
 .document-list__item {
   content-visibility: auto;
   contain-intrinsic-size: auto 2.25rem;
-}
-
-.document-list__item--invisible {
-  display: none;
-}
-
-.document-list__item--visible,
-.document-list__item--invisible:has(.document-list__item--visible) {
-  display: block;
 }
 
 .document-list .document-list-folder__contents .document-list-item {
