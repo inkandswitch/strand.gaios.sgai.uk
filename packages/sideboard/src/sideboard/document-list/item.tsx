@@ -1,4 +1,4 @@
-import { createEffect, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, For, onCleanup, Show, type JSX } from "solid-js";
 import type {
   DatatypeDescription,
   Plugin,
@@ -33,7 +33,7 @@ import { startDrag } from "../dnd/drag-start.ts";
 import { createDragOut } from "../dnd/drag-out.ts";
 import { createHoverTimer } from "../lib/hover-timer.ts";
 import { revealSelectedRow } from "./reveal.ts";
-import type { Side } from "./changes.ts";
+import type { Mark } from "./changes.ts";
 
 // Spring-loading: while a drag is in progress, hovering it over a document
 // row for a moment opens that document in the main view *without ending the
@@ -42,12 +42,6 @@ import type { Side } from "./changes.ts";
 // folder.tsx), and the rows being dragged never spring-load themselves.
 const SPRING_LOAD_MS = 1500;
 
-const SIDE_TITLES: Record<Side, string> = {
-  ours: "Changed on this draft",
-  theirs: "Changed on the compared draft",
-  both: "Changed on both drafts",
-};
-
 export default function Item(props: {
   "aria-label": string;
   id: string;
@@ -55,8 +49,8 @@ export default function Item(props: {
   name: string;
   type: string;
   pressed: boolean;
-  /** whose changes it has, compared with another draft */
-  side?: Side;
+  /** how it differs, compared with another draft or merged into one */
+  mark?: Mark;
   /** compared with another draft, and the same on both */
   unchanged?: boolean;
   children: JSX.Element;
@@ -308,18 +302,43 @@ export default function Item(props: {
       }}
     >
       {props.children}
-      <Show when={props.side}>
-        {(side) => (
-          <span class="document-list-item__changes" title={SIDE_TITLES[side()]}>
-            <Show when={side() !== "theirs"}>
-              <span class="document-list-item__changed document-list-item__changed--ours" />
-            </Show>
-            <Show when={side() !== "ours"}>
-              <span class="document-list-item__changed document-list-item__changed--theirs" />
-            </Show>
-          </span>
-        )}
-      </Show>
+      <Show when={props.mark}>{(mark) => <ChangeMark mark={mark()} />}</Show>
     </div>
   );
 }
+
+export function ChangeMark(props: { mark: Mark }) {
+  return (
+    <span class="document-list-item__changes" title={MARK_TITLES[props.mark]}>
+      <Show when={props.mark === "both"}>
+        <span class="document-list-item__review">review</span>
+      </Show>
+      <For each={MARK_DOTS[props.mark]}>
+        {(dot) => (
+          <span class={`document-list-item__changed document-list-item__changed--${dot}`} />
+        )}
+      </For>
+    </span>
+  );
+}
+
+const MARK_TITLES: Record<Mark, string> = {
+  differs: "Different on the two drafts",
+  ours: "Only on this draft",
+  theirs: "Only on the compared draft",
+  added: "Added by the merge",
+  removed: "Removed by the merge",
+  changed: "Changed by the merge",
+  both: "Changed on both drafts: review it",
+};
+
+// A dot per draft it's on, compared; merging, one for what the merge does.
+const MARK_DOTS: Record<Mark, string[]> = {
+  differs: ["ours", "theirs"],
+  ours: ["ours"],
+  theirs: ["theirs"],
+  added: ["added"],
+  removed: ["removed"],
+  changed: ["changed"],
+  both: ["changed"],
+};

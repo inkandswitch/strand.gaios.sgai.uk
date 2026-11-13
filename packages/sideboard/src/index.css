@@ -23,10 +23,13 @@
 
   --document-list-radius: 0.275rem;
   --placeholder-line: var(--studio-line-offset-50, #808e80);
-  /* the marks on a file that differs from the compared draft: changed on
-     the checked-out draft, on the compared one */
+  /* the marks on a file compared with another draft, one per draft it's on;
+     merging, what the merge does to it */
   --document-list-ours: var(--studio-compare-ours, #7f77dd);
   --document-list-theirs: var(--studio-compare-theirs, #d85a30);
+  --document-list-added: var(--studio-merge-added, #3b8f4f);
+  --document-list-removed: var(--studio-merge-removed, #c4473a);
+  --document-list-changed: var(--studio-merge-changed, #8a8883);
 
   --document-list-primary: var(--studio-primary-fill, var(--studio-primary, #35f7ca));
   --document-list-primary-line: var(--studio-primary-line, var(--studio-line, black));
@@ -370,8 +373,39 @@ button {
   background: var(--document-list-theirs);
 }
 
+.document-list-item__changed--added {
+  background: var(--document-list-added);
+}
+
+.document-list-item__changed--removed {
+  background: var(--document-list-removed);
+}
+
+.document-list-item__changed--changed {
+  background: var(--document-list-changed);
+}
+
+.document-list-item__review {
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: var(--document-list-review, #854f0b);
+  background: var(--document-list-review-fill, #faeeda);
+}
+
 .document-list-item--unchanged {
   opacity: 0.55;
+}
+
+/* only on the other draft: shown, but can't be opened */
+.document-list .document-list-item--ghost {
+  color: var(--document-list-muted);
+  font-style: italic;
+}
+
+.document-list .document-list-item--removed .document-list-item__name {
+  text-decoration: line-through;
 }
 
 /* the whole row toggles the folder, so the caret has no hover of its own */

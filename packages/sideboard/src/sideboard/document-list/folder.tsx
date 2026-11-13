@@ -175,8 +175,8 @@ export default function Folder(props: {
         url={props.url}
         name={folder()?.title ?? props.name ?? ""}
         pressed={props.isSelected(props.url)}
-        side={props.changes.side(props.url)}
-        unchanged={props.changes.comparing() && !props.changes.side(props.url)}
+        mark={props.changes.mark(props.url)}
+        unchanged={props.changes.comparing() && !props.changes.mark(props.url)}
         type="folder"
         element={props.element}
         repo={props.repo}

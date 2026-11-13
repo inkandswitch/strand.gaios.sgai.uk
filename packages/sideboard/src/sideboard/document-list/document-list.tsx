@@ -35,6 +35,7 @@ import { childLocation } from "../lib/location.ts";
 import { markMounted } from "./auto-expand.ts";
 import type { ChangeMarks } from "./changes.ts";
 import Folder from "./folder.tsx";
+import { GhostRows } from "./ghost.tsx";
 import Item from "./item.tsx";
 import { ItemName } from "./name.tsx";
 import { LoadingRow } from "./loading-row.tsx";
@@ -126,7 +127,7 @@ export function DocumentList(props: DocumentListProps) {
     <>
       <For each={docs()}>
         {(doc, index) => {
-          const side = () => props.changes.side(doc.url);
+          const mark = () => props.changes.mark(doc.url);
           const remove = () => removeItem(index());
           const relid = () => props.handle.url + "/" + index();
           onCleanup(markMounted(props.element, doc.url));
@@ -267,8 +268,8 @@ export function DocumentList(props: DocumentListProps) {
                     startRenaming={() => setRenaming(relid())}
                     remove={remove}
                     pressed={props.isSelected(doc.url)}
-                    side={side()}
-                    unchanged={props.changes.comparing() && !side()}
+                    mark={mark()}
+                    unchanged={props.changes.comparing() && !mark()}
                     type={doc.type}
                     element={props.element}
                     repo={props.repo}
@@ -294,6 +295,7 @@ export function DocumentList(props: DocumentListProps) {
           );
         }}
       </For>
+      <GhostRows parent={props.handle.url} depth={props.depth} changes={props.changes} />
       <Show
         when={pendingHere() && pendingNewDoc()!.index >= (props.docs?.length ?? 0)}
       >
