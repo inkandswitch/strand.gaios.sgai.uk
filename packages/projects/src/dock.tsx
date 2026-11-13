@@ -1,5 +1,5 @@
 import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
-import {accept, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
+import {accept, subscribe, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
 import type {
 	AddPanelPositionOptions,
 	DockviewApi,
@@ -19,6 +19,7 @@ import {
 	onMount,
 	Show,
 	type Accessor,
+	type JSX,
 	type Setter,
 } from "solid-js"
 import {render} from "solid-js/web"
@@ -26,16 +27,15 @@ import {
 	drawnByView,
 	offered,
 	optionsIn,
-	useBase,
 	useCompareModes,
-	type Base,
 	type CompareSelector,
 	type CompareView,
+	type ComparedVersion,
 	type Mode,
 	type Options,
 } from "./compare.ts"
-import {CompareBar, ComparePicker} from "./compare-ui.tsx"
-import {useDocTitle} from "./hooks.ts"
+import {ComparePicker} from "./compare-ui.tsx"
+import {useDocTitle, useMounted} from "./hooks.ts"
 import type {Placement, ProjectRoute, Side} from "./navigation.ts"
 import {OpenWith} from "./open-with.tsx"
 import {projectRoot, relocate, type FindDoc} from "./resolve.ts"
@@ -55,15 +55,23 @@ const THEME: DockviewTheme = {
 /** One of the dock's groups of tabs, named after what it shows. */
 export type DockGroup = {id: string; title: string}
 
+/**
+ * The draft the checked-out one is compared with: views of it are checked
+ * out of the workspace by a draft provider of their own. `draft` is unset
+ * for main.
+ */
+export type Comparing = {
+	workspace: AutomergeUrl
+	draft: AutomergeUrl | undefined
+	name: string
+}
+
 type Panel = {
 	route: Accessor<ProjectRoute>
 	setRoute: Setter<ProjectRoute>
 	/** the tool its document's view mounted, the route's or the fallback */
 	tool: Accessor<string | undefined>
 	setTool: Setter<string | undefined>
-	/** what its document is compared against, on a draft that changed it */
-	base: Accessor<Base | undefined>
-	setBase: Setter<Base | undefined>
 	/** what its document's view asked of the compare modes */
 	asked: Accessor<CompareSelector | undefined>
 	setAsked: Setter<CompareSelector | undefined>
@@ -74,12 +82,13 @@ type Panel = {
 }
 
 /** Its compare mode, worked out for a panel's view. */
-type PanelCompare = Pick<Panel, "setBase" | "asked" | "setAsked"> & {
+type PanelCompare = Pick<Panel, "asked" | "setAsked"> & {
+	comparing(): Comparing | undefined
 	mode(): Mode | undefined
 	options(mode: Mode): Options<unknown>
 }
 
-/** What a panel shows when the mode the project's in isn't one its view takes. */
+/** What a panel shows when its view prefers no mode it takes. */
 const FALLBACK_MODE = "side-by-side"
 
 /**
@@ -92,6 +101,7 @@ export function Dock(props: {
 	route: ProjectRoute
 	repo: Repo
 	draftKey: string
+	comparing: Comparing | undefined
 	focus(panel: ProjectRoute | undefined): void
 	/** where the dock's groups are offered, for opening into one */
 	host: HTMLElement | undefined
@@ -99,8 +109,6 @@ export function Dock(props: {
 	const panels = new Map<string, Panel>()
 	const [groups, setGroups] = createSignal<DockGroup[]>([])
 	const modes = useCompareModes()
-	const [projectMode, setProjectMode] = createSignal("inline")
-	const projectOptions = new Map<string, Options<unknown>>()
 	let element!: HTMLDivElement
 	let api: DockviewApi | undefined
 	let count = 0
@@ -146,14 +154,6 @@ export function Dock(props: {
 
 	return (
 		<div class="projects__dock-area">
-			<Show when={props.draftKey !== "main" && modes().length}>
-				<CompareBar
-					modes={modes()}
-					current={projectMode()}
-					pick={setProjectMode}
-					options={mode => optionsIn(projectOptions, mode)}
-				/>
-			</Show>
 			<div ref={element} class="projects__dock" />
 		</div>
 	)
@@ -162,9 +162,10 @@ export function Dock(props: {
 		return modes().filter(mode => offered(mode, panel.asked()))
 	}
 
+	// The one picked for it, else the one its view prefers.
 	function modeOf(panel: Panel) {
 		const list = offeredTo(panel)
-		const wanted = panel.override() ?? projectMode()
+		const wanted = panel.override() ?? panel.asked()?.prefers
 		return (
 			list.find(mode => mode.id === wanted) ??
 			list.find(mode => mode.id === FALLBACK_MODE) ??
@@ -173,7 +174,7 @@ export function Dock(props: {
 	}
 
 	function optionsOf(panel: Panel, mode: Mode) {
-		return optionsIn(panel.override() ? panel.options : projectOptions, mode)
+		return optionsIn(panel.options, mode)
 	}
 
 	function place(route: ProjectRoute) {
@@ -264,7 +265,6 @@ export function Dock(props: {
 		const id = `panel-${++count}`
 		const [shown, setShown] = createSignal(route)
 		const [tool, setTool] = createSignal<string>()
-		const [base, setBase] = createSignal<Base>()
 		const [asked, setAsked] = createSignal<CompareSelector>()
 		const [override, setOverride] = createSignal<string>()
 		panels.set(id, {
@@ -272,8 +272,6 @@ export function Dock(props: {
 			setRoute: setShown,
 			tool,
 			setTool,
-			base,
-			setBase,
 			asked,
 			setAsked,
 			override,
@@ -324,7 +322,7 @@ export function Dock(props: {
 							setTool={panel.setTool}
 							tool={panel.tool}
 							compare={{
-								setBase: panel.setBase,
+								comparing: () => props.comparing,
 								asked: panel.asked,
 								setAsked: panel.setAsked,
 								mode: () => modeOf(panel),
@@ -362,7 +360,7 @@ export function Dock(props: {
 						<Show when={panel()}>
 							{panel => (
 								<>
-									<Show when={panel().base() && modeOf(panel())}>
+									<Show when={props.comparing && modeOf(panel())}>
 										{mode => (
 											<ComparePicker
 												modes={offeredTo(panel())}
@@ -421,8 +419,6 @@ function DockPanel(props: {
 	const docUrl = () => props.route().resolved.docUrl
 	const title = useDocTitle(props.repo, docUrl)
 	createEffect(() => props.setTitle(docUrl() ? (title() ?? "") : "Nothing open"))
-	const base = useBase(props.repo, props.draftKey, docUrl)
-	createEffect(() => props.compare.setBase(base()))
 	return (
 		<Show when={docUrl()} fallback={<p class="projects__empty">{EMPTY}</p>}>
 			{url => (
@@ -436,7 +432,6 @@ function DockPanel(props: {
 							toolId={props.route().location.toolId}
 							tool={props.tool}
 							setTool={props.setTool}
-							base={base}
 							compare={props.compare}
 						/>
 					)}
@@ -447,52 +442,61 @@ function DockPanel(props: {
 }
 
 /**
- * A document, and on a draft that changed it, the version it started from
- * beside it, laid out by the compare mode, unless the document's view draws
- * the mode itself. The view showing the document stays put as the mode
- * changes, and is told the mode and what it's compared against.
+ * A document, and while the checked-out draft is compared with another, that
+ * draft's version beside it, laid out by the compare mode, unless the
+ * document's view draws the mode itself. The view showing the document stays
+ * put as the mode changes, and is told the mode and the other version.
  */
 function Compared(props: {
 	url: AutomergeUrl
 	toolId: string | undefined
 	tool: Accessor<string | undefined>
 	setTool(toolId: string | undefined): void
-	base: Accessor<Base | undefined>
 	compare: PanelCompare
 }) {
-	const [slotA, setSlotA] = createSignal<HTMLDivElement>()
+	const [slotB, setSlotB] = createSignal<HTMLDivElement>()
+	const [version, setVersion] = createSignal<ComparedVersion>(null)
 	let host!: HTMLDivElement
-	let slotB!: HTMLDivElement
+	let slotA!: HTMLDivElement
 	let view!: HTMLElement
-	const mode = () => (props.base() ? props.compare.mode() : undefined)
+	const comparing = () => props.compare.comparing()
+	const mode = () => (comparing() ? props.compare.mode() : undefined)
 	const laidOut = () => {
 		const current = mode()
 		if (!current?.module.compose || drawnByView(current, props.compare.asked())) return
 		return current
 	}
-	const baseUrl = () => {
-		const base = props.base()
-		return base && "url" in base ? base.url : undefined
-	}
+	const missing = () => version()?.doc === null
+
+	onMount(() => {
+		createEffect(() => {
+			if (!comparing()) return setVersion(null)
+			onCleanup(
+				subscribe(host, {type: "compare:version", url: props.url}, next =>
+					setVersion(() => next as unknown as ComparedVersion)
+				)
+			)
+		})
+	})
 
 	createEffect(() => {
 		const current = laidOut()
-		const a = slotA()
-		if (!current || !a) return
-		onCleanup(current.module.compose!({a, b: slotB}, props.compare.options(current)))
+		const b = slotB()
+		if (!current || !b) return
+		onCleanup(current.module.compose!({a: slotA, b}, props.compare.options(current)))
 	})
 
 	const told = new Set<(view: CompareView) => void>()
 	let latest: () => CompareView = () => NOT_COMPARED
 	createEffect(() => {
 		const current = mode()
-		const base = props.base()
+		const other = version()
 		const options = current && props.compare.options(current)
 		latest = () => ({
-			base: base && "url" in base ? base.url : null,
-			created: !!base && "created" in base,
 			mode: current?.id ?? null,
 			options: options ? options.current() : null,
+			other: current ? (other?.doc ?? null) : null,
+			missing: !!current && other?.doc === null,
 		})
 		const tell = () => {
 			for (const respond of told) respond(latest())
@@ -501,8 +505,8 @@ function Compared(props: {
 		if (options) onCleanup(options.subscribe(tell))
 	})
 
-	// Only the two versions' own views are told: views inside them aren't
-	// comparing anything. The old version's isn't compared against anything.
+	// Only the document's own view is told: views inside it aren't comparing
+	// anything, and nor are the other draft's.
 	const onSubscribe = (event: SubscribeEvent) => {
 		const selector = event.detail.selector as CompareSelector
 		if (selector.type !== "compare:view") return
@@ -517,7 +521,7 @@ function Compared(props: {
 					if (props.compare.asked() === selector) props.compare.setAsked(undefined)
 				}
 			})
-		} else if (target.parentElement && target.parentElement === slotA()) {
+		} else if (slotB()?.contains(target)) {
 			accept<CompareView>(event, respond => respond(NOT_COMPARED))
 		}
 	}
@@ -536,20 +540,7 @@ function Compared(props: {
 
 	return (
 		<div ref={host} class="projects__compare">
-			<Show when={laidOut()}>
-				<div ref={setSlotA} class="projects__compare-slot" data-version="a">
-					<Show when={baseUrl()} fallback={<p class="projects__empty">Not in main</p>}>
-						{url => (
-							<patchwork-view
-								class="projects__document"
-								doc-url={url()}
-								tool-id={props.tool() ?? props.toolId}
-							/>
-						)}
-					</Show>
-				</div>
-			</Show>
-			<div ref={slotB} class="projects__compare-slot" data-version="b">
+			<div ref={slotA} class="projects__compare-slot" data-version="a">
 				<patchwork-view
 					ref={reportTool}
 					class="projects__document"
@@ -557,11 +548,52 @@ function Compared(props: {
 					tool-id={props.toolId}
 				/>
 			</div>
+			<Show when={laidOut() && comparing()}>
+				{other => (
+					<div ref={setSlotB} class="projects__compare-slot" data-version="b">
+						<Show
+							when={!missing()}
+							fallback={<p class="projects__empty">Not in {other().name}</p>}>
+							<Show when={other().draft ?? "main"} keyed>
+								{_draft => (
+									<OtherDraft workspace={other().workspace} draft={other().draft}>
+										<patchwork-view
+											class="projects__document"
+											doc-url={props.url}
+											tool-id={props.tool() ?? props.toolId}
+										/>
+									</OtherDraft>
+								)}
+							</Show>
+						</Show>
+					</div>
+				)}
+			</Show>
 		</div>
 	)
 }
 
-const NOT_COMPARED: CompareView = {base: null, created: false, mode: null, options: null}
+/** The workspace with `draft` checked out (main when unset), for the views inside. */
+function OtherDraft(props: {
+	workspace: AutomergeUrl
+	draft: AutomergeUrl | undefined
+	children: JSX.Element
+}) {
+	const [element, setElement] = createSignal<HTMLElement>()
+	const mounted = useMounted("patchwork-draft-provider", element)
+	return (
+		<patchwork-view
+			ref={setElement}
+			class="projects__other-draft"
+			component="patchwork-draft-provider"
+			doc-url={props.workspace}
+			attr:draft={props.draft}>
+			<Show when={mounted()}>{props.children}</Show>
+		</patchwork-view>
+	)
+}
+
+const NOT_COMPARED: CompareView = {mode: null, options: null, other: null, missing: false}
 
 /**
  * Answer `dock:groups` for everything inside `element`: the dock's groups,

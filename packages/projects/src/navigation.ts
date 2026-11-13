@@ -25,6 +25,7 @@ import {
 	type Resolved,
 } from "./resolve.ts"
 import type {SelectedView} from "./selection.ts"
+import type {DraftsState} from "./types.ts"
 
 /**
  * What's open in a project's focused panel. `placement` says where an open
@@ -53,7 +54,7 @@ export type Side = "right" | "left" | "above" | "below"
 
 export type Route =
 	| {page: "loading"}
-	| {page: "splash"}
+	| {page: "home"}
 	| {page: "packages"}
 	| ({page: "project"} & ProjectRoute)
 
@@ -70,7 +71,8 @@ export type Navigation = {
 	open(url: string, toolId?: string | null, placement?: Placement): void
 	/** another panel took focus, or the last one closed */
 	focus(panel: ProjectRoute | undefined): void
-	home(): void
+	/** the open project is compared with another of its drafts, or isn't */
+	compare(draft: AutomergeUrl | undefined): void
 	/** the page for installing packages: tools, datatypes */
 	packages(): void
 	/** where a draft provider should be mounted, if anywhere */
@@ -91,8 +93,10 @@ type Attached = {
 	find: FindDoc
 	/** the draft it was started on */
 	initial: AutomergeUrl | null
-	/** what it has checked out, once it has said */
+	/** what it has checked out, once it has said; null for main */
 	checkedOut: AutomergeUrl | null | undefined
+	/** main's url, once it has said */
+	main: AutomergeUrl | undefined
 	/** a switch navigation asked for, so it's not taken for the user's */
 	switching: AutomergeUrl | null | undefined
 }
@@ -105,8 +109,8 @@ type Attached = {
  * A project is seen through one of its drafts: the frame mounts a draft
  * provider for it (see `scope`), and everything in the project, paths
  * included, is looked up through that provider's repo. The hash's `draft=`
- * and the checked-out draft follow each other. Opening another project
- * starts it on main.
+ * and the checked-out draft follow each other, and `compare=` and the draft
+ * it's compared with. Opening another project starts it on main.
  */
 export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	const find: FindDoc = async url => (await repo.find(url)).doc()
@@ -165,7 +169,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		selectedView,
 		open,
 		focus,
-		home,
+		compare,
 		packages,
 		scope,
 		projectRepo,
@@ -189,7 +193,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			reject(new LocationError("not-a-project"), "push")
 			return
 		}
-		// Within a project, stay in the draft it's on.
+		// Within a project, stay in the draft it's on, compared as it is.
 		const sameProject =
 			current && current.resolved.projectUrl === projectUrlOf(location)
 		void go(
@@ -197,6 +201,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 				...location,
 				toolId: toolId ?? undefined,
 				draft: sameProject ? current.location.draft : undefined,
+				compare: sameProject ? current.location.compare : undefined,
 			},
 			"push",
 			sameProject ? placement : undefined
@@ -219,14 +224,19 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		attempt++
 		show(
 			panel.resolved,
-			{...panel.location, draft: current.location.draft},
+			{
+				...panel.location,
+				draft: current.location.draft,
+				compare: current.location.compare,
+			},
 			"replace"
 		)
 	}
 
-	function home() {
-		leave("splash")
-		write("", "push")
+	function compare(draft: AutomergeUrl | undefined) {
+		const current = project()
+		if (!current || current.location.compare === draft) return
+		show(current.resolved, {...current.location, compare: draft}, "replace")
 	}
 
 	function packages() {
@@ -235,7 +245,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	}
 
 	// To a page outside any project, unmounting its drafts.
-	function leave(page: "splash" | "packages") {
+	function leave(page: "home" | "packages") {
 		attempt++
 		setRoute({page})
 		setScope(undefined)
@@ -244,7 +254,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	function followHash() {
 		const hash = currentHash()
 		written = hash
-		if (!hash) return leave("splash")
+		if (!hash) return leave("home")
 		if (hash === PACKAGES_HASH) return leave("packages")
 		const location = parseHash(hash)
 		if (location) void go(location, "replace")
@@ -268,11 +278,12 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			const draft = location.draft ?? null
 			if (draft !== draftOf(scoped)) {
 				scoped.switching = draft
-				const selection = await request<{checkedOut: AutomergeUrl | null}>(
+				const checkout = await request<{draft: AutomergeUrl} | null>(
 					scoped.provider,
-					{type: "draft:select", checkedOut: draft, at: null}
+					{type: "draft:checkout", draft: draft ?? projectUrl}
 				)
-				scoped.checkedOut = selection.checkedOut
+				if (checkout) scoped.checkedOut = mainAsNull(scoped, checkout.draft)
+				scoped.switching = undefined
 				if (mine !== attempt) return
 			}
 			const resolved = await resolveLocation(location, scoped.find)
@@ -320,13 +331,14 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			find: async url => (await provider.repo.find(url)).doc(),
 			initial: scope()?.draft ?? null,
 			checkedOut: undefined,
+			main: undefined,
 			switching: undefined,
 		}
-		const unsubscribe = subscribe<{checkedOut: AutomergeUrl | null}>(
-			provider,
-			{type: "draft:selection"},
-			selection => onDraftSelected(scoped, selection.checkedOut)
-		)
+		const unsubscribe = subscribe<DraftsState>(provider, {type: "drafts"}, state => {
+			scoped.main = state.main
+			if (state.status !== "verifying")
+				onDraftSelected(scoped, mainAsNull(scoped, state.checkedOut))
+		})
 		setAttached(scoped)
 		const ready = waiting
 		waiting = []
@@ -341,11 +353,9 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	// the same thing in it, or the project with nothing open if it isn't
 	// there.
 	function onDraftSelected(scoped: Attached, checkedOut: AutomergeUrl | null) {
+		if (scoped.checkedOut === checkedOut) return
 		scoped.checkedOut = checkedOut
-		if (scoped.switching === checkedOut) {
-			scoped.switching = undefined
-			return
-		}
+		if (scoped.switching === checkedOut) return
 		const current = project()
 		if (!current || current.resolved.projectUrl !== scoped.projectUrl) return
 		if ((current.location.draft ?? null) === checkedOut) return
@@ -376,14 +386,13 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	}
 
 	// A link that goes nowhere is ignored: what's open stays open. A hash
-	// that can't be followed goes back to the splash screen, so a reload
-	// doesn't repeat it.
+	// that can't be followed goes back home, so a reload doesn't repeat it.
 	function reject(error: unknown, mode: HistoryMode) {
 		const message =
 			error instanceof LocationError ? error.message : String(error)
 		console.warn("projects:", message)
 		if (mode === "push") return
-		setRoute({page: "splash"})
+		setRoute({page: "home"})
 		setScope(undefined)
 		write("", "replace")
 	}
@@ -439,6 +448,11 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 /** The draft a provider is on, or is about to be on. */
 function draftOf(scoped: Attached) {
 	return scoped.checkedOut === undefined ? scoped.initial : scoped.checkedOut
+}
+
+// The hash leaves main out; the provider names it by a url.
+function mainAsNull(scoped: Attached, draft: AutomergeUrl) {
+	return draft === scoped.main || draft === scoped.projectUrl ? null : draft
 }
 
 function atRoot(location: Location): Location {

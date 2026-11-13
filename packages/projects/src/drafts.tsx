@@ -2,12 +2,13 @@ import {request, subscribe} from "@inkandswitch/patchwork-providers"
 import {createEffect, createSignal, onCleanup, Show, type JSX} from "solid-js"
 import {useMounted} from "./hooks.ts"
 import type {DraftProviderElement, DraftScope, Navigation} from "./navigation.ts"
+import type {DraftsState} from "./types.ts"
 
 const PROVIDER = "patchwork-draft-provider"
 
 /**
- * A project's draft provider, around everything shown of the project: the
- * tree and the open document both see the draft it has checked out.
+ * A workspace's draft provider, around everything shown of it: the files and
+ * the open documents all see the draft it has checked out.
  */
 export function DraftScopeView(props: {
 	scope: DraftScope
@@ -22,17 +23,20 @@ export function DraftScopeView(props: {
 		const provider = element()
 		if (!mounted() || !provider) return
 		onCleanup(props.attach(props.scope.projectUrl, provider))
-		onCleanup(subscribe<string>(provider, {type: "draft:status"}, setStatus))
+		onCleanup(
+			subscribe<DraftsState>(provider, {type: "drafts"}, state => setStatus(state.status))
+		)
 	})
 
 	const openMain = () => {
 		const provider = element()
 		if (provider)
-			void request(provider, {type: "draft:select", checkedOut: null, at: null})
+			void request(provider, {type: "draft:checkout", draft: props.scope.projectUrl})
 	}
 
 	return (
 		<patchwork-view
+			class="projects__scope"
 			component={PROVIDER}
 			doc-url={props.scope.projectUrl}
 			attr:draft={props.scope.draft}

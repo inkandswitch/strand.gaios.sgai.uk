@@ -38,7 +38,7 @@ export function removeFromRecents(
 	recents.change(doc => removeEntries(doc, projectUrl))
 }
 
-export async function createProject(repo: Repo, name: string) {
+export async function createWorkspace(repo: Repo, name: string) {
 	const datatype = await getRegistry<DatatypeDescription>(
 		"patchwork:datatype"
 	).load("folder")

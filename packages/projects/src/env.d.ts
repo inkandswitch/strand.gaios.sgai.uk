@@ -5,6 +5,8 @@ declare module "solid-js" {
 		interface ExplicitAttributes {
 			/** the draft provider's starting draft */
 			draft: string | undefined
+			/** the draft the compare provider starts out comparing with */
+			against: string | undefined
 		}
 	}
 }

@@ -1,17 +1,10 @@
-import {
-	parseAutomergeUrl,
-	stringifyAutomergeUrl,
-	type AutomergeUrl,
-	type DocHandle,
-	type Repo,
-	type UrlHeads,
-} from "@automerge/automerge-repo/slim"
+import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
 import {
 	getRegistry,
 	type LoadedPlugin,
 	type PluginDescription,
 } from "@inkandswitch/patchwork-plugins"
-import {createEffect, createSignal, onCleanup, type Accessor} from "solid-js"
+import {createSignal, onCleanup, type Accessor} from "solid-js"
 
 // The compare-modes package's plugin type, as this reads it.
 export type CompareModeDescription = PluginDescription & {
@@ -37,27 +30,30 @@ export type Options<O> = {
 /**
  * What a view asks the panel showing it: `modes` turns modes on or off for
  * it, `draws` names the modes it draws itself though the panel could lay
- * them out.
+ * them out, `prefers` the mode to start in.
  */
 export type CompareSelector = {
 	type: "compare:view"
 	modes?: Record<string, boolean>
 	draws?: string[]
+	prefers?: string
 }
 
 /**
- * What it's told: the mode, its options, and the version it's compared
- * against; `created` when there's none because the draft made the document.
+ * What it's told while its draft is compared with another: the mode, its
+ * options, and the other draft's version of the document, saved, or
+ * `missing` when that draft doesn't have it. All null when nothing's
+ * compared.
  */
 export type CompareView = {
-	base: AutomergeUrl | null
-	created: boolean
 	mode: string | null
 	options: unknown
+	other: Uint8Array | null
+	missing: boolean
 }
 
-/** What a document is compared against on a draft. */
-export type Base = {url: AutomergeUrl} | {created: true}
+/** The compare provider's `compare:version`: null when nothing's compared. */
+export type ComparedVersion = {draft: AutomergeUrl; doc: Uint8Array | null} | null
 
 /** The registered compare modes, loaded, kept current as packages come and go. */
 export function useCompareModes(): Accessor<Mode[]> {
@@ -114,60 +110,4 @@ export function createOptions<O>(initial: O): Options<O> {
 			return () => listeners.delete(listener)
 		},
 	}
-}
-
-// The parts of the drafts package's stored shapes read here.
-type CloneEntry = {clonedAt: UrlHeads; cloneUrl?: AutomergeUrl}
-type DraftDoc = {clones?: Record<AutomergeUrl, CloneEntry>}
-
-/**
- * The version of the document at `docUrl` the checked-out draft started
- * from: undefined on main and while the draft hasn't changed it. The draft
- * repo reads the url at those heads from the draft's copy, which shares the
- * original's history.
- */
-export function useBase(
-	repo: Repo,
-	draft: Accessor<string>,
-	docUrl: Accessor<AutomergeUrl | undefined>
-): Accessor<Base | undefined> {
-	const [base, setBase] = createSignal<Base | undefined>(undefined, {equals: sameBase})
-	createEffect(() => {
-		const draftUrl = draft()
-		const url = docUrl()
-		setBase(undefined)
-		if (draftUrl === "main" || !url) return
-		const {documentId} = parseAutomergeUrl(url)
-		const own = stringifyAutomergeUrl({documentId})
-		let handle: DocHandle<DraftDoc> | undefined
-		let cancelled = false
-		const update = () => setBase(baseOf(own, handle?.doc()?.clones?.[own]))
-		repo.find<DraftDoc>(draftUrl as AutomergeUrl).then(
-			found => {
-				if (cancelled) return
-				handle = found
-				found.on("change", update)
-				update()
-			},
-			error => console.warn("projects: couldn't load the checked-out draft", error)
-		)
-		onCleanup(() => {
-			cancelled = true
-			handle?.off("change", update)
-		})
-	})
-	return base
-}
-
-function baseOf(own: AutomergeUrl, entry: CloneEntry | undefined): Base | undefined {
-	if (!entry?.cloneUrl) return undefined
-	if (entry.clonedAt.length === 0) return {created: true}
-	const {documentId} = parseAutomergeUrl(own)
-	return {url: stringifyAutomergeUrl({documentId, heads: entry.clonedAt})}
-}
-
-function sameBase(a: Base | undefined, b: Base | undefined) {
-	if (!a || !b) return a === b
-	if ("created" in a || "created" in b) return "created" in a && "created" in b
-	return a.url === b.url
 }

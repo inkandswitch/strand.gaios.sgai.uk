@@ -1,7 +1,7 @@
 import type {DocHandle} from "@automerge/automerge-repo/slim"
 import type {FolderDoc} from "@inkandswitch/patchwork-filesystem"
 import type {ToolElement} from "@inkandswitch/patchwork-plugins"
-import {createEffect, Show} from "solid-js"
+import {createEffect, createSignal, Show} from "solid-js"
 import {render} from "solid-js/web"
 import {DraftScopeView} from "./drafts.tsx"
 import {useDoc, useHandle} from "./hooks.ts"
@@ -11,9 +11,11 @@ import {ProjectView} from "./project.tsx"
 import {Provider} from "./provider.tsx"
 import {addToRecents} from "./recents.ts"
 import {provideSelection} from "./selection.ts"
-import {Splash} from "./splash.tsx"
 import styles from "./styles.css?inline"
 import type {AccountDoc} from "./types.ts"
+import {SidebarIcon, WorkspaceList} from "./workspaces.tsx"
+
+const SIDEBAR_KEY = "gaios-projects:workspaces"
 
 export function renderFrame(handle: DocHandle<AccountDoc>, element: ToolElement) {
 	injectStyles()
@@ -47,9 +49,16 @@ function Frame(props: {
 	})
 	createEffect(() => {
 		const page = navigation.route().page
-		if (page === "splash") document.title = props.siteTitle
+		if (page === "home") document.title = props.siteTitle
 		if (page === "packages") document.title = `Packages | ${props.siteTitle}`
 	})
+
+	const [sidebar, setSidebar] = createSignal(localStorage.getItem(SIDEBAR_KEY) !== "hidden")
+	const toggleSidebar = () => {
+		const open = !sidebar()
+		setSidebar(open)
+		localStorage.setItem(SIDEBAR_KEY, open ? "shown" : "hidden")
+	}
 
 	// The open project, once it's the one whose drafts are mounted.
 	const shown = (scope: DraftScope) => {
@@ -67,18 +76,36 @@ function Frame(props: {
 				docUrl={props.account.url}>
 				<patchwork-view component="patchwork-worker-provider">
 					<div class="projects">
-						<Show when={navigation.route().page === "splash"}>
-							<Splash
+						<Show when={sidebar()}>
+							<WorkspaceList
 								recents={recents}
 								repo={repo}
+								current={navigation.scope()?.projectUrl}
+								hidden={account()?.moduleSettingsUrl}
 								open={url => navigation.open(url)}
 								packages={navigation.packages}
+								collapse={toggleSidebar}
 							/>
+						</Show>
+						<Show when={navigation.route().page === "home"}>
+							<div class="projects__card projects__card--empty">
+								<header class="projects__card-header">
+									<button
+										type="button"
+										class="projects__icon-button"
+										title="Workspaces"
+										aria-label="Show or hide workspaces"
+										onClick={toggleSidebar}>
+										<SidebarIcon />
+									</button>
+								</header>
+								<p class="projects__empty">Open a workspace, or make a new one.</p>
+							</div>
 						</Show>
 						<Show when={navigation.route().page === "packages"}>
 							<PackagesPage
 								url={account()?.moduleSettingsUrl}
-								home={navigation.home}
+								toggleSidebar={toggleSidebar}
 							/>
 						</Show>
 						<Show when={navigation.scope()} keyed>
@@ -91,7 +118,8 @@ function Frame(props: {
 												repo={shown().repo}
 												siteTitle={props.siteTitle}
 												focus={navigation.focus}
-												home={navigation.home}
+												compare={navigation.compare}
+												toggleSidebar={toggleSidebar}
 											/>
 										)}
 									</Show>

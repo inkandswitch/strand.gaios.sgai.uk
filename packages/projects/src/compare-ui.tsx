@@ -2,41 +2,9 @@ import {createEffect, createUniqueId, For, onCleanup, Show, createSignal} from "
 import type {Mode, Options} from "./compare.ts"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 
-/** The project's compare mode: every mode, the picked one's controls after. */
-export function CompareBar(props: {
-	modes: Mode[]
-	current: string
-	pick(id: string): void
-	options(mode: Mode): Options<unknown>
-}) {
-	const picked = () => props.modes.find(mode => mode.id === props.current)
-	return (
-		<div class="projects__compare-bar">
-			<Show when={picked()}>
-				{mode => <ModeControls mode={mode()} options={props.options(mode())} />}
-			</Show>
-			<div class="projects__compare-strip" role="radiogroup" aria-label="Compare">
-				<For each={props.modes}>
-					{mode => (
-						<button
-							type="button"
-							role="radio"
-							class="projects__compare-mode"
-							aria-checked={mode.id === props.current}
-							title={mode.name}
-							onClick={() => props.pick(mode.id)}>
-							<ModeIcon mode={mode} />
-						</button>
-					)}
-				</For>
-			</div>
-		</div>
-	)
-}
-
 /**
- * A panel's compare mode, in its tab bar: the modes its view takes, and
- * the project's. A dot says it has one of its own.
+ * A panel's compare mode, in its tab bar: the modes its view takes, the
+ * one it prefers first. A dot says one was picked for it.
  */
 export function ComparePicker(props: {
 	modes: Mode[]
@@ -83,7 +51,7 @@ export function ComparePicker(props: {
 				}}
 				onToggle={event => setOpen(event.newState === "open")}>
 				<Item checked={!props.overridden} onClick={() => choose(undefined)}>
-					Same as project
+					As the view prefers
 				</Item>
 				<For each={props.modes}>
 					{mode => (

@@ -12,7 +12,7 @@ import {
  * As a url (what open events carry): `automerge:<projectId>/<name>/<name>#<heads>`
  * In the hash, behind a slug of the project's name and ahead of the tool and
  * the draft:
- * `#<slug>/automerge:<projectId>/<name>/<name>#<heads>?tool=<toolId>&draft=<url>`
+ * `#<slug>/automerge:<projectId>/<name>/<name>#<heads>?tool=<toolId>&draft=<url>&compare=<url>`
  */
 export type Location = {
 	projectId: DocumentId
@@ -22,6 +22,8 @@ export type Location = {
 	toolId?: string
 	/** the project's draft it's in; main when unset */
 	draft?: AutomergeUrl
+	/** the draft it's compared with, if any */
+	compare?: AutomergeUrl
 }
 
 const SCHEME = "automerge:"
@@ -36,10 +38,12 @@ export function parseHash(hash: string): Location | undefined {
 	const params = new URLSearchParams(query)
 	const toolId = params.get("tool")
 	const draft = params.get("draft")
+	const compare = params.get("compare")
 	return {
 		...location,
 		...(toolId ? {toolId} : {}),
 		...(isValidAutomergeUrl(draft) ? {draft} : {}),
+		...(isValidAutomergeUrl(compare) ? {compare} : {}),
 	}
 }
 
@@ -58,6 +62,7 @@ export function formatHash(location: Location, projectName: string) {
 	const query = [
 		location.toolId && `tool=${encodeURIComponent(location.toolId)}`,
 		location.draft && `draft=${location.draft}`,
+		location.compare && `compare=${location.compare}`,
 	].filter(Boolean)
 	const params = query.length ? `?${query.join("&")}` : ""
 	return `${slug ? `${slug}/` : ""}${formatLocationUrl(location)}${params}`

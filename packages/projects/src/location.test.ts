@@ -98,6 +98,20 @@ describe("formatHash", () => {
 		expect(parseHash(hash)).toEqual(location)
 	})
 
+	it("writes the draft it's compared with last", () => {
+		const location = {
+			projectId: PROJECT,
+			segments: [],
+			draft: `automerge:${DRAFT}` as AutomergeUrl,
+			compare: `automerge:${PROJECT}` as AutomergeUrl,
+		}
+		const hash = formatHash(location, "Q3")
+		expect(hash).toBe(
+			`q3/automerge:${PROJECT}?draft=automerge:${DRAFT}&compare=automerge:${PROJECT}`
+		)
+		expect(parseHash(hash)).toEqual(location)
+	})
+
 	it("leaves the slug out when the name has nothing to make one from", () => {
 		expect(formatHash({projectId: PROJECT, segments: []}, "!!!")).toBe(
 			formatLocationUrl({projectId: PROJECT, segments: []})
