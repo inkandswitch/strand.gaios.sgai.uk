@@ -16,16 +16,16 @@ export const Stacked: CompareModeImplementation = {
   compose: ({ a }) => style(a.parentElement!, { gridTemplateRows: "1fr 1fr" }),
 };
 
-/** How much of B shows through A: 0 is all A, 1 all B. */
+/** How much of B shows over A: 0 is all A, 1 all B. */
 type Mix = { mix: number };
 
-// A lies over B and fades as the mix moves towards B. B stays the one that
+// B lies over A and shows as the mix moves towards it. A stays the one that
 // takes the pointer.
 export const OnionSkin: CompareModeImplementation<Mix> = {
   options: { mix: 0.5 },
   compose(slots, options) {
     const restore = overlay(slots);
-    const apply = ({ mix }: Mix) => (slots.a.style.opacity = String(1 - mix));
+    const apply = ({ mix }: Mix) => (slots.b.style.opacity = String(mix));
     apply(options.current());
     const stop = options.subscribe(apply);
     return () => {
@@ -68,7 +68,7 @@ export const Swipe: CompareModeImplementation<At> = {
     host.append(divider);
 
     const apply = ({ at }: At) => {
-      slots.a.style.clipPath = `inset(0 ${(1 - at) * 100}% 0 0)`;
+      slots.b.style.clipPath = `inset(0 0 0 ${at * 100}%)`;
       divider.style.insetInlineStart = `${at * 100}%`;
       divider.setAttribute("aria-valuenow", String(Math.round(at * 100)));
     };
@@ -101,28 +101,11 @@ export const Swipe: CompareModeImplementation<At> = {
   },
 };
 
-/** Whether the view folds away what didn't change. */
-type Collapse = { collapsed: boolean };
+// Both drawn by the view: the other version's changes marked in this one,
+// and those alone, with what's the same on both folded away.
+export const Inline: CompareModeImplementation = {};
 
-export const Inline: CompareModeImplementation<Collapse> = {
-  options: { collapsed: false },
-  controls(element, options) {
-    const label = document.createElement("label");
-    label.className = "compare-modes__control";
-    const box = Object.assign(document.createElement("input"), {
-      type: "checkbox",
-      checked: options.current().collapsed,
-    });
-    box.addEventListener("change", () => options.set({ collapsed: box.checked }));
-    const stop = options.subscribe(({ collapsed }) => (box.checked = collapsed));
-    label.append(box, " Collapse unchanged");
-    element.append(label);
-    return () => {
-      stop();
-      label.remove();
-    };
-  },
-};
+export const ChangesOnly: CompareModeImplementation = {};
 
 function hide(element: HTMLElement) {
   element.hidden = true;
@@ -140,16 +123,16 @@ function style(element: HTMLElement, styles: Partial<CSSStyleDeclaration>) {
   return () => Object.assign(element.style, before);
 }
 
-// Both views in the one cell, A on top, letting the pointer through to B.
+// Both views in the one cell, B on top, letting the pointer through to A.
 function overlay({ a, b }: Slots) {
   const restore = [
-    style(a, { gridArea: "1 / 1", zIndex: "1", pointerEvents: "none" }),
-    style(b, { gridArea: "1 / 1" }),
+    style(a, { gridArea: "1 / 1" }),
+    style(b, { gridArea: "1 / 1", zIndex: "1", pointerEvents: "none" }),
   ];
   return () => {
     for (const undo of restore) undo();
-    a.style.opacity = "";
-    a.style.clipPath = "";
+    b.style.opacity = "";
+    b.style.clipPath = "";
   };
 }
 

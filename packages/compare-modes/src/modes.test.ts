@@ -11,25 +11,27 @@ describe("compare modes", () => {
     expect(host.style.gridTemplateColumns).toBe("");
   });
 
-  it("fades A with the onion skin's mix", () => {
+  it("shows B over A by the onion skin's mix, leaving A the pointer", () => {
     const { slots } = setup();
     const mix = options({ mix: 0.25 });
     const dispose = OnionSkin.compose!(slots, mix);
-    expect(slots.a.style.opacity).toBe("0.75");
+    expect(slots.b.style.opacity).toBe("0.25");
+    expect(slots.b.style.pointerEvents).toBe("none");
     mix.set({ mix: 1 });
-    expect(slots.a.style.opacity).toBe("0");
+    expect(slots.b.style.opacity).toBe("1");
     dispose();
-    expect(slots.a.style.opacity).toBe("");
+    expect(slots.b.style.opacity).toBe("");
+    expect(slots.b.style.pointerEvents).toBe("");
   });
 
-  it("clips A at the swipe and takes its divider away after", () => {
+  it("clips B at the swipe and takes its divider away after", () => {
     const { host, slots } = setup();
-    const dispose = Swipe.compose!(slots, options({ at: 0.5 }));
-    expect(slots.a.style.clipPath).toBe("inset(0 50% 0 0)");
+    const dispose = Swipe.compose!(slots, options({ at: 0.25 }));
+    expect(slots.b.style.clipPath).toBe("inset(0 0 0 25%)");
     expect(host.querySelector('[role="slider"]')).not.toBeNull();
     dispose();
     expect(host.querySelector('[role="slider"]')).toBeNull();
-    expect(slots.a.style.clipPath).toBe("");
+    expect(slots.b.style.clipPath).toBe("");
   });
 });
 

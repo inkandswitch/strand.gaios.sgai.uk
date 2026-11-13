@@ -25,6 +25,13 @@ export const plugins: Mode[] = [
   ),
   mode("swipe", "Swipe", new URL("./icons/swipe.svg", import.meta.url), false, "Swipe"),
   mode("inline", "Inline", new URL("./icons/inline.svg", import.meta.url), false, "Inline"),
+  mode(
+    "changes-only",
+    "Changes only",
+    new URL("./icons/changes-only.svg", import.meta.url),
+    false,
+    "ChangesOnly"
+  ),
 ];
 
 function mode(

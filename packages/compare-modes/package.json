@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "Ways to show two versions of a document: one of them, side by side, stacked, onion skin, swipe, inline.",
+  "description": "Ways to show two versions of a document: one of them, side by side, stacked, onion skin, swipe, inline, changes only.",
   "main": "./dist/index.js",
   "exports": {
     ".": "./dist/index.js"

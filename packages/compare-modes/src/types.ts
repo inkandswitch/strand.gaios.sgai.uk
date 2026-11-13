@@ -24,7 +24,10 @@ export type CompareModeImplementation<O = unknown> = {
   controls?(element: HTMLElement, options: Options<O>): () => void;
 };
 
-/** The two views, side by side in a grid that is their parent. */
+/**
+ * The two views, side by side in a grid that is their parent: A the version
+ * being worked on, B the one it's compared with.
+ */
 export type Slots = { a: HTMLElement; b: HTMLElement };
 
 export type Options<O> = {
