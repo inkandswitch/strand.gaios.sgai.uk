@@ -6,7 +6,7 @@ import type {
 
 import type { DraftDoc, HasDrafts } from "./draft-types.js";
 import { ensureMainDraft } from "./draft-docs.js";
-import { forkPoints, mergeDraft } from "./draft-forks.js";
+import { forkPoints, mergeDraft, mergeIntoPreview } from "./draft-forks.js";
 
 // What the draft list's commands change. Each takes the base repo: the
 // drafts' own bookkeeping never resolves through a `DraftRepo`.
@@ -67,6 +67,43 @@ export async function mergeInto(
   ]);
   await mergeDraft(repo, draft, into);
   return intoUrl;
+}
+
+// What merging a draft into another (null = main) would leave that one as:
+// a hidden draft forked off it now, with the draft merged in. Returns the
+// preview, to check out read-only and discard once done.
+export async function previewMerge(
+  repo: Repo,
+  root: DocHandle<HasDrafts>,
+  draftUrl: AutomergeUrl,
+  intoUrl: AutomergeUrl | null
+): Promise<AutomergeUrl> {
+  const [clones, draft, into] = await Promise.all([
+    forkPoints(repo, root.url, intoUrl),
+    repo.find<DraftDoc>(draftUrl),
+    intoUrl ? repo.find<DraftDoc>(intoUrl) : ensureMainDraft(repo, root),
+  ]);
+  const preview = repo.create<DraftDoc>({
+    "@patchwork": { type: "draft" },
+    preview: true,
+    parent: into.url,
+    drafts: [],
+    clones,
+  });
+  into.change((d) => {
+    d.drafts.push(preview.url);
+  });
+  await mergeIntoPreview(repo, draft, preview);
+  return preview.url;
+}
+
+// Throw a merge's preview away. Anything that isn't one is left alone.
+export async function discardPreview(
+  repo: Repo,
+  previewUrl: AutomergeUrl
+): Promise<void> {
+  const preview = await repo.find<DraftDoc>(previewUrl);
+  if (preview.doc()?.preview) await deleteDraft(repo, previewUrl);
 }
 
 // Unlink a draft from its parent, which drops it, and every draft forked

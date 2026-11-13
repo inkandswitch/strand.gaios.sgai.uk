@@ -15,8 +15,10 @@ import type {
 } from "../draft-types.js";
 import {
   deleteDraft,
+  discardPreview,
   forkDraft,
   mergeInto,
+  previewMerge,
   renameDraft,
 } from "../draft-actions.js";
 import { DraftRepo, baseRepo, type HandleDescriptor } from "../draft-repo.js";
@@ -37,6 +39,9 @@ const VERIFY_TIMEOUT_MS = 5000;
 //   - `draft:merge { draft, into? }` → merges it into `into`, or its parent,
 //     answers `{ into }`; checks that out if the draft was checked out.
 //     `into` can't be the draft or forked from it
+//   - `draft:preview-merge { draft, into }` → a hidden draft showing what
+//     the merge would leave `into` as, answers `{ preview }`
+//   - `draft:discard { draft }` → throws a preview away, answers `{ draft }`
 //   - `draft:delete { draft }` → unlinks it, answers `{ parent }`; checks
 //     that out if the draft was checked out
 //   - `draft:rename { draft, name }` → renames it, answers `{ name }`
@@ -144,6 +149,27 @@ export const DraftProvider = (
           if (selection.checkedOut === target) await select(into);
           await mergeInto(repo, await drafts.root(), target, into);
           return { into: external(into) };
+        });
+        return;
+      }
+
+      case "draft:preview-merge": {
+        const target = draftIn(selector.draft);
+        if (!drafts || !target) return;
+        const into = draftIn(selector.into);
+        if (into === undefined || !canMergeInto(target, into)) return;
+        command(event, async () => ({
+          preview: await previewMerge(repo, await drafts.root(), target, into),
+        }));
+        return;
+      }
+
+      case "draft:discard": {
+        const preview = draftIn(selector.draft);
+        if (!drafts || !preview) return;
+        command(event, async () => {
+          await discardPreview(repo, preview);
+          return { draft: preview };
         });
         return;
       }

@@ -154,6 +154,48 @@ export async function mergeDraft(
   }
 }
 
+// Merges every doc the draft changed into the preview's copy of it. The
+// preview gets a clone of its own of each one first, where it only recorded a
+// fork point or never forked the doc, so nothing outside it is written. Docs
+// made on the draft are read as they are.
+export async function mergeIntoPreview(
+  repo: Repo,
+  draftHandle: DocHandle<DraftDoc>,
+  preview: DocHandle<DraftDoc>
+): Promise<void> {
+  const entries = Object.entries(draftHandle.doc()?.clones ?? {}) as [
+    AutomergeUrl,
+    CloneEntry,
+  ][];
+  for (const [originalUrl, entry] of entries) {
+    if (!entry.cloneUrl || entry.cloneUrl === originalUrl) continue;
+    const targetUrl = await previewCopy(repo, preview, originalUrl);
+    const [target, clone] = await Promise.all([
+      repo.find<unknown>(targetUrl),
+      repo.find<unknown>(entry.cloneUrl),
+    ]);
+    target.merge(clone);
+  }
+}
+
+async function previewCopy(
+  repo: Repo,
+  preview: DocHandle<DraftDoc>,
+  url: AutomergeUrl
+): Promise<AutomergeUrl> {
+  const entry = preview.doc()?.clones?.[url];
+  if (entry?.cloneUrl) return entry.cloneUrl;
+  const source = await repo.find<unknown>(entry?.source ?? url);
+  const clonedAt = entry ? [...entry.clonedAt] as UrlHeads : source.heads();
+  const cloneUrl = canonicalUrl(cloneAt(repo, source, clonedAt).url);
+  preview.change((d) => {
+    const e = d.clones[url];
+    if (e) e.cloneUrl = cloneUrl;
+    else d.clones[url] = { clonedAt, cloneUrl };
+  });
+  return cloneUrl;
+}
+
 // The parent's copy of `url`, cloning it at the parent's fork point when the
 // parent hasn't written to it yet.
 async function mergeTargetUrl(

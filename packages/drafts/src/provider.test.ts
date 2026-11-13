@@ -7,19 +7,21 @@ import {
 import { request, subscribe } from "@inkandswitch/patchwork-providers";
 
 import { DraftProvider } from "./providers/DraftProvider.js";
-import type { DraftsState, HasDrafts } from "./draft-types.js";
+import type { DraftDoc, DraftsState, HasDrafts } from "./draft-types.js";
 
 beforeAll(() => initSubduction());
 
-function workspace() {
-  const repo = new Repo();
-  const root = repo.create<HasDrafts>({ "@patchwork": { type: "folder" } });
-  const provider = document.createElement("div");
+function workspace(repo = new Repo(), docs: AutomergeUrl[] = []) {
+  const root = repo.create<HasDrafts & { docs: unknown[] }>({
+    "@patchwork": { type: "folder" },
+    docs: docs.map((url, i) => ({ name: `doc ${i}`, type: "note", url })),
+  });
+  const provider: HTMLElement & { repo?: Repo } = document.createElement("div");
   provider.setAttribute("doc-url", root.url);
   const child = document.createElement("div");
   provider.append(child);
   const dispose = DraftProvider(provider, repo);
-  return { root, child, dispose };
+  return { root, child, provider, dispose };
 }
 
 // The latest state, once `ready` says it has caught up.
@@ -36,7 +38,7 @@ function watch(element: HTMLElement) {
     }
     return latest;
   };
-  return { until, stop };
+  return { until, stop, latest: () => latest };
 }
 
 describe("the draft provider", () => {
@@ -148,6 +150,41 @@ describe("the draft provider", () => {
     expect(into).toBe(sibling);
     const state = await drafts.until((s) => s.drafts.length === 3 && s.checkedOut === sibling);
     expect(state.drafts.find((entry) => entry.url === grandchild)?.parent).toBe(sibling);
+    drafts.stop();
+    dispose();
+  });
+
+  it("previews a merge in a hidden draft, writing nothing else", async () => {
+    const repo = new Repo();
+    const note = repo.create<{ text: string }>({ text: "main" });
+    const { child, provider, dispose } = workspace(repo, [note.url]);
+    const drafts = watch(child);
+    const { main } = await drafts.until((s) => s.status === "ready");
+    const { draft } = await request<{ draft: AutomergeUrl }>(child, {
+      type: "draft:create",
+      from: main,
+    });
+    const { main: mainDraft } = await drafts.until((s) => s.checkedOut === draft);
+    const edited = await provider.repo!.find<{ text: string }>(note.url);
+    edited.change((d) => {
+      d.text = "draft";
+    });
+
+    const { preview } = await request<{ preview: AutomergeUrl }>(child, {
+      type: "draft:preview-merge",
+      draft,
+      into: mainDraft,
+    });
+    const previewDoc = (await repo.find<DraftDoc>(preview)).doc();
+    const copy = previewDoc.clones[note.url]?.cloneUrl;
+    expect(copy).toBeDefined();
+    expect((await repo.find<{ text: string }>(copy!)).doc().text).toBe("draft");
+    expect(note.doc().text).toBe("main");
+    expect(drafts.latest()?.drafts.map((entry) => entry.url)).toEqual([mainDraft, draft]);
+
+    await request(child, { type: "draft:discard", draft: preview });
+    const parent = (await repo.find<DraftDoc>(mainDraft)).doc();
+    expect(parent.drafts).toEqual([draft]);
     drafts.stop();
     dispose();
   });

@@ -191,7 +191,7 @@ export function createDraftState(options: DraftStateOptions): DraftState {
     const depths = new Map<AutomergeUrl, number>([[main, 0]]);
     for (const url of orderedDraftUrls) {
       const doc = trackedDrafts.get(url)?.doc();
-      if (!doc || doc.mergedAt !== undefined) continue;
+      if (!doc || doc.mergedAt !== undefined || doc.preview) continue;
       const parent = effectiveParent(doc.parent) ?? main;
       const known = depths.has(parent) ? parent : main;
       const depth = (depths.get(known) ?? 0) + 1;

@@ -27,9 +27,14 @@ export type CloneEntry = {
 //
 // `name` is the user-given display name; absent means the default label
 // ("Draft", or "Main" for the main draft).
+//
+// `preview` marks what a merge would leave its target as: the target forked,
+// with the merging draft's changes merged into the fork alone. It never lists,
+// and is discarded once the merge is confirmed or cancelled.
 export type DraftDoc = {
   "@patchwork": { type: "draft" };
   isMain?: boolean;
+  preview?: boolean;
   name?: string;
   parent: AutomergeUrl;
   drafts: AutomergeUrl[];
