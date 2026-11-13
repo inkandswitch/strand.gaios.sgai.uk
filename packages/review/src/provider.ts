@@ -185,7 +185,7 @@ export function CompareProvider(element: HTMLElement & { repo: Repo }): () => vo
         { once: true }
       );
     });
-    element.prepend(view);
+    element.append(view);
     return {
       draft,
       repo,
