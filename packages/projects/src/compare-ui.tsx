@@ -1,23 +1,23 @@
-import {createEffect, createUniqueId, For, onCleanup, Show, createSignal} from "solid-js"
+import {createEffect, createSignal, createUniqueId, For, onCleanup, Show} from "solid-js"
 import type {Mode, Options} from "./compare.ts"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 
 /**
- * A panel's compare mode, in its tab bar: the modes its view takes, the
- * one it prefers first. A dot says one was picked for it.
+ * A compare mode to pick, from the modes offered: a panel's, in its tab bar,
+ * or every panel's at once, in the workspace's header. Shows the current
+ * one, if there is one.
  */
 export function ComparePicker(props: {
 	modes: Mode[]
-	current: Mode
-	overridden: boolean
-	pick(id: string | undefined): void
-	options(mode: Mode): Options<unknown>
+	current: Mode | undefined
+	title: string
+	pick(id: string): void
 }) {
 	const [open, setOpen] = createSignal(false)
 	const menuId = createUniqueId()
 	let button!: HTMLButtonElement
 	let menu!: HTMLDivElement
-	const choose = (id: string | undefined) => {
+	const choose = (id: string) => {
 		menu.hidePopover()
 		props.pick(id)
 	}
@@ -29,13 +29,12 @@ export function ComparePicker(props: {
 				class="projects__compare-picker"
 				aria-haspopup="menu"
 				aria-expanded={open()}
-				title={`Compare: ${props.current.name}`}
+				title={props.current ? `${props.title}: ${props.current.name}` : props.title}
 				popovertarget={menuId}>
-				<ModeIcon mode={props.current} />
-				<CaretIcon />
-				<Show when={props.overridden}>
-					<span class="projects__compare-dot" aria-label="Its own mode" />
+				<Show when={props.current} fallback={<span class="projects__compare-label">Mode</span>}>
+					{current => <ModeIcon mode={current()} />}
 				</Show>
+				<CaretIcon />
 			</button>
 			<div
 				ref={menu}
@@ -50,49 +49,45 @@ export function ComparePicker(props: {
 					menu.style.right = `${window.innerWidth - box.right}px`
 				}}
 				onToggle={event => setOpen(event.newState === "open")}>
-				<Item checked={!props.overridden} onClick={() => choose(undefined)}>
-					As the view prefers
-				</Item>
 				<For each={props.modes}>
 					{mode => (
-						<Item
-							checked={props.overridden && mode.id === props.current.id}
+						<button
+							type="button"
+							role="menuitemradio"
+							aria-checked={mode.id === props.current?.id}
+							class="projects__open-with-item"
 							onClick={() => choose(mode.id)}>
+							<span class="projects__open-with-check">
+								<Show when={mode.id === props.current?.id}>
+									<CheckIcon />
+								</Show>
+							</span>
 							<ModeIcon mode={mode} />
 							{mode.name}
-						</Item>
+						</button>
 					)}
 				</For>
-				<ModeControls mode={props.current} options={props.options(props.current)} />
 			</div>
 		</>
 	)
 }
 
-function Item(props: {checked: boolean; onClick(): void; children: any}) {
+/** Folds away what's the same on both versions, in a view that can. */
+export function CollapseToggle(props: {collapsed: boolean; toggle(): void}) {
 	return (
 		<button
 			type="button"
-			role="menuitemradio"
-			aria-checked={props.checked}
-			class="projects__open-with-item"
-			onClick={() => props.onClick()}>
-			<span class="projects__open-with-check">
-				<Show when={props.checked}>
-					<CheckIcon />
-				</Show>
-			</span>
-			{props.children}
+			class="projects__compare-picker"
+			aria-pressed={props.collapsed}
+			title={props.collapsed ? "Show unchanged" : "Collapse unchanged"}
+			onClick={() => props.toggle()}>
+			<CollapseIcon />
 		</button>
 	)
 }
 
-function ModeIcon(props: {mode: Mode}) {
-	return <img class="projects__compare-icon" src={props.mode.icon} alt={props.mode.name} />
-}
-
 /** Where a mode draws its own controls, if it has any. */
-function ModeControls(props: {mode: Mode; options: Options<unknown>}) {
+export function ModeControls(props: {mode: Mode; options: Options<unknown>}) {
 	const [element, setElement] = createSignal<HTMLDivElement>()
 	createEffect(() => {
 		const controls = props.mode.module.controls
@@ -103,5 +98,35 @@ function ModeControls(props: {mode: Mode; options: Options<unknown>}) {
 		<Show when={props.mode.module.controls}>
 			<div ref={setElement} class="projects__compare-controls" />
 		</Show>
+	)
+}
+
+function ModeIcon(props: {mode: Mode}) {
+	return <img class="projects__compare-icon" src={props.mode.icon} alt={props.mode.name} />
+}
+
+// lucide `fold-vertical`
+function CollapseIcon() {
+	return (
+		<svg
+			xmlns="http://www.w3.org/2000/svg"
+			width="16"
+			height="16"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="1.75"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true">
+			<path d="M12 22v-6" />
+			<path d="M12 8V2" />
+			<path d="M4 12H2" />
+			<path d="M10 12H8" />
+			<path d="M16 12h-2" />
+			<path d="M22 12h-2" />
+			<path d="m15 19-3-3-3 3" />
+			<path d="m15 5-3 3-3-3" />
+		</svg>
 	)
 }

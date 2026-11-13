@@ -1,6 +1,7 @@
 import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
 import {request, subscribe} from "@inkandswitch/patchwork-providers"
 import {createEffect, createMemo, createSignal, on, onCleanup, Show, untrack} from "solid-js"
+import {createWorkspaceCompare} from "./compare.ts"
 import {Dock, type Comparing} from "./dock.tsx"
 import {WorkspaceHeader} from "./header.tsx"
 import {useDocTitle, useMounted} from "./hooks.ts"
@@ -34,6 +35,7 @@ export function ProjectView(props: {
 	const [drafts, setDrafts] = createSignal<DraftsState>()
 	const [against, setAgainst] = createSignal<CompareAgainst>(null)
 	const [heard, setHeard] = createSignal(false)
+	const workspaceCompare = createWorkspaceCompare()
 	const compared = createMemo<AutomergeUrl | undefined>(previous => {
 		const current = against()
 		return current?.previewing || current?.merging ? previous : current?.draft
@@ -116,6 +118,7 @@ export function ProjectView(props: {
 									compared={compared()}
 									element={at()}
 									showSidebar={props.showSidebar}
+									compare={workspaceCompare}
 								/>
 								<div class="projects__body">
 									<aside class="projects__files" aria-label="Files">
@@ -135,6 +138,7 @@ export function ProjectView(props: {
 													comparing={comparing()}
 													focus={props.focus}
 													host={root()}
+													workspace={workspaceCompare}
 												/>
 											</main>
 										</Provider>

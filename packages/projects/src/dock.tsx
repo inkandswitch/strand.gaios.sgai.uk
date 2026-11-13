@@ -33,8 +33,9 @@ import {
 	type ComparedVersion,
 	type Mode,
 	type Options,
+	type WorkspaceCompare,
 } from "./compare.ts"
-import {ComparePicker} from "./compare-ui.tsx"
+import {CollapseToggle, ComparePicker, ModeControls} from "./compare-ui.tsx"
 import {useDocTitle, useMounted} from "./hooks.ts"
 import type {Placement, ProjectRoute, Side} from "./navigation.ts"
 import {OpenWith} from "./open-with.tsx"
@@ -79,10 +80,14 @@ type Panel = {
 	/** what its document's view asked of the compare modes */
 	asked: Accessor<CompareSelector | undefined>
 	setAsked: Setter<CompareSelector | undefined>
-	/** a compare mode picked for it alone, with options of its own */
-	override: Accessor<string | undefined>
-	setOverride: Setter<string | undefined>
+	/** the compare mode picked for it, here or for the whole workspace */
+	picked: Accessor<string | undefined>
+	setPicked: Setter<string | undefined>
+	/** its modes' options, for those whose options are each panel's */
 	options: Map<string, Options<unknown>>
+	/** what's unchanged folded away, in a mode its view can */
+	collapsed: Accessor<boolean>
+	setCollapsed: Setter<boolean>
 }
 
 /** Its compare mode, worked out for a panel's view. */
@@ -90,6 +95,7 @@ type PanelCompare = Pick<Panel, "asked" | "setAsked"> & {
 	comparing(): Comparing | undefined
 	mode(): Mode | undefined
 	options(mode: Mode): Options<unknown>
+	collapsed(): boolean
 }
 
 /** What a panel shows when its view prefers no mode it takes. */
@@ -109,8 +115,11 @@ export function Dock(props: {
 	focus(panel: ProjectRoute | undefined): void
 	/** where the dock's groups are offered, for opening into one */
 	host: HTMLElement | undefined
+	/** the modes every panel shares */
+	workspace: WorkspaceCompare
 }) {
 	const panels = new Map<string, Panel>()
+	const [panelList, setPanelList] = createSignal<Panel[]>([])
 	const [groups, setGroups] = createSignal<DockGroup[]>([])
 	const modes = useCompareModes()
 	let element!: HTMLDivElement
@@ -135,6 +144,7 @@ export function Dock(props: {
 			}),
 			dock.onDidRemovePanel(panel => {
 				panels.delete(panel.id)
+				setPanelList([...panels.values()])
 				if (!dock.totalPanels) props.focus(undefined)
 			}),
 			dock.onDidLayoutChange(refresh),
@@ -156,6 +166,29 @@ export function Dock(props: {
 		if (host) offerGroups(host, groups)
 	})
 
+	// Picked for the whole workspace: every panel that takes it.
+	createEffect(
+		on(
+			() => props.workspace.picked(),
+			picked => {
+				if (!picked) return
+				for (const panel of panelList()) {
+					if (offeredTo(panel).some(mode => mode.id === picked.mode)) panel.setPicked(picked.mode)
+				}
+			},
+			{defer: true}
+		)
+	)
+
+	createEffect(() => {
+		const list = props.comparing ? panelList() : []
+		const all = modes()
+		props.workspace.report(
+			all.filter(mode => list.some(panel => offeredTo(panel).includes(mode))),
+			all.filter(mode => list.some(panel => modeOf(panel) === mode))
+		)
+	})
+
 	return (
 		<div class="projects__dock-area">
 			<div ref={element} class="projects__dock" />
@@ -166,19 +199,27 @@ export function Dock(props: {
 		return modes().filter(mode => offered(mode, panel.asked()))
 	}
 
-	// The one picked for it, else the one its view prefers.
+	// The one picked for it, else the one last picked for the workspace, else
+	// the one its view prefers.
 	function modeOf(panel: Panel) {
 		const list = offeredTo(panel)
-		const wanted = panel.override() ?? panel.asked()?.prefers
-		return (
-			list.find(mode => mode.id === wanted) ??
-			list.find(mode => mode.id === FALLBACK_MODE) ??
-			list[0]
-		)
+		const wanted = [panel.picked(), props.workspace.picked()?.mode, panel.asked()?.prefers]
+		for (const id of wanted) {
+			const found = id && list.find(mode => mode.id === id)
+			if (found) return found
+		}
+		return list.find(mode => mode.id === FALLBACK_MODE) ?? list[0]
 	}
 
 	function optionsOf(panel: Panel, mode: Mode) {
-		return optionsIn(panel.options, mode)
+		return mode.module.scope === "workspace"
+			? props.workspace.options(mode)
+			: optionsIn(panel.options, mode)
+	}
+
+	// Whether its view can fold what's unchanged away in `mode`.
+	function collapses(panel: Panel, mode: Mode) {
+		return !!panel.asked()?.collapses?.includes(mode.id)
 	}
 
 	function place(route: ProjectRoute) {
@@ -270,7 +311,8 @@ export function Dock(props: {
 		const [shown, setShown] = createSignal(route)
 		const [tool, setTool] = createSignal<string>()
 		const [asked, setAsked] = createSignal<CompareSelector>()
-		const [override, setOverride] = createSignal<string>()
+		const [picked, setPicked] = createSignal<string>()
+		const [collapsed, setCollapsed] = createSignal(false)
 		panels.set(id, {
 			route: shown,
 			setRoute: setShown,
@@ -278,10 +320,13 @@ export function Dock(props: {
 			setTool,
 			asked,
 			setAsked,
-			override,
-			setOverride,
+			picked,
+			setPicked,
 			options: new Map(),
+			collapsed,
+			setCollapsed,
 		})
+		setPanelList([...panels.values()])
 		api?.addPanel({id, component: "document", title: "", position})
 	}
 
@@ -331,6 +376,10 @@ export function Dock(props: {
 								setAsked: panel.setAsked,
 								mode: () => modeOf(panel),
 								options: mode => optionsOf(panel, mode),
+								collapsed: () => {
+									const mode = modeOf(panel)
+									return !!mode && collapses(panel, mode) && panel.collapsed()
+								},
 							}}
 						/>
 					),
@@ -366,13 +415,23 @@ export function Dock(props: {
 								<>
 									<Show when={props.comparing && modeOf(panel())}>
 										{mode => (
-											<ComparePicker
-												modes={offeredTo(panel())}
-												current={mode()}
-												overridden={panel().override() !== undefined}
-												pick={panel().setOverride}
-												options={mode => optionsOf(panel(), mode)}
-											/>
+											<>
+												<Show when={mode().module.scope !== "workspace"}>
+													<ModeControls mode={mode()} options={optionsOf(panel(), mode())} />
+												</Show>
+												<Show when={collapses(panel(), mode())}>
+													<CollapseToggle
+														collapsed={panel().collapsed()}
+														toggle={() => panel().setCollapsed(yn => !yn)}
+													/>
+												</Show>
+												<ComparePicker
+													modes={offeredTo(panel())}
+													current={mode()}
+													title="Compare"
+													pick={panel().setPicked}
+												/>
+											</>
 										)}
 									</Show>
 									<Show when={panel().route().resolved.docUrl}>
@@ -497,11 +556,13 @@ function Compared(props: {
 		const current = mode()
 		const other = version()
 		const options = current && props.compare.options(current)
+		const collapsed = !!current && props.compare.collapsed()
 		latest = () => ({
 			mode: current?.id ?? null,
 			options: options ? options.current() : null,
 			other: current ? (other?.doc ?? null) : null,
 			missing: !!current && other?.doc === null,
+			collapsed,
 		})
 		const tell = () => {
 			for (const respond of told) respond(latest())
@@ -677,7 +738,13 @@ const READING_KEYS = new Set([
 
 const READING_SHORTCUTS = new Set(["a", "c", "f", "g"])
 
-const NOT_COMPARED: CompareView = {mode: null, options: null, other: null, missing: false}
+const NOT_COMPARED: CompareView = {
+	mode: null,
+	options: null,
+	other: null,
+	missing: false,
+	collapsed: false,
+}
 
 /**
  * Answer `dock:groups` for everything inside `element`: the dock's groups,

@@ -719,12 +719,6 @@ button.projects__token:hover {
 	font-size: 0.8rem;
 }
 
-.projects__open-with-menu .projects__compare-controls {
-	margin-top: var(--projects-space-xs);
-	padding: var(--projects-space-sm);
-	border-top: 1px solid var(--projects-surface-edge);
-}
-
 .projects__compare-controls label {
 	display: flex;
 	align-items: center;
@@ -745,18 +739,26 @@ button.projects__token:hover {
 }
 
 .projects__compare-picker:hover,
-.projects__compare-picker[aria-expanded="true"] {
+.projects__compare-picker[aria-expanded="true"],
+.projects__compare-picker[aria-pressed="true"] {
 	background: var(--projects-hover);
 }
 
-.projects__compare-dot {
-	position: absolute;
-	top: 1px;
-	right: 1px;
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	background: var(--projects-lane-current);
+.projects__compare-picker[aria-pressed="true"] {
+	color: var(--projects-fg);
+}
+
+.projects__compare-label {
+	font-size: 0.85rem;
+}
+
+/* every panel's compare mode, at the end of the workspace's header */
+.projects__workspace-modes {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: var(--projects-space-sm);
+	margin-left: auto;
 }
 
 .projects__open-with-item .projects__compare-icon {

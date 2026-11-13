@@ -15,6 +15,8 @@ export type CompareModeDescription = PluginDescription & {
 
 export type CompareModeImplementation = {
 	options?: unknown
+	/** whether its options, and controls, are the workspace's or each panel's */
+	scope?: "workspace" | "panel"
 	compose?(slots: {a: HTMLElement; b: HTMLElement}, options: Options<unknown>): () => void
 	controls?(element: HTMLElement, options: Options<unknown>): () => void
 }
@@ -30,26 +32,67 @@ export type Options<O> = {
 /**
  * What a view asks the panel showing it: `modes` turns modes on or off for
  * it, `draws` names the modes it draws itself though the panel could lay
- * them out, `prefers` the mode to start in.
+ * them out, `collapses` the modes it can fold what's unchanged away in,
+ * `prefers` the mode to start in.
  */
 export type CompareSelector = {
 	type: "compare:view"
 	modes?: Record<string, boolean>
 	draws?: string[]
+	collapses?: string[]
 	prefers?: string
 }
 
 /**
  * What it's told while its draft is compared with another: the mode, its
- * options, and the other draft's version of the document, saved, or
- * `missing` when that draft doesn't have it. All null when nothing's
- * compared.
+ * options, the other draft's version of the document, saved, or `missing`
+ * when that draft doesn't have it, and whether to fold what's unchanged.
+ * All null when nothing's compared.
  */
 export type CompareView = {
 	mode: string | null
 	options: unknown
 	other: Uint8Array | null
 	missing: boolean
+	collapsed: boolean
+}
+
+/**
+ * The compare modes a whole workspace shares. Picking one puts every panel
+ * that takes it in it, and panels opened after start in it; a mode whose
+ * options are the workspace's keeps one set for every panel. The dock says
+ * which modes its panels take and which they're in.
+ */
+export type WorkspaceCompare = {
+	/** the last pick: a new one each time, the same mode again included */
+	picked: Accessor<{mode: string} | undefined>
+	pick(mode: string): void
+	options(mode: Mode): Options<unknown>
+	offered: Accessor<Mode[]>
+	inUse: Accessor<Mode[]>
+	report(offered: Mode[], inUse: Mode[]): void
+}
+
+export function createWorkspaceCompare(): WorkspaceCompare {
+	const [picked, setPicked] = createSignal<{mode: string}>()
+	const [offered, setOffered] = createSignal<Mode[]>([])
+	const [inUse, setInUse] = createSignal<Mode[]>([])
+	const kept = new Map<string, Options<unknown>>()
+	return {
+		picked,
+		pick: mode => setPicked({mode}),
+		options: mode => optionsIn(kept, mode),
+		offered,
+		inUse,
+		report(nextOffered, nextInUse) {
+			setOffered(previous => (sameModes(previous, nextOffered) ? previous : nextOffered))
+			setInUse(previous => (sameModes(previous, nextInUse) ? previous : nextInUse))
+		},
+	}
+}
+
+function sameModes(a: Mode[], b: Mode[]) {
+	return a.length === b.length && a.every((mode, i) => mode === b[i])
 }
 
 /**

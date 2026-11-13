@@ -1,6 +1,8 @@
 import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
 import {request, subscribe, type Selector} from "@inkandswitch/patchwork-providers"
 import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type JSX} from "solid-js"
+import type {WorkspaceCompare} from "./compare.ts"
+import {ComparePicker, ModeControls} from "./compare-ui.tsx"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 import type {CompareAgainst, CompareChanges, DraftEntry, DraftsState, Mark} from "./types.ts"
 import {NameInput, ShowWorkspaces} from "./workspaces.tsx"
@@ -21,6 +23,8 @@ export function WorkspaceHeader(props: {
 	element: HTMLElement
 	/** unset while the workspace list is shown */
 	showSidebar: (() => void) | undefined
+	/** the compare modes every panel shares */
+	compare: WorkspaceCompare
 }) {
 	const [renaming, setRenaming] = createSignal(false)
 	const [changes, setChanges] = createSignal<CompareChanges>()
@@ -121,7 +125,43 @@ export function WorkspaceHeader(props: {
 					</div>
 				)}
 			</Show>
+			<Show when={props.against && props.compare.offered().length > 0}>
+				<WorkspaceModes compare={props.compare} />
+			</Show>
 		</header>
+	)
+}
+
+/**
+ * The compare mode for every panel at once, at the header's end: picking
+ * one puts each panel that takes it in it. The controls of modes whose
+ * options are the workspace's sit beside it, while a panel's in one.
+ */
+function WorkspaceModes(props: {compare: WorkspaceCompare}) {
+	const current = () => {
+		const offered = props.compare.offered()
+		const picked = props.compare.picked()?.mode
+		const inUse = props.compare.inUse()
+		return (
+			offered.find(mode => mode.id === picked) ?? (inUse.length === 1 ? inUse[0] : undefined)
+		)
+	}
+	const shared = () =>
+		props.compare
+			.inUse()
+			.filter(mode => mode.module.scope === "workspace" && mode.module.controls)
+	return (
+		<div class="projects__workspace-modes">
+			<For each={shared()}>
+				{mode => <ModeControls mode={mode} options={props.compare.options(mode)} />}
+			</For>
+			<ComparePicker
+				modes={props.compare.offered()}
+				current={current()}
+				title="Compare every panel"
+				pick={props.compare.pick}
+			/>
+		</div>
 	)
 }
 
