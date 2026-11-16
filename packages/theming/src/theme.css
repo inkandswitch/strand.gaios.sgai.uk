@@ -251,7 +251,7 @@
 	/* Accent AS ink on the ambient background. Legibility depends on which surface
 	   the text sits on, so there's one per surface family — each mixes the accent
 	   toward that surface's own line, which rides the theme automatically (darkened
-	   on light fills, lightened on dark ones). The --editor-*/--text-editor-* ones
+	   on light fills, lightened on dark ones). The --editor-* and --text-editor-* ones
 	   are defined alongside those surfaces below. */
 	--studio-primary-text: color-mix(in oklch, var(--studio-primary), var(--studio-line) 35%);
 	--studio-secondary-text: color-mix(in oklch, var(--studio-secondary), var(--studio-line) 35%);
