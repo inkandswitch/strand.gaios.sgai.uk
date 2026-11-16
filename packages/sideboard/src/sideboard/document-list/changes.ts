@@ -1,6 +1,6 @@
 import { parseAutomergeUrl, type AutomergeUrl } from "@automerge/automerge-repo/slim";
 import { subscribe } from "@inkandswitch/patchwork-providers-solid";
-import { createMemo } from "solid-js";
+import { createMemo, createSignal } from "solid-js";
 
 // How a file differs. Compared with another draft: both drafts have it and
 // it `differs`, or only `ours` (the checked-out draft) or `theirs` has it.
@@ -28,12 +28,15 @@ export type Ghost = {
  * The checked-out draft compared with another, or merged into one, as the
  * rows read it: a file that differs is marked with how, a folder with what's
  * beneath it, what only the other draft has shows as ghosts, and everything
- * else is quieter.
+ * else is quieter, or, `collapsed`, folded away.
  */
 export type ChangeMarks = {
   mark(url: AutomergeUrl): Mark | undefined;
   comparing(): boolean;
   ghostsIn(folder: AutomergeUrl): Ghost[];
+  /** while comparing, whether what's unchanged is folded away */
+  collapsed(): boolean;
+  toggleCollapsed(): void;
 };
 
 // The compare provider's `compare:changes`. Without one above (outside a
@@ -58,10 +61,14 @@ export function useChangeMarks(element: HTMLElement): ChangeMarks {
     }
     return byParent;
   });
+  const [collapsed, setCollapsed] = createSignal(false);
+  const comparing = () => changes().status === "ready";
   return {
     mark: (url) => marks()[url],
-    comparing: () => changes().status === "ready",
+    comparing,
     ghostsIn: (folder) => ghosts().get(documentOf(folder)) ?? [],
+    collapsed: () => comparing() && collapsed(),
+    toggleCollapsed: () => setCollapsed((yn) => !yn),
   };
 }
 

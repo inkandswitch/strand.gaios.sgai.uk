@@ -224,6 +224,9 @@ export function DocumentList(props: DocumentListProps) {
               </Show>
               <div
                 class="document-list__item"
+                classList={{
+                  "document-list__item--folded": props.changes.collapsed() && !mark(),
+                }}
               >
                 {/* Per-row boundary: a folder still loading its handle shows a
                     skeleton here without blocking its siblings. */}

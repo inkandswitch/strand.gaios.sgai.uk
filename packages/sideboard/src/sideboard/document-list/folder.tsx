@@ -81,6 +81,12 @@ export default function Folder(props: {
     if (autoExpandedFolders().has(props.url)) setExpanded(true);
   });
 
+  // With what's unchanged folded away, a folder with changes beneath it opens
+  // to show them.
+  createEffect(() => {
+    if (props.changes.collapsed() && props.changes.mark(props.url)) setExpanded(true);
+  });
+
   // Hold a drag over this folder's row for a second and it opens, so you can
   // drop inside it. It only ever opens: closing a folder you're aiming into
   // would take the target away. Re-arms when the drag leaves.

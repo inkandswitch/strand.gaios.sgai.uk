@@ -41,6 +41,7 @@ import { dropInto } from "./dnd/drop-into.ts";
 import { hasDocumentDrag } from "./dnd/payload.ts";
 import { createMarquee } from "./document-list/marquee.ts";
 import { createTreeNav } from "./document-list/tree-nav.ts";
+import { FoldIcon } from "./icons.tsx";
 import { menuTarget } from "./state.ts";
 
 const ItemMenu = lazy(() =>
@@ -53,7 +54,8 @@ const ItemMenu = lazy(() =>
  * The document-list panel: a scrolling, recursive list of the folder's
  * documents and subfolders, where a right-click outside the rows makes a new
  * document. Renders a single folder, given its url. Inside a compare provider, the files the
- * checked-out draft and the compared one differ on are marked.
+ * checked-out draft and the compared one differ on are marked, and what's
+ * unchanged can be folded away.
  *
  * Documents are opened by where they sit under the folder
  * (`automerge:<folder>/<name>/<name>`) rather than by their own url.
@@ -173,6 +175,19 @@ export function DocumentListPanel(props: {
 
   return (
     <aside class="document-list" on:contextmenu={openNewMenu}>
+      <Show when={changes.comparing()}>
+        <div class="document-list__compare-bar">
+          <button
+            type="button"
+            class="document-list__collapse"
+            aria-pressed={changes.collapsed()}
+            title={changes.collapsed() ? "Show unchanged" : "Collapse unchanged"}
+            onClick={() => changes.toggleCollapsed()}
+          >
+            <FoldIcon />
+          </button>
+        </div>
+      </Show>
       <nav
         ref={attachMarquee}
         class="document-list__doclist document-list-widget"

@@ -1,5 +1,5 @@
 import type { AutomergeUrl } from "@automerge/automerge-repo/slim";
-import { createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, Show } from "solid-js";
 import { Chevron } from "../icons.tsx";
 import type { ChangeMarks, Ghost } from "./changes.ts";
 import { ChangeMark } from "./item.tsx";
@@ -31,6 +31,9 @@ export function GhostRows(props: {
 
 function GhostFolder(props: { ghost: Ghost; depth: number; changes: ChangeMarks }) {
   const [expanded, setExpanded] = createSignal(false);
+  createEffect(() => {
+    if (props.changes.collapsed()) setExpanded(true);
+  });
   return (
     <div class="document-list-folder" role="none" style={{ "--depth": props.depth }}>
       <GhostRow

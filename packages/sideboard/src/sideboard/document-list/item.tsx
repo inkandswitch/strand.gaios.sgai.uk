@@ -310,9 +310,6 @@ export default function Item(props: {
 export function ChangeMark(props: { mark: Mark }) {
   return (
     <span class="document-list-item__changes" title={MARK_TITLES[props.mark]}>
-      <Show when={props.mark === "both"}>
-        <span class="document-list-item__review">review</span>
-      </Show>
       <For each={MARK_DOTS[props.mark]}>
         {(dot) => (
           <span class={`document-list-item__changed document-list-item__changed--${dot}`} />

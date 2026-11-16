@@ -385,17 +385,40 @@ button {
   background: var(--document-list-changed);
 }
 
-.document-list-item__review {
-  font-size: 0.7rem;
-  line-height: 1;
-  padding: 2px 5px;
-  border-radius: 999px;
-  color: var(--document-list-review, #854f0b);
-  background: var(--document-list-review-fill, #faeeda);
-}
-
 .document-list-item--unchanged {
   opacity: 0.55;
+}
+
+/* comparing, with what's unchanged folded away */
+.document-list .document-list__item--folded {
+  display: none;
+}
+
+/* while comparing: the toggle that folds what's unchanged away */
+.document-list__compare-bar {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  margin-bottom: -0.5rem;
+}
+
+.document-list .document-list__collapse {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--document-list-radius);
+  color: var(--document-list-muted);
+}
+
+.document-list .document-list__collapse:hover {
+  background: var(--document-list-row-hover-fill);
+  color: var(--document-list-line);
+}
+
+.document-list .document-list__collapse[aria-pressed="true"] {
+  background: var(--document-list-row-selected-fill);
+  color: var(--document-list-line);
 }
 
 /* only on the other draft: shown, but can't be opened */
