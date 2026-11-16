@@ -1,4 +1,6 @@
-import type { CompareModeImplementation, Options, Slots } from "./types.js";
+import type { CompareModeImplementation, Options, Slots, Version, Versions } from "./types.js";
+
+const AB: Versions = { a: { name: "A" }, b: { name: "B" } };
 
 export const AOnly: CompareModeImplementation = {
   compose: ({ b }) => hide(b),
@@ -34,9 +36,13 @@ export const OnionSkin: CompareModeImplementation<Mix> = {
       restore();
     };
   },
-  controls(element, options) {
-    return slider(element, "Mix", options.current().mix, (mix) => options.set({ mix }), (set) =>
-      options.subscribe(({ mix }) => set(mix))
+  controls(element, options, versions = AB) {
+    return slider(
+      element,
+      versions,
+      options.current().mix,
+      (mix) => options.set({ mix }),
+      (set) => options.subscribe(({ mix }) => set(mix))
     );
   },
 };
@@ -46,12 +52,15 @@ type At = { at: number };
 
 export const Swipe: CompareModeImplementation<At> = {
   options: { at: 0.5 },
-  compose(slots, options) {
+  compose(slots, options, versions = AB) {
     const host = slots.a.parentElement!;
     const restore = overlay(slots);
     const divider = document.createElement("div");
     divider.setAttribute("role", "slider");
-    divider.setAttribute("aria-label", "Swipe between A and B");
+    divider.setAttribute(
+      "aria-label",
+      `Swipe between ${versions.a.name} and ${versions.b.name}`
+    );
     divider.setAttribute("aria-valuemin", "0");
     divider.setAttribute("aria-valuemax", "100");
     divider.tabIndex = 0;
@@ -135,9 +144,10 @@ function overlay({ a, b }: Slots) {
   };
 }
 
+// From A to B, each end named and marked in its colour.
 function slider(
   element: HTMLElement,
-  label: string,
+  versions: Versions,
   value: number,
   set: (value: number) => void,
   follow: (update: (value: number) => void) => () => void
@@ -151,15 +161,35 @@ function slider(
     step: "0.01",
     value: String(value),
   });
-  input.setAttribute("aria-label", label);
+  input.setAttribute("aria-label", `Mix from ${versions.a.name} to ${versions.b.name}`);
   input.addEventListener("input", () => set(input.valueAsNumber));
   const stop = follow((next) => (input.value = String(next)));
-  wrapper.append("A ", input, " B");
+  wrapper.append(end(versions.a), input, end(versions.b));
   element.append(wrapper);
   return () => {
     stop();
     wrapper.remove();
   };
+}
+
+// A version's colour dot and name.
+function end(version: Version) {
+  const span = document.createElement("span");
+  Object.assign(span.style, { display: "inline-flex", alignItems: "center", gap: "0.3em" });
+  if (version.color) {
+    const dot = document.createElement("span");
+    dot.setAttribute("aria-hidden", "true");
+    Object.assign(dot.style, {
+      flex: "none",
+      width: "7px",
+      height: "7px",
+      borderRadius: "50%",
+      background: version.color,
+    });
+    span.append(dot);
+  }
+  span.append(version.name);
+  return span;
 }
 
 function clamp(value: number) {

@@ -13,6 +13,8 @@ export type CompareModeDescription = PluginDescription & {
   icon: string;
   /** offered to every view unless it opts out */
   default?: boolean;
+  /** shows just this version: a host that knows its name calls it "<name> only" */
+  only?: "a" | "b";
 };
 
 export type CompareModeImplementation<O = unknown> = {
@@ -25,10 +27,17 @@ export type CompareModeImplementation<O = unknown> = {
    */
   scope?: "workspace" | "panel";
   /** lays out the two versions; absent means the view draws the mode */
-  compose?(slots: Slots, options: Options<O>): () => void;
+  compose?(slots: Slots, options: Options<O>, versions?: Versions): () => void;
   /** renders the mode's controls */
-  controls?(element: HTMLElement, options: Options<O>): () => void;
+  controls?(element: HTMLElement, options: Options<O>, versions?: Versions): () => void;
 };
+
+/**
+ * What the host calls the two versions, and the colour it marks each with
+ * (any CSS colour). Without it they're just A and B.
+ */
+export type Versions = { a: Version; b: Version };
+export type Version = { name: string; color?: string };
 
 /**
  * The two views, side by side in a grid that is their parent: A the version
