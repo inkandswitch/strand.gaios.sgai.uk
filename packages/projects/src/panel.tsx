@@ -1,5 +1,5 @@
 import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
-import {accept, subscribe, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
+import {accept, request, subscribe, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
 import {
 	createEffect,
 	createSignal,
@@ -15,6 +15,7 @@ import {
 	drawnByView,
 	offered,
 	optionsIn,
+	type CompareEdit,
 	type CompareSelector,
 	type CompareView,
 	type ComparedVersion,
@@ -37,6 +38,8 @@ export type Comparing = {
 	workspace: AutomergeUrl
 	draft: AutomergeUrl | undefined
 	name: string
+	/** the checked-out draft's name */
+	ours: string
 	merging: boolean
 	after: AutomergeUrl | undefined
 }
@@ -190,7 +193,6 @@ export function PanelCompareControls(props: {
 							modes={props.modes.offeredTo(props.panel)}
 							current={mode()}
 							title="Compare"
-							versions={props.versions}
 							pick={props.panel.setPicked}
 						/>
 					</Show>
@@ -261,6 +263,9 @@ export function Compared(props: {
 			other: current ? (other?.doc ?? null) : null,
 			missing: !!current && other?.doc === null,
 			collapsed,
+			editable: !!current && !merging() && !!other?.doc,
+			names: current && comparing() ? {ours: comparing()!.ours, theirs: comparing()!.name} : null,
+			merging: !!current && merging(),
 		})
 		const tell = () => {
 			for (const respond of told) respond(latest())
@@ -272,9 +277,26 @@ export function Compared(props: {
 	// Only the document's own view is told: views inside it aren't comparing
 	// anything, and nor are the other draft's.
 	const onSubscribe = (event: SubscribeEvent) => {
-		const selector = event.detail.selector as CompareSelector
-		if (selector.type !== "compare:view") return
+		const selector = event.detail.selector as CompareSelector | CompareEdit
 		const target = event.target as HTMLElement
+		if (selector.type === "compare:edit") {
+			// The view's edits to the other version, made by the provider that
+			// compares, for this document.
+			if (target !== view) return
+			accept<boolean>(event, respond => {
+				if (!latest().editable) return respond(false)
+				request<boolean>(host, {
+					type: "compare:edit",
+					url: props.url,
+					splices: selector.splices,
+				} as never).then(
+					done => respond(!!done),
+					() => respond(false)
+				)
+			})
+			return
+		}
+		if (selector.type !== "compare:view") return
 		if (target === view) {
 			accept<CompareView>(event, respond => {
 				props.compare.setAsked(selector)
@@ -442,4 +464,7 @@ const NOT_COMPARED: CompareView = {
 	other: null,
 	missing: false,
 	collapsed: false,
+	editable: false,
+	names: null,
+	merging: false,
 }

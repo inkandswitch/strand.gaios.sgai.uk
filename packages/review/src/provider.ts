@@ -1,4 +1,4 @@
-import { save } from "@automerge/automerge/slim";
+import { save, splice } from "@automerge/automerge/slim";
 import {
   isValidAutomergeUrl,
   type AutomergeUrl,
@@ -54,6 +54,15 @@ export type ComparedVersion = {
   removed: boolean;
 } | null;
 
+// A change to a text in the compared draft's version of a document: at
+// `path` in it, `remove` characters taken out at `index` and `insert` put in.
+export type TextSplice = {
+  path: (string | number)[];
+  index: number;
+  remove: number;
+  insert: string;
+};
+
 // The parts of the draft provider's `drafts` state read here.
 type DraftsState = {
   workspace: AutomergeUrl;
@@ -91,6 +100,9 @@ const OFF: CompareChanges = { status: "off", mode: "compare", files: {}, folders
 //     previewed with null, answers CompareAgainst
 //   - `compare:changes` → CompareChanges, pushed on every change
 //   - `compare:version { url }` → ComparedVersion, pushed whenever it changes
+//   - `compare:edit { url, splices }` → makes the TextSplices to the compared
+//     draft's version of `url`, in order, answers whether it could (not while
+//     merging, nor when that draft doesn't have it)
 //   - `merge:start { into }` → looks over the checked-out draft's merge into
 //     `into`, answers CompareAgainst
 //   - `merge:cancel` → stops, answers CompareAgainst
@@ -160,6 +172,22 @@ export function CompareProvider(element: HTMLElement & { repo: Repo }): () => vo
         accept<ComparedVersion>(event, (respond) =>
           answerVersion(canonical(url), respond)
         );
+        return;
+      }
+
+      case "compare:edit": {
+        const url = selector.url;
+        const splices = selector.splices;
+        if (!isValidAutomergeUrl(url) || !areSplices(splices)) return;
+        // Answered even when it can't be made, so the view isn't left waiting.
+        accept<boolean>(event, (respond) => {
+          const target = theirs;
+          if (!target || merging) return respond(false);
+          void edit(target, canonical(url), splices).then(respond, (err) => {
+            console.error("[compare] couldn't edit the compared draft:", err);
+            respond(false);
+          });
+        });
         return;
       }
 
@@ -475,6 +503,21 @@ export function CompareProvider(element: HTMLElement & { repo: Repo }): () => vo
     };
   }
 
+  async function edit(
+    target: Mounted,
+    url: AutomergeUrl,
+    splices: TextSplice[]
+  ): Promise<boolean> {
+    const [repo, result] = await Promise.all([target.repo, comparison]);
+    if (theirs !== target || merging || !result?.theirFiles.has(url)) return false;
+    const handle = await find(repo, url);
+    if (!handle || theirs !== target || merging) return false;
+    handle.change((doc: unknown) => {
+      for (const each of splices) splice(doc as never, each.path, each.index, each.remove, each.insert);
+    });
+    return true;
+  }
+
   function answerVersions() {
     for (const answer of versionAnswers) answer();
   }
@@ -482,6 +525,22 @@ export function CompareProvider(element: HTMLElement & { repo: Repo }): () => vo
   function isListed(url: AutomergeUrl, state: DraftsState): boolean {
     return isMain(url, state) || state.drafts.some((draft) => draft.url === url);
   }
+}
+
+function areSplices(value: unknown): value is TextSplice[] {
+  const count = (n: unknown) => typeof n === "number" && Number.isInteger(n) && n >= 0;
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (each) =>
+        !!each &&
+        Array.isArray(each.path) &&
+        each.path.every((key: unknown) => typeof key === "string" || count(key)) &&
+        count(each.index) &&
+        count(each.remove) &&
+        typeof each.insert === "string"
+    )
+  );
 }
 
 // Main goes by the main draft's url and by the workspace's.

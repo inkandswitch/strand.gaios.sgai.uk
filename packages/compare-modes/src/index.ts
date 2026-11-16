@@ -6,8 +6,6 @@ export type * from "./types.js";
 type Mode = LoadablePlugin<CompareModeDescription, CompareModeImplementation<any>>;
 
 export const plugins: Mode[] = [
-  mode("a-only", "A only", new URL("./icons/a-only.svg", import.meta.url), true, "AOnly", "a"),
-  mode("b-only", "B only", new URL("./icons/b-only.svg", import.meta.url), true, "BOnly", "b"),
   mode(
     "side-by-side",
     "Side by side",
@@ -32,8 +30,7 @@ function mode(
   name: string,
   icon: URL,
   on: boolean,
-  exported: keyof typeof import("./modes.js"),
-  only?: "a" | "b"
+  exported: keyof typeof import("./modes.js")
 ): Mode {
   return {
     type: "patchwork:compare-mode",
@@ -41,7 +38,6 @@ function mode(
     name,
     icon: icon.href,
     default: on,
-    ...(only ? { only } : {}),
     async load() {
       return (await import("./modes.js"))[exported];
     },

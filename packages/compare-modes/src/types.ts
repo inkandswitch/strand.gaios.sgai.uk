@@ -13,8 +13,6 @@ export type CompareModeDescription = PluginDescription & {
   icon: string;
   /** offered to every view unless it opts out */
   default?: boolean;
-  /** shows just this version: a host that knows its name calls it "<name> only" */
-  only?: "a" | "b";
 };
 
 export type CompareModeImplementation<O = unknown> = {

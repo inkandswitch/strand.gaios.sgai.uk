@@ -30,17 +30,20 @@
 		0 10px 28px -10px rgb(31 30 29 / 0.14);
 	--projects-header-height: var(--studio-space-2xl, 3rem);
 	--projects-sidebar-width: 15rem;
-	/* The checked-out draft, and the draft it's compared with. */
-	--projects-ours: #7f77dd;
-	--projects-ours-fill: #eeedfe;
-	--projects-ours-ink: #3c3489;
-	--projects-theirs: #d85a30;
-	--projects-theirs-fill: #faece7;
-	--projects-theirs-ink: #712b13;
+	/* The checked-out draft, and the draft it's compared with: neither red
+	   nor green, which say what a merge removes and adds. */
+	--projects-ours: #3b7dd8;
+	--projects-ours-fill: #e6effb;
+	--projects-ours-ink: #1b4a8a;
+	--projects-theirs: #9b5de5;
+	--projects-theirs-fill: #f2eafc;
+	--projects-theirs-ink: #4f2585;
 	/* What a merge does: adds, removes, changes, and what both drafts
 	   changed, to review. */
 	--projects-added: #3b8f4f;
 	--projects-removed: #c4473a;
+	/* changed on both sides, beside the other version */
+	--projects-modified: #dba617;
 	--projects-changed: #8a8883;
 	--projects-review: #854f0b;
 	--projects-review-fill: #faeeda;
@@ -686,11 +689,22 @@ button.projects__token:hover {
 	overflow: auto;
 }
 
-/* inline diffs mark what's only on each side: the drafts' colours compared,
-   added and removed merging */
+/* diffs beside the other version mark what's only in the checked-out draft
+   as added, what's only in the other as removed, and lines changed on both
+   sides as modified, each side headed by its draft's colour and name;
+   inline, they're in the drafts' own colours */
 .projects__compare {
-	--compare-inserted: var(--projects-ours);
-	--compare-deleted: var(--projects-theirs);
+	--compare-inserted: var(--projects-added);
+	--compare-deleted: var(--projects-removed);
+	--compare-modified: var(--projects-modified);
+	--compare-edge: var(--projects-surface-edge);
+	--compare-heading: var(--projects-secondary);
+	/* views that mark it their own way, or label which draft is which,
+	   take the colours by name */
+	--compare-ours: var(--projects-ours);
+	--compare-theirs: var(--projects-theirs);
+	--compare-added: var(--projects-added);
+	--compare-removed: var(--projects-removed);
 }
 
 .projects__compare--merge {

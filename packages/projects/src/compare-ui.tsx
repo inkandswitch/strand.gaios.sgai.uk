@@ -1,5 +1,5 @@
 import {createEffect, createSignal, createUniqueId, For, onCleanup, Show} from "solid-js"
-import {modeName, type Mode, type Options, type Versions} from "./compare.ts"
+import type {Mode, Options, Versions} from "./compare.ts"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 
 /**
@@ -11,10 +11,9 @@ export function ComparePicker(props: {
 	modes: Mode[]
 	current: Mode | undefined
 	title: string
-	versions: Versions | undefined
 	pick(id: string): void
 }) {
-	const name = (mode: Mode) => modeName(mode, props.versions)
+	const name = (mode: Mode) => mode.name
 	const [open, setOpen] = createSignal(false)
 	const menuId = createUniqueId()
 	let button!: HTMLButtonElement

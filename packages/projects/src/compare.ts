@@ -11,8 +11,6 @@ export type CompareModeDescription = PluginDescription & {
 	type: "patchwork:compare-mode"
 	icon: string
 	default?: boolean
-	/** shows just this version, so it's "<its name> only" */
-	only?: "a" | "b"
 }
 
 export type CompareModeImplementation = {
@@ -34,11 +32,6 @@ export type CompareModeImplementation = {
  */
 export type Versions = {a: Version; b: Version}
 export type Version = {name: string; color: string}
-
-/** A mode's name, with the versions' names in it where it shows just one. */
-export function modeName(mode: Mode, versions: Versions | undefined) {
-	return mode.only && versions ? `${versions[mode.only].name} only` : mode.name
-}
 
 export type Mode = LoadedPlugin<CompareModeDescription, CompareModeImplementation>
 
@@ -66,7 +59,11 @@ export type CompareSelector = {
  * What it's told while its draft is compared with another: the mode, its
  * options, the other draft's version of the document, saved, or `missing`
  * when that draft doesn't have it, and whether to fold what's unchanged.
- * All null when nothing's compared.
+ * `editable` while that version can be changed with `compare:edit`: the
+ * other draft has the document, and it isn't a merge being looked over.
+ * `names` are the two drafts', to label each version with. `merging` while
+ * a merge is looked over: the view shows the document after the merge, and
+ * `other` is the target's before it. All null when nothing's compared.
  */
 export type CompareView = {
 	mode: string | null
@@ -74,6 +71,18 @@ export type CompareView = {
 	other: Uint8Array | null
 	missing: boolean
 	collapsed: boolean
+	editable: boolean
+	names: {ours: string; theirs: string} | null
+	merging: boolean
+}
+
+/**
+ * Asked by a view drawing the other draft's version itself, to change it:
+ * text spliced into that version, answered with whether it was.
+ */
+export type CompareEdit = {
+	type: "compare:edit"
+	splices: {path: (string | number)[]; index: number; remove: number; insert: string}[]
 }
 
 /**

@@ -159,7 +159,6 @@ function WorkspaceModes(props: {compare: WorkspaceCompare}) {
 				modes={props.compare.offered()}
 				current={current()}
 				title="Compare every panel"
-				versions={props.compare.versions()}
 				pick={props.compare.pick}
 			/>
 		</div>
@@ -294,7 +293,6 @@ function DraftMenu(props: {
 				<Show when={props.entries.length > 1}>
 					<SubmenuItem
 						ref={el => (compareItem = el)}
-						icon={<CompareIcon />}
 						expanded={submenu() === "compare"}
 						open={() => beside(compareItem, menu, compareMenu)}>
 						Compare with
@@ -303,7 +301,6 @@ function DraftMenu(props: {
 				<Show when={parent()}>
 					<SubmenuItem
 						ref={el => (mergeItem = el)}
-						icon={<MergeIcon />}
 						expanded={submenu() === "merge"}
 						open={() => beside(mergeItem, menu, mergeMenu)}>
 						Merge into
@@ -311,10 +308,8 @@ function DraftMenu(props: {
 				</Show>
 				<div onMouseEnter={closeSubmenus}>
 					<button type="button" role="menuitem" class="projects__menu-item" onClick={actions.copy}>
-						<span class="projects__menu-icon">
-							<CopyIcon />
-						</span>
-						Copy
+						<span class="projects__menu-icon" />
+						Create draft
 					</button>
 					<button type="button" role="menuitem" class="projects__menu-item" onClick={actions.rename}>
 						<span class="projects__menu-icon" />
@@ -428,7 +423,6 @@ function mergeReady(changes: CompareChanges | undefined) {
 
 function SubmenuItem(props: {
 	ref(element: HTMLButtonElement): void
-	icon: JSX.Element
 	expanded: boolean
 	open(): void
 	children: JSX.Element
@@ -443,7 +437,7 @@ function SubmenuItem(props: {
 			class="projects__menu-item"
 			onMouseEnter={() => props.open()}
 			onClick={() => props.open()}>
-			<span class="projects__menu-icon">{props.icon}</span>
+			<span class="projects__menu-icon" />
 			<span class="projects__menu-name">{props.children}</span>
 			<span class="projects__menu-chevron">
 				<ChevronIcon />
@@ -531,54 +525,6 @@ function beside(item: HTMLElement, menu: HTMLElement, submenu: HTMLElement) {
 	const width = submenu.getBoundingClientRect().width
 	if (box.right + 4 + width > window.innerWidth - 8)
 		submenu.style.left = `${Math.max(8, box.left - 4 - width)}px`
-}
-
-// ours and theirs, side by side
-function CompareIcon() {
-	return (
-		<svg width="22" height="10" viewBox="0 0 22 10" aria-hidden="true">
-			<circle cx="5" cy="5" r="4" fill="var(--projects-ours)" />
-			<circle cx="17" cy="5" r="4" fill="var(--projects-theirs)" />
-		</svg>
-	)
-}
-
-// ours going into theirs
-function MergeIcon() {
-	return (
-		<svg width="22" height="10" viewBox="0 0 22 10" aria-hidden="true">
-			<circle cx="3.5" cy="5" r="3.5" fill="var(--projects-ours)" />
-			<path
-				d="M8 5h5m-2-2.5L13.5 5 11 7.5"
-				fill="none"
-				stroke="currentColor"
-				stroke-width="1.4"
-				stroke-linecap="round"
-				stroke-linejoin="round"
-			/>
-			<circle cx="18.5" cy="5" r="3.5" fill="var(--projects-theirs)" />
-		</svg>
-	)
-}
-
-// lucide `copy`
-function CopyIcon() {
-	return (
-		<svg
-			xmlns="http://www.w3.org/2000/svg"
-			width="16"
-			height="16"
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="1.75"
-			stroke-linecap="round"
-			stroke-linejoin="round"
-			aria-hidden="true">
-			<rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-			<path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-		</svg>
-	)
 }
 
 // lucide `chevron-right`

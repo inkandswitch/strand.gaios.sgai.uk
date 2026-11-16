@@ -2,16 +2,16 @@ import type { CompareModeImplementation, Options, Slots, Version, Versions } fro
 
 const AB: Versions = { a: { name: "A" }, b: { name: "B" } };
 
-export const AOnly: CompareModeImplementation = {
-  compose: ({ b }) => hide(b),
-};
-
-export const BOnly: CompareModeImplementation = {
-  compose: ({ a }) => hide(a),
-};
-
+// Each side headed by its version's dot and name.
 export const SideBySide: CompareModeImplementation = {
-  compose: ({ a }) => style(a.parentElement!, { gridTemplateColumns: "1fr 1fr" }),
+  compose: (slots, _options, versions = AB) => {
+    const restore = style(slots.a.parentElement!, { gridTemplateColumns: "1fr 1fr" });
+    const labels = [heading(slots.a, versions.a), heading(slots.b, versions.b)];
+    return () => {
+      for (const label of labels) label.remove();
+      restore();
+    };
+  },
 };
 
 export const Stacked: CompareModeImplementation = {
@@ -115,13 +115,6 @@ export const Swipe: CompareModeImplementation<At> = {
 // this one.
 export const Combined: CompareModeImplementation = {};
 
-function hide(element: HTMLElement) {
-  element.hidden = true;
-  return () => {
-    element.hidden = false;
-  };
-}
-
 // Sets styles, and puts back what was there.
 function style(element: HTMLElement, styles: Partial<CSSStyleDeclaration>) {
   const before = Object.fromEntries(
@@ -170,6 +163,26 @@ function slider(
     stop();
     wrapper.remove();
   };
+}
+
+// Heads a slot with its version, above the view in it.
+function heading(slot: HTMLElement, version: Version) {
+  const label = document.createElement("div");
+  label.className = "compare-modes__heading";
+  Object.assign(label.style, {
+    flex: "none",
+    display: "flex",
+    alignItems: "center",
+    padding: "0.35rem 0.75rem",
+    borderBottom: "1px solid var(--compare-edge, rgb(0 0 0 / 0.08))",
+    color: "var(--compare-heading, inherit)",
+    fontSize: "0.8rem",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+  });
+  label.append(end(version));
+  slot.prepend(label);
+  return label;
 }
 
 // A version's colour dot and name.

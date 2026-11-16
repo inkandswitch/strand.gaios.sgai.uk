@@ -1,3 +1,4 @@
+import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
 import {subscribe} from "@inkandswitch/patchwork-providers"
 import {createEffect, createMemo, createSignal, onCleanup, type Accessor} from "solid-js"
 import type {Comparing} from "./panel.tsx"
@@ -37,12 +38,16 @@ export function useWorkspaceState(
 			const current = against()
 			const draft = current?.draft
 			if (!state || !draft) return undefined
-			const main = draft === state.main || draft === state.workspace
-			const name = state.drafts.find(entry => entry.url === draft)?.name ?? ""
+			// main comes first, under the workspace's url or the main draft's
+			const isMain = (url: AutomergeUrl) => url === state.main || url === state.workspace
+			const nameOf = (url: AutomergeUrl) =>
+				(isMain(url) ? state.drafts[0] : state.drafts.find(entry => entry.url === url))?.name ?? ""
+			const main = isMain(draft)
 			return {
 				workspace: state.workspace,
 				draft: main ? undefined : draft,
-				name,
+				name: nameOf(draft),
+				ours: nameOf(state.checkedOut),
 				merging: !!current.merging,
 				after: current.after ?? undefined,
 			}
@@ -53,6 +58,7 @@ export function useWorkspaceState(
 				a?.workspace === b?.workspace &&
 				a?.draft === b?.draft &&
 				a?.name === b?.name &&
+				a?.ours === b?.ours &&
 				a?.merging === b?.merging &&
 				a?.after === b?.after,
 		}

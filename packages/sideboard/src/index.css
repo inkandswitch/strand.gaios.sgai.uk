@@ -25,8 +25,8 @@
   --placeholder-line: var(--studio-line-offset-50, #808e80);
   /* the marks on a file compared with another draft, one per draft it's on;
      merging, what the merge does to it */
-  --document-list-ours: var(--studio-compare-ours, #7f77dd);
-  --document-list-theirs: var(--studio-compare-theirs, #d85a30);
+  --document-list-ours: var(--studio-compare-ours, #3b7dd8);
+  --document-list-theirs: var(--studio-compare-theirs, #9b5de5);
   --document-list-added: var(--studio-merge-added, #3b8f4f);
   --document-list-removed: var(--studio-merge-removed, #c4473a);
   --document-list-changed: var(--studio-merge-changed, #8a8883);
