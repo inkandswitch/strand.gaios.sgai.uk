@@ -2,12 +2,14 @@ import {defineConfig} from "vite"
 import {dirname, join} from "node:path"
 import {fileURLToPath} from "node:url"
 import {core, environment, patchwork} from "./vite/environment.ts"
+import {bundledPackages} from "./vite/packages.ts"
 
 const root = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
 	plugins: [
 		environment(),
+		bundledPackages(join(root, "packages", "static-dist")),
 		patchwork({
 			storagePrefix: "strand.gaios",
 			title: "GAIOS",
