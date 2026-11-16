@@ -5,17 +5,29 @@ import {
 import {
 	findLink,
 	folderLinks,
+	asString,
 	folderTitle,
 	isFolder,
 	segmentFor,
 } from "./folders.ts"
 import type {Location} from "./location.ts"
 
-/** A location, followed down to the document it names. */
+/**
+ * A location, followed down to the document it names. The project is the
+ * root, whatever document the location starts at: a folder, laid out as its
+ * tree beside what's open in it, or any other document, shown on its own.
+ */
 export type Resolved = {
 	projectUrl: AutomergeUrl
 	projectName: string
-	/** undefined for the project itself, where nothing is open yet */
+	/** a folder, with documents open in it, or a document on its own */
+	root: "folder" | "document"
+	/** the root's datatype */
+	rootType: string
+	/**
+	 * What's open: in a folder, undefined until something is; a document on
+	 * its own is itself
+	 */
 	docUrl?: AutomergeUrl
 	/** one step per segment: the folder searched and the entry found in it */
 	trail: Step[]
@@ -38,13 +50,13 @@ export class LocationError extends Error {
 
 export type FindDoc = (url: AutomergeUrl) => Promise<unknown>
 
-/** The project a location is in. Only a folder can be a project. */
+/** The project a location is in: the document it starts at, whatever it is. */
 export async function findProject(
 	location: Location,
 	find: FindDoc
 ): Promise<AutomergeUrl> {
 	const projectUrl = projectUrlOf(location)
-	await findFolder(projectUrl, find, "not-a-project")
+	await findRoot(projectUrl, find)
 	return projectUrl
 }
 
@@ -54,10 +66,24 @@ export async function resolveLocation(
 	find: FindDoc
 ): Promise<Resolved> {
 	const projectUrl = projectUrlOf(location)
-	const project = await findFolder(projectUrl, find, "not-a-project")
+	const project = await findRoot(projectUrl, find)
+	const root = isFolder(project) ? "folder" : "document"
+	const rootType = asString((project as any)?.["@patchwork"]?.type) ?? ""
+	// A document on its own has nothing beneath it to go down into.
+	if (root === "document") {
+		if (location.segments.length) throw new LocationError("not-found")
+		return {
+			projectUrl,
+			projectName: rootTitle(project),
+			root,
+			rootType,
+			docUrl: withHeads(projectUrl, location.heads),
+			trail: [],
+		}
+	}
 	const trail: Step[] = []
 	let folderUrl = projectUrl
-	let folder = project
+	let folder: unknown = project
 	for (const [index, segment] of location.segments.entries()) {
 		const links = folderLinks(folder)
 		const link = findLink(links, segment)
@@ -70,7 +96,9 @@ export async function resolveLocation(
 	const last = trail.at(-1)?.url
 	return {
 		projectUrl,
-		projectName: folderTitle(project),
+		projectName: rootTitle(project),
+		root,
+		rootType,
 		docUrl: last && withHeads(last, location.heads),
 		trail,
 	}
@@ -85,9 +113,10 @@ export async function endsInFolder(
 	return last ? isFolder(await find(last.url)) : false
 }
 
-/** The same project, with nothing open. */
+/** The same project, with nothing open: a document on its own stays open. */
 export function projectRoot(resolved: Resolved): Resolved {
-	return {...resolved, docUrl: undefined, trail: []}
+	const docUrl = resolved.root === "document" ? resolved.projectUrl : undefined
+	return {...resolved, docUrl, trail: []}
 }
 
 /**
@@ -106,13 +135,24 @@ export async function relocate(
 		if (!link) return undefined
 		trail.push({...step, segment: segmentFor(link, links)})
 	}
-	return {...resolved, projectName: folderTitle(project), trail}
+	return {...resolved, projectName: rootTitle(project), trail}
 }
 
 const REJECTIONS: Record<Rejection, string> = {
-	"not-a-project": "That link doesn't point at a project folder.",
+	"not-a-project": "That link doesn't point at a document.",
 	"not-found": "Nothing in this project is at that path.",
 	unavailable: "That project couldn't be loaded.",
+}
+
+async function findRoot(url: AutomergeUrl, find: FindDoc) {
+	let doc: unknown
+	try {
+		doc = await find(url)
+	} catch {
+		throw new LocationError("unavailable")
+	}
+	if (!doc) throw new LocationError("unavailable")
+	return doc
 }
 
 async function findFolder(
@@ -128,6 +168,14 @@ async function findFolder(
 	}
 	if (!isFolder(doc)) throw new LocationError(otherwise)
 	return doc
+}
+
+// A folder's title, or what another document says it's called, until the
+// view showing it knows better (see `useDocTitle`).
+function rootTitle(doc: unknown) {
+	if (isFolder(doc)) return folderTitle(doc)
+	const metadata = (doc as any)?.["@patchwork"]
+	return asString(metadata?.title) || asString((doc as any)?.title) || "Untitled"
 }
 
 function projectUrlOf(location: Location) {

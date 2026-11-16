@@ -4,8 +4,8 @@ import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type J
 import type {WorkspaceCompare} from "./compare.ts"
 import {ComparePicker, ModeControls} from "./compare-ui.tsx"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
-import type {CompareAgainst, CompareChanges, DraftEntry, DraftsState, Mark} from "./types.ts"
-import {NameInput, ShowWorkspaces} from "./workspaces.tsx"
+import type {CompareAgainst, CompareChanges, DraftEntry, DraftsState} from "./types.ts"
+import {NameInput, SidebarButton, type SidebarToggle} from "./workspaces.tsx"
 
 /**
  * The workspace card's header: its name, then the checked-out draft as a
@@ -15,16 +15,18 @@ import {NameInput, ShowWorkspaces} from "./workspaces.tsx"
 export function WorkspaceHeader(props: {
 	name: string
 	drafts: DraftsState | undefined
-	/** what's compared with, previews included */
+	/** what's compared with, a merge's target included */
 	against: CompareAgainst
-	/** what's compared with once nothing's previewed */
+	/** what's compared with outside a merge */
 	compared: AutomergeUrl | undefined
 	/** inside the compare provider, where requests go from */
 	element: HTMLElement
-	/** unset while the workspace list is shown */
-	showSidebar: (() => void) | undefined
+	/** the sidebar, shown or hidden from the card header */
+	sidebar: SidebarToggle
 	/** the compare modes every panel shares */
 	compare: WorkspaceCompare
+	/** where a root shown on its own puts its own controls */
+	actions?(element: HTMLElement): void
 }) {
 	const [renaming, setRenaming] = createSignal(false)
 	const [changes, setChanges] = createSignal<CompareChanges>()
@@ -42,15 +44,6 @@ export function WorkspaceHeader(props: {
 		)
 	})
 
-	// What comparing with `draft` turned up, once it's what's compared with.
-	const difference = (draft: AutomergeUrl) => {
-		const found = changes()
-		if (props.against?.draft !== draft || found?.status !== "ready") return undefined
-		const count = Object.keys(found.files).length
-		if (count === 0) return "no differences"
-		return count === 1 ? "1 file differs" : `${count} files differ`
-	}
-
 	const merging = () => {
 		const from = ours()
 		const into = theirs()
@@ -59,14 +52,13 @@ export function WorkspaceHeader(props: {
 
 	return (
 		<header class="projects__card-header">
-			<ShowWorkspaces show={props.showSidebar} />
+			<SidebarButton sidebar={props.sidebar} />
 			<h1 class="projects__workspace-title">{props.name}</h1>
 			<Show when={merging()}>
 				{merge => (
 					<MergeBar
 						from={merge().from}
 						into={merge().into}
-						changes={changes()}
 						element={props.element}
 					/>
 				)}
@@ -93,7 +85,6 @@ export function WorkspaceHeader(props: {
 								entries={entries()}
 								comparing={theirs() !== undefined}
 								compared={props.compared}
-								difference={difference}
 								send={send}
 								rename={() => setRenaming(true)}
 							/>
@@ -104,10 +95,7 @@ export function WorkspaceHeader(props: {
 									<span class="projects__tokens-between" aria-hidden="true">
 										↔
 									</span>
-									<span
-										class="projects__token projects__token--theirs"
-										classList={{"projects__token--preview": props.against?.previewing}}
-										title="Compared with">
+									<span class="projects__token projects__token--theirs" title="Compared with">
 										<span class="projects__token-dot" aria-hidden="true" />
 										<span class="projects__token-name">{compared().name}</span>
 										<button
@@ -125,9 +113,15 @@ export function WorkspaceHeader(props: {
 					</div>
 				)}
 			</Show>
-			<Show when={props.against && props.compare.offered().length > 0}>
-				<WorkspaceModes compare={props.compare} />
-			</Show>
+			<div class="projects__header-end">
+				<div ref={element => props.actions?.(element)} class="projects__header-actions" />
+				<Show when={props.against && props.compare.offered().length > 0}>
+					<WorkspaceModes compare={props.compare} />
+				</Show>
+				<Show when={merging()}>
+					<MergeButton changes={changes()} element={props.element} />
+				</Show>
+			</div>
 		</header>
 	)
 }
@@ -153,12 +147,19 @@ function WorkspaceModes(props: {compare: WorkspaceCompare}) {
 	return (
 		<div class="projects__workspace-modes">
 			<For each={shared()}>
-				{mode => <ModeControls mode={mode} options={props.compare.options(mode)} />}
+				{mode => (
+					<ModeControls
+						mode={mode}
+						options={props.compare.options(mode)}
+						versions={props.compare.versions()}
+					/>
+				)}
 			</For>
 			<ComparePicker
 				modes={props.compare.offered()}
 				current={current()}
 				title="Compare every panel"
+				versions={props.compare.versions()}
 				pick={props.compare.pick}
 			/>
 		</div>
@@ -168,15 +169,13 @@ function WorkspaceModes(props: {compare: WorkspaceCompare}) {
 /**
  * The checked-out draft's token, opening the drafts to check out another,
  * and what to do with this one: compare it with another or merge it into
- * one (hovering either previews the comparison), copy it, rename it, delete
- * it. Both lists start with the draft it was copied from.
+ * one, copy it, rename it, delete it. Both lists start with the draft it was copied from.
  */
 function DraftMenu(props: {
 	ours: DraftEntry
 	entries: DraftEntry[]
 	comparing: boolean
 	compared: AutomergeUrl | undefined
-	difference(draft: AutomergeUrl): string | undefined
 	send(selector: Selector): void
 	rename(): void
 }) {
@@ -208,8 +207,6 @@ function DraftMenu(props: {
 	const toggled = (which: "compare" | "merge") => (open: boolean) =>
 		setSubmenu(current => (open ? which : current === which ? undefined : current))
 	const close = () => menu.hidePopover()
-	const preview = (draft: AutomergeUrl | null) =>
-		props.send({type: "compare:preview", draft})
 	const closeSubmenus = () => {
 		compareMenu.hidePopover()
 		mergeMenu.hidePopover()
@@ -269,9 +266,6 @@ function DraftMenu(props: {
 				class="projects__menu"
 				onBeforeToggle={event => {
 					if (event.newState === "open") below(token, menu)
-				}}
-				onToggle={event => {
-					if (event.newState === "closed") preview(null)
 				}}>
 				<p class="projects__menu-heading">Drafts</p>
 				<div onMouseEnter={closeSubmenus}>
@@ -347,7 +341,6 @@ function DraftMenu(props: {
 					checked={url => props.compared === url}
 					copiedFrom={copiedFrom}
 					toggled={toggled("compare")}
-					preview={preview}
 					pick={actions.compare}
 				/>
 				<DraftSubmenu
@@ -357,10 +350,8 @@ function DraftMenu(props: {
 					parent={parent()}
 					others={mergeTargets()}
 					suggest
-					detail={props.difference}
 					copiedFrom={copiedFrom}
 					toggled={toggled("merge")}
-					preview={preview}
 					pick={actions.merge}
 				/>
 			</div>
@@ -369,31 +360,49 @@ function DraftMenu(props: {
 }
 
 /**
- * While the checked-out draft's merge into another is looked over: what it
- * does, and the choice to merge, which hides the merged draft and checks the
- * other out, or not.
+ * While the checked-out draft's merge into another is looked over: the two
+ * drafts, the target closing to stop merging.
  */
 function MergeBar(props: {
 	from: DraftEntry
 	into: DraftEntry
-	changes: CompareChanges | undefined
 	element: HTMLElement
 }) {
+	const stop = () => void request(props.element, {type: "merge:cancel"})
+
+	return (
+		<div class="projects__merge" role="group" aria-label="Merge">
+			<span class="projects__tokens">
+				<span class="projects__token" title="Merging">
+					<span class="projects__token-dot" aria-hidden="true" />
+					<span class="projects__token-name">{props.from.name}</span>
+				</span>
+				<span class="projects__tokens-between" aria-label="into">
+					→
+				</span>
+				<span class="projects__token projects__token--theirs" title="Merging into">
+					<span class="projects__token-dot" aria-hidden="true" />
+					<span class="projects__token-name">{props.into.name}</span>
+					<button
+						type="button"
+						class="projects__token-clear"
+						title="Stop merging"
+						aria-label="Stop merging"
+						onClick={stop}>
+						×
+					</button>
+				</span>
+			</span>
+		</div>
+	)
+}
+
+/**
+ * Merges what the merge bar shows, which hides the merged draft and checks
+ * the other out. At the very end of the header.
+ */
+function MergeButton(props: {changes: CompareChanges | undefined; element: HTMLElement}) {
 	const [merging, setMerging] = createSignal(false)
-	const ready = () => props.changes?.mode === "merge" && props.changes.status === "ready"
-	const counts = () => {
-		const found = props.changes
-		if (!ready() || !found) return undefined
-		const marks = Object.values(found.files)
-		const count = (mark: Mark) => marks.filter(each => each === mark).length
-		return {
-			added: count("added"),
-			removed: count("removed"),
-			changed: count("changed") + count("both"),
-			review: count("both"),
-		}
-	}
-	const cancel = () => void request(props.element, {type: "merge:cancel"})
 	const merge = async () => {
 		setMerging(true)
 		try {
@@ -402,62 +411,19 @@ function MergeBar(props: {
 			setMerging(false)
 		}
 	}
-
 	return (
-		<div class="projects__merge" role="group" aria-label="Merge">
-			<span class="projects__merge-title">
-				Merge
-				<span class="projects__token">
-					<span class="projects__token-dot" aria-hidden="true" />
-					<span class="projects__token-name">{props.from.name}</span>
-				</span>
-				into
-				<span class="projects__token projects__token--into">
-					<span class="projects__token-dot" aria-hidden="true" />
-					<span class="projects__token-name">{props.into.name}</span>
-				</span>
-			</span>
-			<span class="projects__merge-summary">
-				<Show when={counts()} fallback="Working out the merge…">
-					{found => <MergeCounts {...found()} />}
-				</Show>
-			</span>
-			<button type="button" class="projects__button" onClick={cancel}>
-				Cancel
-			</button>
-			<button
-				type="button"
-				class="projects__button projects__button--primary"
-				disabled={!ready() || merging()}
-				onClick={merge}>
-				Merge
-			</button>
-		</div>
+		<button
+			type="button"
+			class="projects__button projects__merge-button"
+			disabled={!mergeReady(props.changes) || merging()}
+			onClick={merge}>
+			Merge
+		</button>
 	)
 }
 
-function MergeCounts(props: {added: number; removed: number; changed: number; review: number}) {
-	const parts = () =>
-		[
-			{count: props.added, label: "added", kind: "added"},
-			{count: props.removed, label: "removed", kind: "removed"},
-			{count: props.changed, label: "changed", kind: "changed"},
-			{count: props.review, label: "to review", kind: "review"},
-		].filter(part => part.count > 0)
-	return (
-		<Show when={parts().length > 0} fallback="Nothing changes">
-			<For each={parts()}>
-				{(part, index) => (
-					<>
-						<Show when={index() > 0}> · </Show>
-						<span class={`projects__merge-count--${part.kind}`}>
-							{part.count} {part.label}
-						</span>
-					</>
-				)}
-			</For>
-		</Show>
-	)
+function mergeReady(changes: CompareChanges | undefined) {
+	return changes?.mode === "merge" && changes.status === "ready"
 }
 
 function SubmenuItem(props: {
@@ -486,10 +452,7 @@ function SubmenuItem(props: {
 	)
 }
 
-/**
- * Drafts to pick one from, the one this was copied from first: hovering one
- * previews comparing with it, and leaving the list stops previewing.
- */
+/** Drafts to pick one from, the one this was copied from first. */
 function DraftSubmenu(props: {
 	ref(element: HTMLDivElement): void
 	id: string
@@ -499,10 +462,8 @@ function DraftSubmenu(props: {
 	/** the parent stands out as the one to pick */
 	suggest?: boolean
 	checked?(draft: AutomergeUrl): boolean
-	detail?(draft: AutomergeUrl): string | undefined
 	copiedFrom(entry: DraftEntry): string | undefined
 	toggled(open: boolean): void
-	preview(draft: AutomergeUrl | null): void
 	pick(draft: AutomergeUrl): void
 }) {
 	const item = (entry: DraftEntry, meta: string | undefined, suggested = false) => (
@@ -512,8 +473,6 @@ function DraftSubmenu(props: {
 			aria-checked={props.checked?.(entry.url)}
 			class="projects__menu-item projects__menu-item--draft"
 			classList={{"projects__menu-item--suggested": suggested}}
-			onMouseEnter={() => props.preview(entry.url)}
-			onFocus={() => props.preview(entry.url)}
 			onClick={() => props.pick(entry.url)}>
 			<span class="projects__menu-line">
 				<span class="projects__menu-name">{entry.name}</span>
@@ -526,9 +485,6 @@ function DraftSubmenu(props: {
 					</span>
 				</Show>
 			</span>
-			<Show when={props.detail?.(entry.url)}>
-				{detail => <span class="projects__menu-detail">{detail()}</span>}
-			</Show>
 		</button>
 	)
 
@@ -539,11 +495,7 @@ function DraftSubmenu(props: {
 			popover="auto"
 			role="menu"
 			class="projects__menu"
-			onMouseLeave={() => props.preview(null)}
-			onToggle={event => {
-				props.toggled(event.newState === "open")
-				if (event.newState === "closed") props.preview(null)
-			}}>
+			onToggle={event => props.toggled(event.newState === "open")}>
 			<p class="projects__menu-label">{props.label}</p>
 			<Show when={props.parent}>
 				{parent => (

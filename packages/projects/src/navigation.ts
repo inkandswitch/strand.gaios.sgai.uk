@@ -103,8 +103,9 @@ type Attached = {
 
 /**
  * The frame's router. The hash says what's open; `patchwork:open-document`
- * events from anything inside `element` change it. Only locations inside a
- * project are opened, and a project has to be a folder.
+ * events from anything inside `element` change it. A location's first
+ * document is its project, the root, whatever it is: a folder, with
+ * documents open in it, or any other document, open on its own.
  *
  * A project is seen through one of its drafts: the frame mounts a draft
  * provider for it (see `scope`), and everything in the project, paths

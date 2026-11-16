@@ -11,14 +11,33 @@ export type CompareModeDescription = PluginDescription & {
 	type: "patchwork:compare-mode"
 	icon: string
 	default?: boolean
+	/** shows just this version, so it's "<its name> only" */
+	only?: "a" | "b"
 }
 
 export type CompareModeImplementation = {
 	options?: unknown
 	/** whether its options, and controls, are the workspace's or each panel's */
 	scope?: "workspace" | "panel"
-	compose?(slots: {a: HTMLElement; b: HTMLElement}, options: Options<unknown>): () => void
-	controls?(element: HTMLElement, options: Options<unknown>): () => void
+	compose?(
+		slots: {a: HTMLElement; b: HTMLElement},
+		options: Options<unknown>,
+		versions?: Versions
+	): () => void
+	controls?(element: HTMLElement, options: Options<unknown>, versions?: Versions): () => void
+}
+
+/**
+ * What the two versions are called and marked with: A the checked-out draft
+ * (or, merging, the merge's result), B the draft it's compared with (or
+ * merged into).
+ */
+export type Versions = {a: Version; b: Version}
+export type Version = {name: string; color: string}
+
+/** A mode's name, with the versions' names in it where it shows just one. */
+export function modeName(mode: Mode, versions: Versions | undefined) {
+	return mode.only && versions ? `${versions[mode.only].name} only` : mode.name
 }
 
 export type Mode = LoadedPlugin<CompareModeDescription, CompareModeImplementation>
@@ -68,26 +87,41 @@ export type WorkspaceCompare = {
 	picked: Accessor<{mode: string} | undefined>
 	pick(mode: string): void
 	options(mode: Mode): Options<unknown>
+	/** a mode's options by its id, made from `defaults` the first time */
+	optionsFor(id: string, defaults: unknown): Options<unknown>
 	offered: Accessor<Mode[]>
 	inUse: Accessor<Mode[]>
 	report(offered: Mode[], inUse: Mode[]): void
+	/** the two versions compared, while they are */
+	versions: Accessor<Versions | undefined>
+	setVersions(versions: Versions | undefined): void
 }
 
 export function createWorkspaceCompare(): WorkspaceCompare {
 	const [picked, setPicked] = createSignal<{mode: string}>()
 	const [offered, setOffered] = createSignal<Mode[]>([])
 	const [inUse, setInUse] = createSignal<Mode[]>([])
+	const [versions, setVersions] = createSignal<Versions | undefined>(undefined, {
+		equals: (a, b) =>
+			a?.a.name === b?.a.name &&
+			a?.a.color === b?.a.color &&
+			a?.b.name === b?.b.name &&
+			a?.b.color === b?.b.color,
+	})
 	const kept = new Map<string, Options<unknown>>()
 	return {
 		picked,
 		pick: mode => setPicked({mode}),
 		options: mode => optionsIn(kept, mode),
+		optionsFor: (id, defaults) => optionsById(kept, id, defaults),
 		offered,
 		inUse,
 		report(nextOffered, nextInUse) {
 			setOffered(previous => (sameModes(previous, nextOffered) ? previous : nextOffered))
 			setInUse(previous => (sameModes(previous, nextInUse) ? previous : nextInUse))
 		},
+		versions,
+		setVersions: next => setVersions(() => next),
 	}
 }
 
@@ -135,10 +169,14 @@ export function drawnByView(mode: Mode, asked: CompareSelector | undefined) {
 
 /** A mode's options, made from its defaults the first time they're asked for. */
 export function optionsIn(kept: Map<string, Options<unknown>>, mode: Mode) {
-	let options = kept.get(mode.id)
+	return optionsById(kept, mode.id, mode.module.options)
+}
+
+function optionsById(kept: Map<string, Options<unknown>>, id: string, defaults: unknown) {
+	let options = kept.get(id)
 	if (!options) {
-		options = createOptions(structuredClone(mode.module.options ?? null))
-		kept.set(mode.id, options)
+		options = createOptions(structuredClone(defaults ?? null))
+		kept.set(id, options)
 	}
 	return options
 }

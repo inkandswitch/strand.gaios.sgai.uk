@@ -1,6 +1,6 @@
 import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
 import {Show} from "solid-js"
-import {ShowWorkspaces} from "./workspaces.tsx"
+import {SidebarButton, type SidebarToggle} from "./workspaces.tsx"
 
 /**
  * The account's packages, through the `packages` tool: what's installed,
@@ -9,13 +9,13 @@ import {ShowWorkspaces} from "./workspaces.tsx"
 export function PackagesPage(props: {
 	/** the account's module settings, where its packages are listed */
 	url: AutomergeUrl | undefined
-	/** unset while the workspace list is shown */
-	showSidebar: (() => void) | undefined
+	/** the sidebar, shown or hidden from the card header */
+	sidebar: SidebarToggle
 }) {
 	return (
 		<div class="projects__card">
 			<header class="projects__card-header">
-				<ShowWorkspaces show={props.showSidebar} />
+				<SidebarButton sidebar={props.sidebar} />
 				<h1 class="projects__workspace-title">Packages</h1>
 			</header>
 			<Show

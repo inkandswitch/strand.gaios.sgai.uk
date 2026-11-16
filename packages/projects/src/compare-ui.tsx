@@ -1,5 +1,5 @@
 import {createEffect, createSignal, createUniqueId, For, onCleanup, Show} from "solid-js"
-import type {Mode, Options} from "./compare.ts"
+import {modeName, type Mode, type Options, type Versions} from "./compare.ts"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 
 /**
@@ -11,8 +11,10 @@ export function ComparePicker(props: {
 	modes: Mode[]
 	current: Mode | undefined
 	title: string
+	versions: Versions | undefined
 	pick(id: string): void
 }) {
+	const name = (mode: Mode) => modeName(mode, props.versions)
 	const [open, setOpen] = createSignal(false)
 	const menuId = createUniqueId()
 	let button!: HTMLButtonElement
@@ -29,10 +31,10 @@ export function ComparePicker(props: {
 				class="projects__compare-picker"
 				aria-haspopup="menu"
 				aria-expanded={open()}
-				title={props.current ? `${props.title}: ${props.current.name}` : props.title}
+				title={props.current ? `${props.title}: ${name(props.current)}` : props.title}
 				popovertarget={menuId}>
 				<Show when={props.current} fallback={<span class="projects__compare-label">Mode</span>}>
-					{current => <ModeIcon mode={current()} />}
+					{current => <ModeIcon mode={current()} name={name(current())} />}
 				</Show>
 				<CaretIcon />
 			</button>
@@ -62,8 +64,8 @@ export function ComparePicker(props: {
 									<CheckIcon />
 								</Show>
 							</span>
-							<ModeIcon mode={mode} />
-							{mode.name}
+							<ModeIcon mode={mode} name={name(mode)} />
+							{name(mode)}
 						</button>
 					)}
 				</For>
@@ -87,12 +89,16 @@ export function CollapseToggle(props: {collapsed: boolean; toggle(): void}) {
 }
 
 /** Where a mode draws its own controls, if it has any. */
-export function ModeControls(props: {mode: Mode; options: Options<unknown>}) {
+export function ModeControls(props: {
+	mode: Mode
+	options: Options<unknown>
+	versions: Versions | undefined
+}) {
 	const [element, setElement] = createSignal<HTMLDivElement>()
 	createEffect(() => {
 		const controls = props.mode.module.controls
 		const at = element()
-		if (controls && at) onCleanup(controls(at, props.options))
+		if (controls && at) onCleanup(controls(at, props.options, props.versions))
 	})
 	return (
 		<Show when={props.mode.module.controls}>
@@ -101,8 +107,8 @@ export function ModeControls(props: {mode: Mode; options: Options<unknown>}) {
 	)
 }
 
-function ModeIcon(props: {mode: Mode}) {
-	return <img class="projects__compare-icon" src={props.mode.icon} alt={props.mode.name} />
+function ModeIcon(props: {mode: Mode; name: string}) {
+	return <img class="projects__compare-icon" src={props.mode.icon} alt={props.name} />
 }
 
 // lucide `fold-vertical`

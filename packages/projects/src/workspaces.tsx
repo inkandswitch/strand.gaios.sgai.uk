@@ -1,13 +1,29 @@
 import type {AutomergeUrl, DocHandle, Repo} from "@automerge/automerge-repo/slim"
 import type {FolderDoc} from "@inkandswitch/patchwork-filesystem"
-import {createSignal, For, onMount, Show, type Accessor} from "solid-js"
-import {folderLinks} from "./folders.ts"
+import {getRegistry, type DatatypeDescription} from "@inkandswitch/patchwork-plugins"
+import {
+	createSignal,
+	createUniqueId,
+	For,
+	onCleanup,
+	onMount,
+	Show,
+	type Accessor,
+} from "solid-js"
 import {useDoc} from "./hooks.ts"
-import {createWorkspace, removeFromRecents} from "./recents.ts"
+import {
+	createDocument,
+	groupRecents,
+	nameForNew,
+	recentsOf,
+	removeFromRecents,
+	setPinned,
+} from "./recents.ts"
 
 /**
- * The account's workspaces, most recently opened first, beside whatever's
- * open: one to open, a new one to make, and the packages page at the bottom.
+ * The account's roots beside whatever's open: a new one of any kind to make,
+ * what's pinned, then the rest by when each was first opened, and the
+ * packages page at the bottom.
  */
 export function WorkspaceList(props: {
 	recents: Accessor<DocHandle<FolderDoc> | undefined>
@@ -18,21 +34,25 @@ export function WorkspaceList(props: {
 	hidden: AutomergeUrl | undefined
 	open(url: AutomergeUrl): void
 	packages(): void
-	collapse(): void
 }) {
 	const list = useDoc(props.recents)
-	const workspaces = () =>
-		folderLinks(list()).filter(
-			link => link.type === "folder" && link.url !== props.hidden
-		)
+	const groups = () =>
+		groupRecents(recentsOf(list()).filter(recent => recent.url !== props.hidden))
 	const [naming, setNaming] = createSignal(false)
 
-	async function create(name: string) {
+	// A folder is named first; anything else is made straight away, named
+	// after when it was made until it's given a name.
+	function pick(type: string) {
+		if (type === "folder") setNaming(true)
+		else void create(type, nameForNew())
+	}
+
+	async function create(type: string, title?: string) {
 		setNaming(false)
 		try {
-			props.open(await createWorkspace(props.repo, name.trim() || "Untitled workspace"))
+			props.open(await createDocument(props.repo, type, title))
 		} catch (error) {
-			console.error("projects: couldn't make a workspace", error)
+			console.error(`projects: couldn't make a ${type}`, error)
 		}
 	}
 
@@ -41,59 +61,72 @@ export function WorkspaceList(props: {
 		if (recents) removeFromRecents(recents, url)
 	}
 
+	function pin(url: AutomergeUrl, pinned: boolean) {
+		const recents = props.recents()
+		if (recents) setPinned(recents, url, pinned)
+	}
+
 	return (
-		<aside class="projects__workspaces" aria-label="Workspaces">
+		<aside class="projects__workspaces" aria-label="GAIOS">
 			<header class="projects__workspaces-header">
-				<h2 class="projects__label">Workspaces</h2>
-				<button
-					type="button"
-					class="projects__icon-button"
-					title="Hide workspaces"
-					aria-label="Hide workspaces"
-					onClick={() => props.collapse()}>
-					<ChevronLeftIcon />
-				</button>
+				<h2 class="projects__label">GAIOS</h2>
+				<NewMenu pick={pick} />
 			</header>
-			<ul class="projects__workspace-list">
-				<For each={workspaces()}>
-					{workspace => (
-						<li
-							class="projects__workspace-item"
-							classList={{"projects__workspace-item--current": workspace.url === props.current}}>
-							<button
-								type="button"
-								class="projects__workspace-open"
-								aria-current={workspace.url === props.current ? "page" : undefined}
-								onClick={() => props.open(workspace.url)}>
-								{workspace.name || "Untitled workspace"}
-							</button>
-							<button
-								type="button"
-								class="projects__workspace-forget"
-								title="Take off the list"
-								aria-label={`Take ${workspace.name} off the list`}
-								onClick={() => forget(workspace.url)}>
-								×
-							</button>
-						</li>
-					)}
-				</For>
-			</ul>
-			<Show
-				when={naming()}
-				fallback={
-					<button type="button" class="projects__workspace-new" onClick={() => setNaming(true)}>
-						+ New workspace
-					</button>
-				}>
+			<Show when={naming()}>
 				<NameInput
 					class="projects__workspace-name"
-					placeholder="Workspace name"
-					label="New workspace name"
-					commit={create}
+					placeholder="Folder name"
+					label="New folder name"
+					commit={name => create("folder", name.trim() || "Untitled folder")}
 					cancel={() => setNaming(false)}
 				/>
 			</Show>
+			<div class="projects__workspace-groups">
+				<For each={groups()}>
+					{group => (
+						<section class="projects__workspace-group" aria-label={group.label}>
+							<h3 class="projects__workspace-group-label">{group.label}</h3>
+							<ul class="projects__workspace-list">
+								<For each={group.recents}>
+									{workspace => (
+										<li
+											class="projects__workspace-item"
+											classList={{
+												"projects__workspace-item--current": workspace.url === props.current,
+											}}>
+											<button
+												type="button"
+												class="projects__workspace-open"
+												aria-current={workspace.url === props.current ? "page" : undefined}
+												onClick={() => props.open(workspace.url)}>
+												{workspace.name || "Untitled"}
+											</button>
+											<button
+												type="button"
+												class="projects__workspace-action"
+												classList={{"projects__workspace-action--on": workspace.pinned}}
+												aria-pressed={workspace.pinned}
+												title={workspace.pinned ? "Unpin" : "Pin"}
+												aria-label={`${workspace.pinned ? "Unpin" : "Pin"} ${workspace.name}`}
+												onClick={() => pin(workspace.url, !workspace.pinned)}>
+												<PinIcon />
+											</button>
+											<button
+												type="button"
+												class="projects__workspace-action"
+												title="Take off the list"
+												aria-label={`Take ${workspace.name} off the list`}
+												onClick={() => forget(workspace.url)}>
+												×
+											</button>
+										</li>
+									)}
+								</For>
+							</ul>
+						</section>
+					)}
+				</For>
+			</div>
 			<footer class="projects__workspaces-footer">
 				<button type="button" class="projects__workspace-new" onClick={() => props.packages()}>
 					Packages
@@ -101,6 +134,74 @@ export function WorkspaceList(props: {
 			</footer>
 		</aside>
 	)
+}
+
+/** A plus, opening a menu of every kind of document there is to make. */
+function NewMenu(props: {pick(type: string): void}) {
+	const datatypes = useDatatypes()
+	const menuId = createUniqueId()
+	let button!: HTMLButtonElement
+	let menu!: HTMLDivElement
+	return (
+		<>
+			<button
+				ref={button}
+				type="button"
+				class="projects__icon-button"
+				aria-haspopup="menu"
+				title="New"
+				aria-label="New"
+				popovertarget={menuId}>
+				<PlusIcon />
+			</button>
+			<div
+				ref={menu}
+				id={menuId}
+				popover="auto"
+				role="menu"
+				class="projects__open-with-menu"
+				onBeforeToggle={event => {
+					if (event.newState !== "open") return
+					const box = button.getBoundingClientRect()
+					menu.style.top = `${box.bottom + 4}px`
+					menu.style.left = `${box.left}px`
+				}}>
+				<For each={datatypes()}>
+					{datatype => (
+						<button
+							type="button"
+							role="menuitem"
+							class="projects__open-with-item"
+							onClick={() => {
+								menu.hidePopover()
+								props.pick(datatype.id)
+							}}>
+							{datatype.name}
+						</button>
+					)}
+				</For>
+			</div>
+		</>
+	)
+}
+
+/** The datatypes there are to make, folders first, then by name. */
+function useDatatypes() {
+	const registry = getRegistry<DatatypeDescription>("patchwork:datatype")
+	const listed = () =>
+		registry
+			.all()
+			.filter(datatype => !datatype.unlisted)
+			.sort((a, b) =>
+				a.id === "folder" ? -1 : b.id === "folder" ? 1 : a.name.localeCompare(b.name)
+			)
+	const [datatypes, setDatatypes] = createSignal(listed())
+	onCleanup(
+		registry.on("changed", () => {
+			setDatatypes(listed())
+		})
+	)
+	return datatypes
 }
 
 /** A name typed in place: Enter or leaving it takes it, Escape doesn't. */
@@ -143,39 +244,64 @@ export function NameInput(props: {
 	)
 }
 
-// lucide `chevron-left`
-function ChevronLeftIcon() {
+// lucide `pin`
+function PinIcon() {
 	return (
 		<svg
 			xmlns="http://www.w3.org/2000/svg"
-			width="16"
-			height="16"
+			width="14"
+			height="14"
 			viewBox="0 0 24 24"
 			fill="none"
 			stroke="currentColor"
 			stroke-width="1.75"
 			stroke-linecap="round"
-			stroke-linejoin="round">
-			<path d="m15 18-6-6 6-6" />
+			stroke-linejoin="round"
+			aria-hidden="true">
+			<path d="M12 17v5" />
+			<path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
 		</svg>
 	)
 }
 
-/** Brings the workspace list back, while it's collapsed: `show` is unset otherwise. */
-export function ShowWorkspaces(props: {show: (() => void) | undefined}) {
+// lucide `plus`
+function PlusIcon() {
 	return (
-		<Show when={props.show}>
-			{show => (
-				<button
-					type="button"
-					class="projects__icon-button"
-					title="Show workspaces"
-					aria-label="Show workspaces"
-					onClick={() => show()()}>
-					<SidebarIcon />
-				</button>
-			)}
-		</Show>
+		<svg
+			xmlns="http://www.w3.org/2000/svg"
+			width="18"
+			height="18"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="1.75"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true">
+			<path d="M5 12h14" />
+			<path d="M12 5v14" />
+		</svg>
+	)
+}
+
+/** Whether the sidebar is open, and the switch for it. */
+export type SidebarToggle = {open: boolean; toggle(): void}
+
+/**
+ * Shows or hides the sidebar, from the start of a card's header: it stays
+ * there either way, so it doesn't move about.
+ */
+export function SidebarButton(props: {sidebar: SidebarToggle}) {
+	return (
+		<button
+			type="button"
+			class="projects__icon-button"
+			aria-pressed={props.sidebar.open}
+			title={props.sidebar.open ? "Hide sidebar" : "Show sidebar"}
+			aria-label={props.sidebar.open ? "Hide sidebar" : "Show sidebar"}
+			onClick={() => props.sidebar.toggle()}>
+			<SidebarIcon />
+		</button>
 	)
 }
 

@@ -1,4 +1,5 @@
 import type {Plugin, ToolImplementation} from "@inkandswitch/patchwork-plugins"
+import {FOLDER_TOOL} from "./tool-ids.ts"
 import type {AccountDoc} from "./types.ts"
 
 export const plugins: Plugin<any>[] = [
@@ -21,6 +22,19 @@ export const plugins: Plugin<any>[] = [
 		icon: "Window",
 		supportedDatatypes: ["account"],
 		load: loadFrame,
+	},
+	{
+		type: "patchwork:tool",
+		id: FOLDER_TOOL,
+		name: "Folder workspace",
+		icon: "Folder",
+		unlisted: true,
+		supportedDatatypes: ["folder"],
+		async load() {
+			const {renderFolderTool} = await import("./folder-tool.tsx")
+			await new Promise(resolve => setTimeout(resolve))
+			return renderFolderTool as ToolImplementation<unknown>
+		},
 	},
 ]
 

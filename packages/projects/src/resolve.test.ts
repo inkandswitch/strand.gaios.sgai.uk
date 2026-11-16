@@ -50,6 +50,8 @@ describe("resolveLocation", () => {
 		expect(resolved).toEqual({
 			projectUrl: PROJECT,
 			projectName: "Q3 Planning",
+			root: "folder",
+			rootType: "folder",
 			docUrl: undefined,
 			trail: [],
 		})
@@ -95,10 +97,26 @@ describe("resolveLocation", () => {
 		expect(resolved.docUrl).toBe(`${ROADMAP}#abc`)
 	})
 
-	it("only takes a folder as a project", async () => {
+	it("takes any document as a project, open on its own", async () => {
+		const resolved = await resolveLocation(
+			{projectId: idOf(ROADMAP), segments: [], heads: "abc"},
+			repo(docs)
+		)
+		expect(resolved).toEqual({
+			projectUrl: ROADMAP,
+			projectName: "Untitled",
+			root: "document",
+			rootType: "md",
+			docUrl: `${ROADMAP}#abc`,
+			trail: [],
+		})
+		expect(projectRoot(resolved).docUrl).toBe(ROADMAP)
+	})
+
+	it("has nothing beneath a document on its own", async () => {
 		await expect(
-			resolveLocation({projectId: idOf(ROADMAP), segments: []}, repo(docs))
-		).rejects.toEqual(new LocationError("not-a-project"))
+			resolveLocation({projectId: idOf(ROADMAP), segments: ["x"]}, repo(docs))
+		).rejects.toEqual(new LocationError("not-found"))
 	})
 
 	it("rejects a path that isn't there", async () => {

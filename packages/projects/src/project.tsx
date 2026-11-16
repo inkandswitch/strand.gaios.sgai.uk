@@ -1,20 +1,33 @@
 import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
-import {request, subscribe} from "@inkandswitch/patchwork-providers"
-import {createEffect, createMemo, createSignal, on, onCleanup, Show, untrack} from "solid-js"
-import {createWorkspaceCompare} from "./compare.ts"
-import {Dock, type Comparing} from "./dock.tsx"
+import {request} from "@inkandswitch/patchwork-providers"
+import {createEffect, createMemo, createSignal, on, Show, untrack} from "solid-js"
+import {Portal} from "solid-js/web"
+import {createWorkspaceCompare, useCompareModes, type Mode, type WorkspaceCompare} from "./compare.ts"
 import {WorkspaceHeader} from "./header.tsx"
 import {useDocTitle, useMounted} from "./hooks.ts"
 import type {ProjectRoute} from "./navigation.ts"
+import {OpenWith} from "./open-with.tsx"
+import {
+	Compared,
+	PanelCompareControls,
+	createPanelModes,
+	createPanelState,
+	type Comparing,
+} from "./panel.tsx"
 import {Provider} from "./provider.tsx"
-import type {CompareAgainst, DraftsState} from "./types.ts"
+import {FOLDER_TOOL} from "./tool-ids.ts"
+import {provideWorkspace} from "./workspace.ts"
+import type {SidebarToggle} from "./workspaces.tsx"
+import {useWorkspaceState} from "./workspace-state.ts"
 
 const COMPARE_PROVIDER = "patchwork-compare-provider"
 
 /**
- * A workspace as a card: its header, its files beside its open documents,
- * all seen through the draft the provider around it has checked out (`repo`
- * is that provider's), and compared with another draft when one's picked.
+ * A root as a card: its header, then the root itself, all seen through the
+ * draft the provider around it has checked out (`repo` is that provider's),
+ * and compared with another draft when one's picked. A folder lays out what's
+ * open in it with its own tool, its tree beside its documents; any other
+ * document is shown on its own.
  */
 export function ProjectView(props: {
 	route: ProjectRoute
@@ -22,78 +35,60 @@ export function ProjectView(props: {
 	siteTitle: string
 	focus(panel: ProjectRoute | undefined): void
 	compare(draft: AutomergeUrl | undefined): void
-	/** unset while the workspace list is shown */
-	showSidebar: (() => void) | undefined
+	/** the sidebar, shown or hidden from the card header */
+	sidebar: SidebarToggle
 }) {
 	const docUrl = () => props.route.resolved.docUrl
-	const projectName = () => props.route.resolved.projectName
+	const folder = () => props.route.resolved.root === "folder"
 	const title = useDocTitle(props.repo, docUrl)
-	const [root, setRoot] = createSignal<HTMLElement>()
+	// A folder's name is its title; another document's is whatever its view
+	// calls it.
+	const name = () => (folder() ? props.route.resolved.projectName : title()) ?? props.route.resolved.projectName
 	const [provider, setProvider] = createSignal<HTMLElement>()
 	const [card, setCard] = createSignal<HTMLElement>()
+	const [actions, setActions] = createSignal<HTMLElement>()
 	const mounted = useMounted(COMPARE_PROVIDER, provider)
-	const [drafts, setDrafts] = createSignal<DraftsState>()
-	const [against, setAgainst] = createSignal<CompareAgainst>(null)
-	const [heard, setHeard] = createSignal(false)
+	const state = useWorkspaceState(card, mounted)
 	const workspaceCompare = createWorkspaceCompare()
+	const modes = useCompareModes()
 	const compared = createMemo<AutomergeUrl | undefined>(previous => {
-		const current = against()
+		const current = state.against()
 		return current?.previewing || current?.merging ? previous : current?.draft
 	})
-	// The draft provider names it by its url, and checks views out of it by
-	// that, but main is the draft provider's own `doc-url`.
-	const comparing = createMemo<Comparing | undefined>(() => {
-		const state = drafts()
-		const current = against()
-		const draft = current?.draft
-		if (!state || !draft) return undefined
-		const main = draft === state.main || draft === state.workspace
-		const name = state.drafts.find(entry => entry.url === draft)?.name ?? ""
-		return {
-			workspace: state.workspace,
-			draft: main ? undefined : draft,
-			name,
-			merging: !!current.merging,
-			after: current.after ?? undefined,
-		}
-	}, undefined, {
-		equals: (a, b) =>
-			a?.workspace === b?.workspace &&
-			a?.draft === b?.draft &&
-			a?.name === b?.name &&
-			a?.merging === b?.merging &&
-			a?.after === b?.after,
-	})
 
+	// What the two versions are called: merging, A is what the merge leaves
+	// the target as.
 	createEffect(() => {
-		document.title = [title(), projectName(), props.siteTitle]
-			.filter(Boolean)
-			.join(" | ")
-	})
-
-	createEffect(() => {
-		const at = card()
-		if (!mounted() || !at) return
-		onCleanup(subscribe<DraftsState>(at, {type: "drafts"}, state => setDrafts(state)))
-		onCleanup(
-			subscribe<CompareAgainst>(at, {type: "compare:against"}, value => {
-				setAgainst(value)
-				setHeard(true)
-			})
+		const drafts = state.drafts()
+		const current = state.against()
+		const ours = drafts?.drafts.find(entry => entry.url === drafts.checkedOut)?.name
+		const theirs = drafts?.drafts.find(entry => entry.url === current?.draft)?.name
+		workspaceCompare.setVersions(
+			current && ours !== undefined && theirs !== undefined
+				? {
+						a: {name: current.merging ? "Merged" : ours, color: "var(--projects-ours)"},
+						b: {name: theirs, color: "var(--projects-theirs)"},
+					}
+				: undefined
 		)
+	})
+
+	createEffect(() => {
+		const shown = folder() ? [title(), name()] : [name()]
+		document.title = [...shown, props.siteTitle].filter(Boolean).join(" | ")
 	})
 
 	// The hash and the provider follow each other, once the provider has
 	// started from the hash's.
 	createEffect(() => {
-		if (heard()) props.compare(compared())
+		if (state.heard()) props.compare(compared())
 	})
 	createEffect(
 		on(
 			() => props.route.location.compare,
 			wanted => {
 				const at = card()
-				if (!untrack(heard) || !at || wanted === untrack(compared)) return
+				if (!untrack(state.heard) || !at || wanted === untrack(compared)) return
 				void request(at, {type: "compare:set", draft: wanted ?? null})
 			},
 			{defer: true}
@@ -101,54 +96,157 @@ export function ProjectView(props: {
 	)
 
 	return (
-		<div ref={setRoot} class="projects__project">
+		<div class="projects__project">
 			<patchwork-view
 				ref={setProvider}
 				component={COMPARE_PROVIDER}
 				attr:against={props.route.location.compare}
 				class="projects__compare-scope">
 				<section ref={setCard} class="projects__card">
-					<Show when={mounted() && drafts() && card()}>
+					<Show when={mounted() && state.drafts() && card()}>
 						{at => (
 							<>
 								<WorkspaceHeader
-									name={projectName()}
-									drafts={drafts()}
-									against={against()}
+									name={name()}
+									drafts={state.drafts()}
+									against={state.against()}
 									compared={compared()}
 									element={at()}
-									showSidebar={props.showSidebar}
+									sidebar={props.sidebar}
 									compare={workspaceCompare}
+									actions={setActions}
 								/>
-								<div class="projects__body">
-									<aside class="projects__files" aria-label="Files">
-										<patchwork-view
-											class="projects__panel"
-											tool-id="chee/document-list"
-											doc-url={props.route.resolved.projectUrl}
-										/>
-									</aside>
-									<Provider component="patchwork-comments-provider">
-										<Provider component="patchwork-focus-provider">
-											<main class="projects__main">
-												<Dock
-													route={props.route}
+								<Show
+									when={folder()}
+									fallback={
+										<Show when={docUrl()}>
+											{url => (
+												<DocumentRoot
+													url={url()}
+													toolId={props.route.location.toolId}
 													repo={props.repo}
-													draftKey={drafts()!.checkedOut}
-													comparing={comparing()}
-													focus={props.focus}
-													host={root()}
+													draftKey={state.drafts()!.checkedOut}
+													comparing={state.comparing()}
 													workspace={workspaceCompare}
+													modes={modes}
+													actions={actions()}
+													element={at()}
 												/>
-											</main>
-										</Provider>
-									</Provider>
-								</div>
+											)}
+										</Show>
+									}>
+									<FolderRoot
+										url={props.route.resolved.projectUrl}
+										route={props.route}
+										focus={props.focus}
+										workspace={workspaceCompare}
+										modes={modes}
+										element={at()}
+									/>
+								</Show>
 							</>
 						)}
 					</Show>
 				</section>
 			</patchwork-view>
 		</div>
+	)
+}
+
+/**
+ * A folder as the root, laid out by its own tool, which is told what's open
+ * and reports back what it does with it (see `workspace.ts`).
+ */
+function FolderRoot(props: {
+	url: AutomergeUrl
+	route: ProjectRoute
+	focus(panel: ProjectRoute | undefined): void
+	workspace: WorkspaceCompare
+	modes: () => Mode[]
+	element: HTMLElement
+}) {
+	provideWorkspace(props.element, {
+		route: () => props.route,
+		focus: route => props.focus(route),
+		compare: props.workspace,
+		modes: props.modes,
+	})
+	return (
+		<patchwork-view class="projects__root-tool" tool-id={FOLDER_TOOL} doc-url={props.url} />
+	)
+}
+
+/**
+ * A document as the root, shown on its own: compared like a panel of a
+ * folder's dock, with its controls, and "Open with", in the header.
+ */
+function DocumentRoot(props: {
+	url: AutomergeUrl
+	toolId: string | undefined
+	repo: Repo
+	draftKey: string
+	comparing: Comparing | undefined
+	workspace: WorkspaceCompare
+	modes: () => Mode[]
+	/** where in the header its controls go */
+	actions: HTMLElement | undefined
+	element: HTMLElement
+}) {
+	const panel = createPanelState()
+	const [tool, setTool] = createSignal<string>()
+	const panelModes = createPanelModes({
+		modes: props.modes,
+		workspace: props.workspace,
+		comparing: () => props.comparing,
+		panels: () => [panel],
+	})
+	const openWith = (toolId: string) =>
+		props.element.dispatchEvent(
+			new CustomEvent("patchwork:open-document", {
+				detail: {url: props.url, toolId},
+				bubbles: true,
+				composed: true,
+			})
+		)
+
+	return (
+		<>
+			<Show when={props.actions}>
+				{at => (
+					<Portal mount={at()}>
+						<PanelCompareControls
+							panel={panel}
+							modes={panelModes}
+							comparing={!!props.comparing}
+							versions={props.workspace.versions()}
+							picker={false}
+						/>
+						<OpenWith docUrl={props.url} repo={props.repo} toolId={tool()} pick={openWith} />
+					</Portal>
+				)}
+			</Show>
+			<div class="projects__body projects__body--document">
+				<Provider component="patchwork-comments-provider">
+					<Provider component="patchwork-focus-provider">
+						<main class="projects__main">
+							{/* Most tools keep showing what they first read when their
+							    handle moves onto another draft's copy, so each draft gets
+							    a view of its own. */}
+							<Show when={props.draftKey} keyed>
+								{_draft => (
+									<Compared
+										url={props.url}
+										toolId={props.toolId}
+										tool={tool}
+										setTool={setTool}
+										compare={panelModes.compareOf(panel)}
+									/>
+								)}
+							</Show>
+						</main>
+					</Provider>
+				</Provider>
+			</div>
+		</>
 	)
 }

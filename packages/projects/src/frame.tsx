@@ -4,16 +4,16 @@ import type {ToolElement} from "@inkandswitch/patchwork-plugins"
 import {createEffect, createSignal, Show} from "solid-js"
 import {render} from "solid-js/web"
 import {DraftScopeView} from "./drafts.tsx"
-import {useDoc, useHandle} from "./hooks.ts"
+import {useDoc, useDocTitle, useHandle} from "./hooks.ts"
 import {createNavigation, type DraftScope} from "./navigation.ts"
 import {PackagesPage} from "./packages.tsx"
 import {ProjectView} from "./project.tsx"
 import {Provider} from "./provider.tsx"
 import {addToRecents} from "./recents.ts"
 import {provideSelection} from "./selection.ts"
-import styles from "./styles.css?inline"
+import {injectStyles} from "./styles.ts"
 import type {AccountDoc} from "./types.ts"
-import {ShowWorkspaces, WorkspaceList} from "./workspaces.tsx"
+import {SidebarButton, WorkspaceList, type SidebarToggle} from "./workspaces.tsx"
 
 const SIDEBAR_KEY = "gaios-projects:workspaces"
 
@@ -37,15 +37,20 @@ function Frame(props: {
 
 	const account = useDoc(() => props.account)
 	const recents = useHandle<FolderDoc>(repo, () => account()?.rootFolderUrl)
+	// A folder's name is its title; another document's is whatever its
+	// datatype calls it.
+	const rootTitle = useDocTitle(repo, () => {
+		const current = navigation.project()
+		return current?.resolved.root === "document" ? current.resolved.projectUrl : undefined
+	})
 	createEffect(() => {
 		const current = navigation.project()
 		const list = recents()
-		if (current && list)
-			addToRecents(
-				list,
-				current.resolved.projectUrl,
-				current.resolved.projectName
-			)
+		if (!current || !list) return
+		const {resolved} = current
+		const name =
+			resolved.root === "document" ? (rootTitle() ?? resolved.projectName) : resolved.projectName
+		addToRecents(list, resolved.projectUrl, name, resolved.rootType)
 	})
 	createEffect(() => {
 		const page = navigation.route().page
@@ -59,7 +64,12 @@ function Frame(props: {
 		setSidebar(open)
 		localStorage.setItem(SIDEBAR_KEY, open ? "shown" : "hidden")
 	}
-	const showSidebar = () => (sidebar() ? undefined : toggleSidebar)
+	const sidebarToggle: SidebarToggle = {
+		get open() {
+			return sidebar()
+		},
+		toggle: toggleSidebar,
+	}
 
 	// The open project, once it's the one whose drafts are mounted.
 	const shown = (scope: DraftScope) => {
@@ -85,13 +95,12 @@ function Frame(props: {
 								hidden={account()?.moduleSettingsUrl}
 								open={url => navigation.open(url)}
 								packages={navigation.packages}
-								collapse={toggleSidebar}
 							/>
 						</Show>
 						<Show when={navigation.route().page === "home"}>
 							<div class="projects__card projects__card--empty">
 								<header class="projects__card-header">
-									<ShowWorkspaces show={showSidebar()} />
+									<SidebarButton sidebar={sidebarToggle} />
 								</header>
 								<p class="projects__empty">Open a workspace, or make a new one.</p>
 							</div>
@@ -99,7 +108,7 @@ function Frame(props: {
 						<Show when={navigation.route().page === "packages"}>
 							<PackagesPage
 								url={account()?.moduleSettingsUrl}
-								showSidebar={showSidebar()}
+								sidebar={sidebarToggle}
 							/>
 						</Show>
 						<Show when={navigation.scope()} keyed>
@@ -113,7 +122,7 @@ function Frame(props: {
 												siteTitle={props.siteTitle}
 												focus={navigation.focus}
 												compare={navigation.compare}
-												showSidebar={showSidebar()}
+												sidebar={sidebarToggle}
 											/>
 										)}
 									</Show>
@@ -125,17 +134,4 @@ function Frame(props: {
 			</Provider>
 		</Provider>
 	)
-}
-
-function injectStyles() {
-	const id = "gaios-projects-styles"
-	const existing = document.getElementById(id)
-	if (existing) {
-		existing.textContent = styles
-		return
-	}
-	const style = document.createElement("style")
-	style.id = id
-	style.textContent = styles
-	document.head.append(style)
 }

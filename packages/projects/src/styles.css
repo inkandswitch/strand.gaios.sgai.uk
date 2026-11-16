@@ -144,13 +144,30 @@
 	margin-bottom: var(--projects-space-xs);
 }
 
+/* what's pinned, then the rest by when each was first opened */
+.projects__workspace-groups {
+	display: flex;
+	flex-direction: column;
+	gap: var(--projects-space);
+	min-height: 0;
+	margin-top: var(--projects-space-xs);
+	overflow-y: auto;
+}
+
+.projects__workspace-group-label {
+	margin: 0;
+	padding: var(--projects-space-xs) var(--projects-space-sm);
+	color: var(--projects-muted);
+	font-size: 0.8rem;
+	font-weight: 500;
+}
+
 .projects__workspace-list {
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
 	margin: 0;
 	padding: 0;
-	overflow-y: auto;
 	list-style: none;
 }
 
@@ -186,8 +203,14 @@
 	font-weight: 600;
 }
 
-.projects__workspace-forget {
-	padding: 0 var(--projects-space-sm);
+/* pin and take off the list: shown while the row's hovered, the pin also
+   while it's on */
+.projects__workspace-action {
+	display: grid;
+	flex: none;
+	place-items: center;
+	padding: 0 0.3rem;
+	align-self: stretch;
 	border: none;
 	background: none;
 	color: var(--projects-muted);
@@ -195,8 +218,17 @@
 	opacity: 0;
 }
 
-.projects__workspace-item:hover .projects__workspace-forget,
-.projects__workspace-forget:focus-visible {
+.projects__workspace-action:last-child {
+	padding-right: var(--projects-space-sm);
+}
+
+.projects__workspace-action:hover {
+	color: var(--projects-fg);
+}
+
+.projects__workspace-item:hover .projects__workspace-action,
+.projects__workspace-action:focus-visible,
+.projects__workspace-action--on {
 	opacity: 1;
 }
 
@@ -335,15 +367,6 @@ button.projects__token:hover {
 	background: var(--projects-theirs);
 }
 
-.projects__token--into .projects__token-dot {
-	background: var(--projects-theirs);
-}
-
-.projects__token--preview {
-	border-style: dashed;
-	background: var(--projects-surface);
-}
-
 .projects__token-name {
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -368,7 +391,8 @@ button.projects__token:hover {
 	line-height: 1;
 }
 
-/* in place of the tokens while a merge is looked over */
+/* in place of the tokens while a merge is looked over: the merge button
+   is the header's last thing, after the compare modes */
 
 .projects__merge {
 	display: flex;
@@ -378,52 +402,21 @@ button.projects__token:hover {
 	min-width: 0;
 }
 
-.projects__merge-title {
-	display: flex;
-	align-items: center;
-	gap: var(--projects-space-sm);
-	min-width: 0;
-	color: var(--projects-secondary);
-}
-
-.projects__merge-summary {
-	flex: 1;
-	min-width: 0;
-	overflow: hidden;
-	color: var(--projects-muted);
-	font-size: 0.85rem;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.projects__merge-count--added {
-	color: var(--projects-added);
-}
-
-.projects__merge-count--removed {
-	color: var(--projects-removed);
-}
-
-.projects__merge-count--review {
-	color: var(--projects-review);
-}
-
-.projects__merge .projects__button {
+/* at the very end of the header, past the compare modes */
+.projects__button.projects__merge-button {
+	flex: none;
 	padding: 0.3rem var(--projects-space);
-	font-size: 0.9rem;
-}
-
-.projects__merge .projects__button--primary {
 	border-color: var(--projects-fg);
 	background: var(--projects-fg);
 	color: var(--projects-surface);
+	font-size: 0.9rem;
 }
 
-.projects__merge .projects__button--primary:hover:not(:disabled) {
+.projects__button.projects__merge-button:hover:not(:disabled) {
 	background: color-mix(in oklch, var(--projects-fg) 85%, var(--projects-surface));
 }
 
-.projects__merge .projects__button:disabled {
+.projects__merge-button:disabled {
 	opacity: 0.5;
 }
 
@@ -550,12 +543,6 @@ button.projects__token:hover {
 	font-weight: 400;
 }
 
-.projects__menu-detail {
-	color: var(--projects-faint);
-	font-size: 0.78rem;
-	font-weight: 400;
-}
-
 .projects__menu-check {
 	display: grid;
 	flex: none;
@@ -583,6 +570,42 @@ button.projects__token:hover {
 	grid-template-columns: var(--projects-sidebar-width) minmax(0, 1fr);
 	min-height: 0;
 	background: var(--projects-field);
+}
+
+/* a document that's the root, on its own: no tree beside it */
+.projects__body--document {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.projects__body--document .projects__main {
+	padding-left: var(--projects-space-sm);
+}
+
+/* in a card like a dock's group, without the tab bar */
+.projects__body--document .projects__compare {
+	box-sizing: border-box;
+	overflow: hidden;
+	border: 1px solid var(--projects-surface-edge);
+	border-radius: var(--projects-radius-lg);
+	box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+}
+
+/* the folder's tool, where the folder is the root, filling the card below
+   the header: patchwork renders it into a wrapper of its own */
+.projects__root-tool {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+}
+
+.projects__root-tool > .patchwork-view-content {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
 }
 
 .projects__files {
@@ -752,13 +775,35 @@ button.projects__token:hover {
 	font-size: 0.85rem;
 }
 
-/* every panel's compare mode, at the end of the workspace's header */
-.projects__workspace-modes {
+/* the end of the header: a root's own controls when it's shown on its own,
+   every panel's compare mode, and the merge button */
+.projects__header-end {
 	display: flex;
 	flex: none;
 	align-items: center;
 	gap: var(--projects-space-sm);
 	margin-left: auto;
+}
+
+.projects__header-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--projects-space-sm);
+}
+
+.projects__header-actions:empty {
+	display: none;
+}
+
+.projects__header-actions > div {
+	display: contents;
+}
+
+.projects__workspace-modes {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: var(--projects-space-sm);
 }
 
 .projects__open-with-item .projects__compare-icon {
