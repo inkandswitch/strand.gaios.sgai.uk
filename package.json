@@ -1,0 +1,22 @@
+{
+	"name": "strand.gaios.sgai.uk",
+	"type": "module",
+	"private": true,
+	"dependencies": {
+		"@inkandswitch/patchwork": "^0.10.1"
+	},
+	"devDependencies": {
+		"@inkandswitch/patchwork-e2e": "^0.2.4",
+		"vite": "^8.3.8"
+	},
+	"scripts": {
+		"dev": "node scripts/dev.mjs",
+		"packages": "node packages/scripts/each.mjs install && node packages/scripts/each.mjs build && node packages/scripts/bundle.mjs --strict",
+		"build": "pnpm packages && vite build",
+		"serve": "vite preview",
+		"preview": "vite preview",
+		"sync": "pnpm build && pushwork sync",
+		"test": "node packages/scripts/each.mjs test"
+	},
+	"packageManager": "pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065"
+}
