@@ -1,51 +1,41 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
 	<defs>
-		<!-- twisted plies: diagonal bands painted along the cord -->
-		<pattern id="twist" width="13" height="13" patternUnits="userSpaceOnUse" patternTransform="rotate(-50)">
-			<rect width="13" height="13" fill="#c8483a"/>
-			<rect x="1" width="6" height="13" fill="#e26651"/>
-			<rect x="10" width="2" height="13" fill="#9a2f25"/>
+		<!-- twisted plies: soft diagonal bands painted along the cord -->
+		<pattern id="twist" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(-55)">
+			<rect width="16" height="16" fill="#f2b42c"/>
+			<rect x="2" width="7" height="16" fill="#fbcd55"/>
+			<rect x="12" width="2" height="16" fill="#d9951a"/>
 		</pattern>
+		<radialGradient id="round" cx="0.38" cy="0.34" r="0.7">
+			<stop offset="0" stop-color="#fff" stop-opacity="0.35"/>
+			<stop offset="0.6" stop-color="#fff" stop-opacity="0"/>
+			<stop offset="1" stop-color="#7a4a08" stop-opacity="0.25"/>
+		</radialGradient>
 	</defs>
 
-	<rect x="16" y="16" width="480" height="480" rx="112" fill="#fffdf8"/>
-	<rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#e8e1d4" stroke-width="3"/>
+	<rect x="16" y="16" width="480" height="480" rx="112" fill="#fffdf6"/>
+	<rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="#ece4d2" stroke-width="3"/>
 
-	<g fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(256 256) scale(1.12) translate(-258 -262)">
-		<!-- loose tail curling out from under the cord's end -->
-		<path d="M190 370 C190 430 222 448 242 432 C256 420 248 402 232 408" stroke="#7d241c" stroke-width="16"/>
-		<path d="M190 370 C190 430 222 448 242 432 C256 420 248 402 232 408" stroke="url(#twist)" stroke-width="10"/>
-
-		<!-- the cord's shadowed edge, then the twisted body on top -->
-		<g stroke="#7d241c" stroke-width="40">
-			<path id="main" d="M190 396 C186 330 194 250 190 112"/>
-			<path id="branch" d="M190 318 C192 262 330 270 326 200 L324 128"/>
+	<g fill="none" stroke-linecap="round" stroke-linejoin="round">
+		<!-- outline, then the twisted body on top -->
+		<g stroke="#9a6410" stroke-width="38">
+			<path id="main" d="M188 128 L188 384"/>
+			<path id="branch" d="M188 330 C188 250 324 262 324 150"/>
 		</g>
-		<g stroke="url(#twist)" stroke-width="32">
+		<g stroke="url(#twist)" stroke-width="28">
 			<use href="#main"/>
 			<use href="#branch"/>
 		</g>
-
-		<!-- frayed ends -->
-		<g stroke="#c8483a" stroke-width="7">
-			<path d="M190 104 C186 86 176 78 168 72"/>
-			<path d="M190 104 C192 84 196 74 200 64"/>
-			<path d="M190 104 C196 90 208 84 216 80"/>
-			<path d="M324 120 C318 100 310 94 302 88"/>
-			<path d="M324 120 C326 100 330 88 334 80"/>
-			<path d="M324 120 C332 104 342 98 350 96"/>
-		</g>
-
-		<!-- knots for commits -->
-		<g stroke="#7d241c" stroke-width="12">
-			<circle cx="190" cy="214" r="30"/>
-			<circle cx="325" cy="214" r="30"/>
-			<circle cx="190" cy="356" r="30"/>
-		</g>
-		<g stroke="url(#twist)" stroke-width="8">
-			<circle cx="190" cy="214" r="30"/>
-			<circle cx="325" cy="214" r="30"/>
-			<circle cx="190" cy="356" r="30"/>
-		</g>
 	</g>
+
+	<!-- a knot tied at each end of the string -->
+	<g id="knot">
+		<circle cx="188" cy="128" r="40" fill="#9a6410"/>
+		<circle cx="188" cy="128" r="33" fill="url(#twist)"/>
+		<circle cx="188" cy="128" r="33" fill="url(#round)"/>
+		<path d="M166 104 C168 132 184 150 212 152" fill="none" stroke="#9a6410" stroke-width="5" stroke-linecap="round"/>
+		<path d="M176 98 C180 120 194 136 218 140" fill="none" stroke="#9a6410" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+	</g>
+	<use href="#knot" transform="translate(136 22)"/>
+	<use href="#knot" transform="translate(0 256)"/>
 </svg>
