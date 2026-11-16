@@ -7,7 +7,6 @@ import {
 	highlightActiveLineGutter,
 	highlightActiveLine,
 	keymap,
-	scrollPastEnd,
 } from "@codemirror/view"
 import {EditorState} from "@codemirror/state"
 import {bracketMatching, foldGutter, foldKeymap} from "@codemirror/language"
@@ -17,6 +16,7 @@ import codemirrorTheme from "../codemirror-theme"
 import {getLanguageExtension} from "../languages"
 import type {FileDoc} from "../types"
 import {fileText} from "../datatype"
+import {scrollPastEndWhenLong} from "./scroll-past-end"
 import {collectExtensions} from "./codemirror-extensions"
 import {createFileComments} from "./comments"
 import {diffEditor, useDraftCompare, type DraftCompare} from "./draft-diff"
@@ -91,7 +91,7 @@ function Viewer(
 			bracketMatching(),
 			EditorState.tabSize.of(2),
 			EditorView.lineWrapping,
-			scrollPastEnd(),
+			scrollPastEndWhenLong(),
 			keymap.of([...searchKeymap, ...foldKeymap, ...defaultKeymap]),
 			languageExtension,
 			...codemirrorTheme,

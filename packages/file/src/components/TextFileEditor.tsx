@@ -7,7 +7,6 @@ import {
 	highlightActiveLine,
 	rectangularSelection,
 	keymap,
-	scrollPastEnd,
 } from "@codemirror/view"
 import {EditorState, Compartment} from "@codemirror/state"
 import {
@@ -29,6 +28,7 @@ import {
 } from "@codemirror/commands"
 import {automergeSyncPlugin} from "@automerge/automerge-codemirror"
 import {isImmutableStringFileDoc} from "../datatype"
+import {scrollPastEndWhenLong} from "./scroll-past-end"
 import {collectExtensions} from "./codemirror-extensions"
 import {createFileComments} from "./comments"
 import {diffEditor, useDraftCompare, type DraftCompare} from "./draft-diff"
@@ -155,7 +155,7 @@ function Editor(
 			EditorState.allowMultipleSelections.of(true),
 			EditorState.tabSize.of(2),
 			EditorView.lineWrapping,
-			scrollPastEnd(),
+			scrollPastEndWhenLong(),
 			EditorView.clickAddsSelectionRange.of((event) => {
 				const mask = modshift(event)
 				if (mask == 1 << mod.option) return true

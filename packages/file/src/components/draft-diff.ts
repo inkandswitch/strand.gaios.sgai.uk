@@ -9,7 +9,7 @@ import {createEffect, createMemo, on, untrack, type Accessor} from "solid-js"
 import {Automerge} from "@automerge/automerge-repo/slim"
 import {Compartment, EditorState, type Extension} from "@codemirror/state"
 import {EditorView} from "@codemirror/view"
-import {getChunks, MergeView, unifiedMergeView} from "@codemirror/merge"
+import {MergeView, unifiedMergeView} from "@codemirror/merge"
 import {subscribe} from "@inkandswitch/patchwork-providers-solid"
 import {fileText} from "../datatype"
 import type {FileDoc} from "../types"
@@ -101,9 +101,8 @@ function followInline(
 		const current = compare()
 		return current?.mode === "inline" ? current : undefined
 	})
-	let scrolled = false
 	createEffect(
-		on(inline, current => {
+		on(inline, (current, previous) => {
 			view.dispatch({
 				effects: compartment.reconfigure(
 					current === undefined
@@ -119,13 +118,12 @@ function followInline(
 							],
 				),
 			})
-			if (current === undefined || scrolled) return
-			scrolled = true
-			const first = getChunks(view.state)?.chunks[0]
-			if (!first) return
-			view.dispatch({
-				effects: EditorView.scrollIntoView(first.fromB, {y: "center"}),
-			})
+			// Starting to compare, or folding what's unchanged away or back,
+			// the file shows from its very top.
+			if (current === undefined) return
+			if (previous !== undefined && previous.collapsed === current.collapsed) return
+			view.dispatch({effects: EditorView.scrollIntoView(0, {y: "start"})})
+			view.scrollDOM.scrollTop = 0
 		}),
 	)
 }
@@ -170,7 +168,10 @@ function besideDiff(config: {
 	createEffect(
 		on(
 			() => !!config.compare()?.collapsed,
-			collapsed => merge.reconfigure({collapseUnchanged: collapsed ? COLLAPSE : undefined}),
+			collapsed => {
+				merge.reconfigure({collapseUnchanged: collapsed ? COLLAPSE : undefined})
+				merge.dom.scrollTop = 0
+			},
 			{defer: true},
 		),
 	)
