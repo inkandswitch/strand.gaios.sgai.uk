@@ -15,8 +15,8 @@ jobs:
       - name: caw
         env:
           WEBHOOK: ${{ secrets.DISCORD_PATCHWORK_FEED_WEBHOOK_URL }}
-          PUSH_CONTENT: "caw caw! [GaiOS](https://gaios.sgai.uk) has been updated!!! squark skwoo!!"
-          PR_CONTENT: "caw caw! new patchwork packages are out! [merge this PR](${{ github.event.pull_request.html_url }}) to update [GaiOS](https://gaios.sgai.uk)!! craw!"
+          PUSH_CONTENT: "caw caw! [strand](https://strand.gaios.sgai.uk) has been updated!!! squark skwoo!!"
+          PR_CONTENT: "caw caw! new patchwork packages are out! [merge this PR](${{ github.event.pull_request.html_url }}) to update [strand](https://strand.gaios.sgai.uk)!! craw!"
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             content="$PR_CONTENT"

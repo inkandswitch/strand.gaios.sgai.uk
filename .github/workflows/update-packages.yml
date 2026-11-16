@@ -2,7 +2,7 @@ name: update patchwork packages
 
 on:
   repository_dispatch:
-    types: [core-published, base-published]
+    types: [core-published]
   schedule:
     - cron: "0 * * * *"
   workflow_dispatch:
@@ -65,7 +65,6 @@ jobs:
           fi
           pnpm update --latest \
             @inkandswitch/patchwork \
-            @inkandswitch/patchwork-pkg-base \
             @inkandswitch/patchwork-e2e
           git diff --quiet package.json pnpm-lock.yaml && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
 
@@ -81,7 +80,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PATCHWORK_CROW_TOKEN }}
         run: |
           git show origin/main:package.json > "$RUNNER_TEMP/previous-package.json"
-          body="$(pnpm list --depth 0 --json @inkandswitch/patchwork @inkandswitch/patchwork-pkg-base @inkandswitch/patchwork-e2e | node scripts/update-packages-pr-body.mjs "$RUNNER_TEMP/previous-package.json")"
+          body="$(pnpm list --depth 0 --json @inkandswitch/patchwork @inkandswitch/patchwork-e2e | node scripts/update-packages-pr-body.mjs "$RUNNER_TEMP/previous-package.json")"
           pr="$(gh pr list \
             --head update-patchwork-packages \
             --base main \

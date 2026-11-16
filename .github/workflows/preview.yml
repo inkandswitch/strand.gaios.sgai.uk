@@ -1,14 +1,14 @@
-name: preview.gaios.sgai.uk
+name: preview.strand.gaios.sgai.uk
 
 on:
   push:
     branches: [main]
   repository_dispatch:
-    types: [core-main, base-main]
+    types: [core-main]
   workflow_dispatch:
 
 concurrency:
-  group: gaios-preview
+  group: strand-preview
   cancel-in-progress: true
 
 permissions:
@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   preview:
-    name: preview.gaios.sgai.uk
+    name: preview.strand.gaios.sgai.uk
     runs-on: ubuntu-latest
 
     steps:
