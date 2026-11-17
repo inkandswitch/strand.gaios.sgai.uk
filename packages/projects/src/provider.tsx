@@ -9,6 +9,7 @@ import {useMounted} from "./hooks.ts"
 export function Provider(props: {
 	component: string
 	docUrl?: AutomergeUrl
+	class?: string
 	children: JSX.Element
 }) {
 	const [element, setElement] = createSignal<HTMLElement>()
@@ -17,6 +18,7 @@ export function Provider(props: {
 		<patchwork-view
 			component={props.component}
 			doc-url={props.docUrl}
+			class={props.class}
 			ref={setElement}>
 			<Show when={mounted()}>{props.children}</Show>
 		</patchwork-view>

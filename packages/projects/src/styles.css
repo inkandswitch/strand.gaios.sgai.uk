@@ -260,7 +260,9 @@
 
 .projects__workspaces-footer {
 	display: flex;
-	flex-direction: column;
+	flex-direction: row;
+	align-items: center;
+	gap: var(--projects-space-xs);
 	margin-top: auto;
 	padding-top: var(--projects-space-xs);
 	border-top: 1px solid var(--projects-divider);
@@ -813,6 +815,18 @@ button.projects__token:hover {
 	display: contents;
 }
 
+/* the compare mode and its controls, after the drafts */
+.projects__header-compare {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: var(--projects-space-sm);
+}
+
+.projects__header-compare:not(:has(> .projects__workspace-modes)) > .projects__header-actions:empty {
+	display: none;
+}
+
 .projects__workspace-modes {
 	display: flex;
 	flex: none;
@@ -1051,4 +1065,108 @@ button.projects__token:hover {
 	.projects__files {
 		max-height: 30dvh;
 	}
+}
+
+/* ---------------------------------------------------------------- comments */
+
+/* the comments and focus providers around the root take no room */
+.projects__provider,
+.projects__provider > .patchwork-view-content {
+	display: contents;
+}
+
+/* the root, and the comments sidebar beside it */
+.projects__with-comments {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+
+.projects__with-comments > :not(.projects__comments) {
+	flex: 1;
+	min-width: 0;
+}
+
+.projects__comments {
+	flex: none;
+	display: flex;
+	width: min(22rem, 45%);
+	min-width: 0;
+	overflow: hidden;
+	contain: inline-size;
+	min-height: 0;
+	border-left: 1px solid var(--projects-surface-edge);
+	background: var(--projects-field);
+}
+
+.projects__comments[hidden] {
+	display: none;
+}
+
+.projects__comments-view,
+.projects__comments-view > .patchwork-view-content {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+}
+
+.projects__comments-view > .patchwork-view-content > * {
+	flex: 1;
+	min-height: 0;
+}
+
+.projects__comments-button {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 6px;
+	height: 28px;
+	padding: 0 10px;
+	border: 1px solid var(--projects-surface-edge);
+	border-radius: var(--projects-radius, 6px);
+	background: transparent;
+	color: var(--projects-fg);
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+}
+
+.projects__comments-button:hover {
+	background: var(--projects-hover);
+}
+
+/* pressed: raised and white, like a selected tab */
+.projects__comments-button[aria-pressed="true"] {
+	background: var(--projects-surface);
+	box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+	font-weight: 600;
+}
+
+
+@media (max-width: 40rem) {
+	.projects__with-comments {
+		flex-direction: column;
+	}
+
+	.projects__comments {
+		width: auto;
+		max-height: 45dvh;
+		border-left: 0;
+		border-top: 1px solid var(--projects-surface-edge);
+	}
+}
+
+.projects__workspace-new[aria-current="page"] {
+	color: var(--projects-fg);
+}
+
+.projects__account-view {
+	display: block;
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	padding: var(--projects-space-md, 1rem);
 }

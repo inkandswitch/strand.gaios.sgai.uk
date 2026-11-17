@@ -2,6 +2,7 @@ import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
 import {request} from "@inkandswitch/patchwork-providers"
 import {createEffect, createMemo, createSignal, on, Show, untrack} from "solid-js"
 import {Portal} from "solid-js/web"
+import {CommentsScope, createCommentsToggle} from "./comments.tsx"
 import {createWorkspaceCompare, useCompareModes, type Mode, type WorkspaceCompare} from "./compare.ts"
 import {WorkspaceHeader} from "./header.tsx"
 import {useDocTitle, useMounted} from "./hooks.ts"
@@ -47,9 +48,13 @@ export function ProjectView(props: {
 	const [provider, setProvider] = createSignal<HTMLElement>()
 	const [card, setCard] = createSignal<HTMLElement>()
 	const [actions, setActions] = createSignal<HTMLElement>()
+	const [compareControls, setCompareControls] = createSignal<HTMLElement>()
 	const mounted = useMounted(COMPARE_PROVIDER, provider)
 	const state = useWorkspaceState(card, mounted)
 	const workspaceCompare = createWorkspaceCompare()
+	const comments = createCommentsToggle()
+	const draftName = (url: AutomergeUrl | null | undefined) =>
+		url ? state.drafts()?.drafts.find(entry => entry.url === url)?.name : undefined
 	const modes = useCompareModes()
 	const compared = createMemo<AutomergeUrl | undefined>(previous => {
 		const current = state.against()
@@ -113,37 +118,47 @@ export function ProjectView(props: {
 									compared={compared()}
 									element={at()}
 									sidebar={props.sidebar}
+									comments={comments}
 									compare={workspaceCompare}
 									actions={setActions}
+									compareControls={setCompareControls}
 								/>
-								<Show
-									when={folder()}
-									fallback={
-										<Show when={docUrl()}>
-											{url => (
-												<DocumentRoot
-													url={url()}
-													toolId={props.route.location.toolId}
-													repo={props.repo}
-													draftKey={state.drafts()!.checkedOut}
-													comparing={state.comparing()}
-													workspace={workspaceCompare}
-													modes={modes}
-													actions={actions()}
-													element={at()}
-												/>
-											)}
-										</Show>
-									}>
-									<FolderRoot
-										url={props.route.resolved.projectUrl}
-										route={props.route}
-										focus={props.focus}
-										workspace={workspaceCompare}
-										modes={modes}
-										element={at()}
-									/>
-								</Show>
+								<CommentsScope
+									route={props.route}
+									repo={props.repo}
+									ours={draftName(state.drafts()?.checkedOut)}
+									theirs={state.against()?.merging ? undefined : draftName(compared())}
+									comments={comments}>
+									<Show
+										when={folder()}
+										fallback={
+											<Show when={docUrl()}>
+												{url => (
+													<DocumentRoot
+														url={url()}
+														toolId={props.route.location.toolId}
+														repo={props.repo}
+														draftKey={state.drafts()!.checkedOut}
+														comparing={state.comparing()}
+														workspace={workspaceCompare}
+														modes={modes}
+														actions={actions()}
+													compareControls={compareControls()}
+														element={at()}
+													/>
+												)}
+											</Show>
+										}>
+										<FolderRoot
+											url={props.route.resolved.projectUrl}
+											route={props.route}
+											focus={props.focus}
+											workspace={workspaceCompare}
+											modes={modes}
+											element={at()}
+										/>
+									</Show>
+								</CommentsScope>
 							</>
 						)}
 					</Show>
@@ -190,6 +205,8 @@ function DocumentRoot(props: {
 	modes: () => Mode[]
 	/** where in the header its controls go */
 	actions: HTMLElement | undefined
+	/** where in the header its compare controls go, beside the drafts */
+	compareControls: HTMLElement | undefined
 	element: HTMLElement
 }) {
 	const panel = createPanelState()
@@ -211,7 +228,7 @@ function DocumentRoot(props: {
 
 	return (
 		<>
-			<Show when={props.actions}>
+			<Show when={props.compareControls}>
 				{at => (
 					<Portal mount={at()}>
 						<PanelCompareControls
@@ -221,14 +238,18 @@ function DocumentRoot(props: {
 							versions={props.workspace.versions()}
 							picker={false}
 						/>
+					</Portal>
+				)}
+			</Show>
+			<Show when={props.actions}>
+				{at => (
+					<Portal mount={at()}>
 						<OpenWith docUrl={props.url} repo={props.repo} toolId={tool()} pick={openWith} />
 					</Portal>
 				)}
 			</Show>
 			<div class="projects__body projects__body--document">
-				<Provider component="patchwork-comments-provider">
-					<Provider component="patchwork-focus-provider">
-						<main class="projects__main">
+				<main class="projects__main">
 							{/* Most tools keep showing what they first read when their
 							    handle moves onto another draft's copy, so each draft gets
 							    a view of its own. */}
@@ -243,9 +264,7 @@ function DocumentRoot(props: {
 									/>
 								)}
 							</Show>
-						</main>
-					</Provider>
-				</Provider>
+				</main>
 			</div>
 		</>
 	)

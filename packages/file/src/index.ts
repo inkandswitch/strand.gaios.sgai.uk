@@ -7,6 +7,7 @@ import {NewFileDatatype} from "./new-file-datatype"
 export * from "./types"
 export * from "./datatype"
 export * from "./utils"
+export {replaceFileContent} from "./components/comments/anchors"
 
 export const plugins = [
 	{
@@ -27,6 +28,17 @@ export const plugins = [
 		supportedDatatypes: ["file"],
 		async load() {
 			return (await import("./tool")).FileTool
+		},
+	},
+	{
+		// What a comment on a file is about, drawn in the comments sidebar: an
+		// image pin or region, or a quote of the commented text.
+		type: "patchwork:ref-view",
+		id: "file-ref",
+		name: "File ref",
+		supportedDatatypes: ["file"],
+		async load() {
+			return (await import("./ref-view")).default
 		},
 	},
 	{

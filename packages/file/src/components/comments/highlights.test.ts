@@ -1,12 +1,10 @@
 import {beforeAll, describe, it, expect} from "vitest"
-import {Repo, initSubduction, type AutomergeUrl} from "@automerge/automerge-repo"
+import {Repo, initSubduction} from "@automerge/automerge-repo"
 import type {DecorationSet} from "@codemirror/view"
 import {buildHighlights} from "./index"
-import {createCommentForRange} from "./threads"
+import {rangeRef} from "./threads"
 
 beforeAll(() => initSubduction())
-
-const alice = "automerge:alice" as AutomergeUrl
 
 const marks = (set: DecorationSet) => {
 	const out: [number, number, string][] = []
@@ -20,12 +18,10 @@ describe("buildHighlights", () => {
 	it("marks each commented range, emphasising the focused ones", async () => {
 		const repo = new Repo()
 		const handle = repo.create<any>({content: "one two three"})
-		createCommentForRange(handle, ["content"], 0, 3, alice)
-		createCommentForRange(handle, ["content"], 8, 13, alice)
-		const refs = handle.doc()["@comments"].threads.map((t: any) => t.refs[0])
-		const [first, second] = await Promise.all(
-			refs.map((url: AutomergeUrl) => repo.find(url)),
-		)
+		const [first, second] = await Promise.all([
+			repo.find(rangeRef(handle, ["content"], 0, 3)),
+			repo.find(rangeRef(handle, ["content"], 8, 13)),
+		])
 
 		expect(marks(buildHighlights([first, second], [], 13))).toEqual([
 			[0, 3, "cm-comment-target"],
