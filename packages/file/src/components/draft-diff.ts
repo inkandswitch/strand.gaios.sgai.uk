@@ -1,30 +1,43 @@
-// What differs from the other draft's version of a text file, which the
-// panel showing it compares it with: marked inline, read-only, or with that
-// version beside the editor, lined up and scrolling with it, and editable
-// too while the panel says it can be changed. Unchanged stretches fold away
-// while the panel says to collapse them. Only shows inside something
-// answering `compare:view`, like the GAIOS dock while the checked-out draft
-// is compared with another.
+// What each of two drafts changed in a text file since the version both
+// came from, their common ancestor, which the panel showing it compares
+// with the other draft: marked in this draft's version, alone (stacked) or
+// beside the other's, lined up and scrolling with it, and editable too
+// while the panel says it can be changed; or both drafts' changes marked
+// together in the drafts' own colours, read-only (combined). Unchanged
+// stretches fold away while the panel says to collapse them. Only shows
+// inside something answering `compare:view`, like the GAIOS dock while the
+// checked-out draft is compared with another.
 
-import {createEffect, createMemo, on, untrack, type Accessor} from "solid-js"
+import {createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor} from "solid-js"
 import {Automerge} from "@automerge/automerge-repo/slim"
 import {
 	Annotation,
+	ChangeSet,
 	Compartment,
 	EditorState,
-	RangeSetBuilder,
+	Facet,
+	RangeSet,
+	StateEffect,
 	StateField,
+	Text,
 	Transaction,
-	type ChangeSet,
 	type Extension,
-	type RangeSet,
+	type Range,
 } from "@codemirror/state"
-import {Decoration, EditorView, GutterMarker, gutterLineClass, type DecorationSet} from "@codemirror/view"
-import {getChunks, MergeView, unifiedMergeView, type Chunk} from "@codemirror/merge"
+import {
+	Decoration,
+	EditorView,
+	GutterMarker,
+	WidgetType,
+	gutter,
+	type DecorationSet,
+} from "@codemirror/view"
+import {Chunk, MergeView, presentableDiff, type Change} from "@codemirror/merge"
 import {request} from "@inkandswitch/patchwork-providers"
 import {subscribe} from "@inkandswitch/patchwork-providers-solid"
 import {fileText} from "../datatype"
 import type {FileDoc} from "../types"
+import {commonAncestor} from "./ancestor"
 
 // The compare view the dock answers with, as this reads it.
 type CompareView = {
@@ -38,17 +51,19 @@ type CompareView = {
 	merging?: boolean
 }
 
-/** The two drafts' names: the checked-out one's, and the other's. */
+/** The two drafts' names: this view's, and the other's. */
 type Names = {ours: string; theirs: string}
 
 /**
- * The text to show changes against, how, whether to fold what didn't
- * change, and whether that text can be changed. Empty text when the other
- * draft doesn't have the file.
+ * The other draft's text, the text both drafts came from, how to show
+ * them, whether to fold what didn't change, and whether the other text can
+ * be changed. Empty text when the other draft doesn't have the file.
  */
 export type DraftCompare = {
-	mode: "inline" | "side-by-side"
+	mode: "inline" | "side-by-side" | "stacked"
 	original: string
+	/** the common ancestor's text, which each draft's changes are marked against */
+	base: string
 	collapsed: boolean
 	editable: boolean
 	/** to head each side with, side by side */
@@ -57,42 +72,90 @@ export type DraftCompare = {
 	merging: boolean
 }
 
-const MODES = ["inline", "side-by-side"] as const
+const MODES = ["inline", "side-by-side", "stacked"] as const
 
 const COLLAPSE = {margin: 3, minSize: 4}
 
-/** Undefined unless the file is compared in a mode the editor draws. */
-export function useDraftCompare(element: HTMLElement): Accessor<DraftCompare | undefined> {
+// This draft's version is read again this long after it last changed, for
+// where it parted from the other.
+const OURS_DEBOUNCE_MS = 300
+
+type Handle = {
+	doc(): unknown
+	on(event: "change", listener: () => void): void
+	off(event: "change", listener: () => void): void
+}
+
+/**
+ * Undefined unless the file is compared in a mode the editor shows.
+ * `handle` is this draft's version, to find where it parted from the
+ * other's; without it, the other's version is taken as where it started.
+ */
+export function useDraftCompare(
+	element: HTMLElement,
+	handle?: Handle,
+): Accessor<DraftCompare | undefined> {
 	const compare = subscribe(element, {
 		type: "compare:view",
-		modes: {inline: true, "side-by-side": true},
+		modes: {inline: true, "side-by-side": true, stacked: true},
 		draws: ["side-by-side"],
 		collapses: [...MODES],
 		prefers: "inline",
 	})
+	// Bumped a moment after this draft's version last changed.
+	const [changed, setChanged] = createSignal(0)
+	if (handle) {
+		let timer: ReturnType<typeof setTimeout> | undefined
+		const bump = () => {
+			clearTimeout(timer)
+			timer = setTimeout(() => setChanged(count => count + 1), OURS_DEBOUNCE_MS)
+		}
+		handle.on("change", bump)
+		onCleanup(() => {
+			clearTimeout(timer)
+			handle.off("change", bump)
+		})
+	}
+	const view = () => compare() as unknown as CompareView | undefined
+	const theirs = createMemo(() => {
+		const other = view()?.other
+		if (!other) return undefined
+		try {
+			return Automerge.load<FileDoc>(other)
+		} catch (error) {
+			console.warn("[file] couldn't read the version compared with", error)
+			return undefined
+		}
+	})
+	const ours = () => {
+		changed()
+		return handle?.doc() as Automerge.Doc<FileDoc> | undefined
+	}
 	return createMemo<DraftCompare | undefined>(
 		() => {
-			const view = compare() as unknown as CompareView | undefined
-			const mode = MODES.find(each => each === view?.mode)
-			if (!view || !mode) return undefined
-			const collapsed = !!view.collapsed
-			const names = view.names ?? null
-			const merging = !!view.merging
-			if (view.missing) return {mode, original: "", collapsed, editable: false, names, merging}
-			if (!view.other) return undefined
-			const editable = !!view.editable
-			try {
-				return {
-					mode,
-					original: fileText(Automerge.load<FileDoc>(view.other)),
-					collapsed,
-					editable,
-					names,
-					merging,
-				}
-			} catch (error) {
-				console.warn("[file] couldn't read the version compared with", error)
-				return undefined
+			const current = view()
+			const mode = MODES.find(each => each === current?.mode)
+			if (!current || !mode) return undefined
+			const collapsed = !!current.collapsed
+			const names = current.names ?? null
+			const merging = !!current.merging
+			if (current.missing) {
+				// Nothing to have parted from: all of it is new here, unless a
+				// merge takes it out, which leaves this side as it was.
+				const base = merging ? fileText(ours()) : ""
+				return {mode, original: "", base, collapsed, editable: false, names, merging}
+			}
+			const other = theirs()
+			if (!other) return undefined
+			const original = fileText(other)
+			return {
+				mode,
+				original,
+				base: ancestorText(ours(), other) ?? original,
+				collapsed,
+				editable: !!current.editable,
+				names,
+				merging,
 			}
 		},
 		undefined,
@@ -100,6 +163,7 @@ export function useDraftCompare(element: HTMLElement): Accessor<DraftCompare | u
 			equals: (a, b) =>
 				a?.mode === b?.mode &&
 				a?.original === b?.original &&
+				a?.base === b?.base &&
 				a?.collapsed === b?.collapsed &&
 				a?.editable === b?.editable &&
 				a?.names?.ours === b?.names?.ours &&
@@ -109,10 +173,26 @@ export function useDraftCompare(element: HTMLElement): Accessor<DraftCompare | u
 	)
 }
 
+// The file's text where `ours` and `theirs` parted, read from `theirs`,
+// which has it all.
+function ancestorText(
+	ours: Automerge.Doc<FileDoc> | undefined,
+	theirs: Automerge.Doc<FileDoc>,
+): string | undefined {
+	if (!ours) return undefined
+	try {
+		return fileText(Automerge.view(theirs, commonAncestor(ours, theirs)))
+	} catch (error) {
+		console.warn("[file] couldn't find where the drafts parted", error)
+		return undefined
+	}
+}
+
 /**
- * The editor for `doc`: on its own, with what differs marked inline, and
- * nothing typed into it, while the compare is inline, or beside the other
- * version while it's side by side, which it's built for (see
+ * The editor for `doc`: on its own, with what this draft changed marked
+ * (stacked), or both drafts' changes marked and nothing typed into it
+ * (combined), or beside the other version, each marked with what its draft
+ * changed, while it's side by side, which it's built for (see
  * `useDraftCompare`).
  */
 export function diffEditor(config: {
@@ -129,55 +209,57 @@ export function diffEditor(config: {
 	editsFrom?: HTMLElement
 }): {view: EditorView; dom: HTMLElement; views: EditorView[]; destroy(): void} {
 	if (config.beside) return besideDiff(config)
-	const inline = new Compartment()
+	const marks = new Compartment()
 	const view = new EditorView({
 		doc: config.doc,
-		extensions: [config.extensions, inline.of([])],
+		extensions: [config.extensions, marks.of([])],
 	})
-	followInline(view, inline, config.compare)
+	followAlone(view, marks, config.compare)
 	return {view, dom: view.dom, views: [view], destroy: () => view.destroy()}
 }
 
-function followInline(
+// How the editor on its own is marked: the shape of it, which reconfigures
+// it, apart from the texts, which it's sent as they change.
+const shapeOf = (current: DraftCompare | undefined) =>
+	current && current.mode !== "side-by-side" ? `${current.mode} ${current.collapsed}` : ""
+
+function followAlone(
 	view: EditorView,
 	compartment: Compartment,
 	compare: Accessor<DraftCompare | undefined>,
 ) {
-	const inline = createMemo(() => {
-		const current = compare()
-		return current?.mode === "inline" ? current : undefined
-	})
 	createEffect(
-		on(inline, (current, previous) => {
-			view.dispatch({
-				effects: compartment.reconfigure(
-					current === undefined
-						? []
-						: [
-								unifiedMergeView({
-									original: current.original,
-									mergeControls: false,
-									syntaxHighlightDeletions: true,
-									collapseUnchanged: current.collapsed ? COLLAPSE : undefined,
-								}),
-								DRAFT_COLOURS,
-								LOCKED,
-							],
-				),
-			})
+		on(compare, (current, previous) => {
+			const shape = shapeOf(current)
+			const reshaped = shape !== shapeOf(previous)
+			const effects: StateEffect<unknown>[] = []
+			if (reshaped) {
+				const marking =
+					current?.mode === "inline"
+						? [combined(current.base, current.original), LOCKED]
+						: current?.mode === "stacked"
+							? [ownChanges(current.base)]
+							: []
+				const folding = current?.collapsed && shape ? [collapseUnchanged] : []
+				effects.push(compartment.reconfigure([marking, folding]))
+			}
+			if (current?.mode === "inline")
+				effects.push(setCombined.of({base: current.base, theirs: current.original}))
+			if (current?.mode === "stacked") effects.push(setBase.of(current.base))
+			if (effects.length) view.dispatch({effects})
 			// Starting to compare, or folding what's unchanged away or back,
 			// the file shows from its very top.
-			if (current === undefined) return
-			if (previous !== undefined && previous.collapsed === current.collapsed) return
+			if (!shape || !reshaped) return
 			view.dispatch({effects: EditorView.scrollIntoView(0, {y: "start"})})
 			view.scrollDOM.scrollTop = 0
 		}),
 	)
 }
 
-// The editor goes first, as B, and the other version after it, as A: what's
-// only in B is what was inserted, what's only in A what was deleted. What's
-// typed into A goes to the other draft, while it can.
+// The editor goes first, as B, and the other version after it, as A, lined
+// up by how they differ, but each marked with what its own draft changed
+// since they parted. What's typed into A goes to the other draft, while it
+// can.
 function besideDiff(config: {
 	doc: string
 	extensions: Extension[]
@@ -190,20 +272,22 @@ function besideDiff(config: {
 		!!config.editsFrom && !!current?.editable
 	const lock = new Compartment()
 	const theirs = config.editsFrom ? sendEdits(config.editsFrom) : undefined
+	const base = initial?.base ?? initial?.original ?? ""
 	const merge = new MergeView({
 		a: {
 			doc: initial?.original ?? "",
 			extensions: [
 				lock.of(writable(initial) ? [] : LOCKED),
 				config.besideExtensions,
-				DIFF_COLOURS,
-				CHANGED_ON_BOTH,
+				UNMARKED,
+				ownChanges(base),
 				theirs?.extension ?? [],
 			],
 		},
-		b: {doc: config.doc, extensions: [config.extensions, DIFF_COLOURS, CHANGED_ON_BOTH]},
+		b: {doc: config.doc, extensions: [config.extensions, UNMARKED, ownChanges(base)]},
 		orientation: "b-a",
-		gutter: true,
+		highlightChanges: false,
+		gutter: false,
 		collapseUnchanged: initial?.collapsed ? COLLAPSE : undefined,
 	})
 	Object.assign(merge.dom.style, {flex: "1", minHeight: "0", overflow: "auto"})
@@ -234,6 +318,16 @@ function besideDiff(config: {
 				if (text === undefined) return
 				if (theirs) theirs.receive(merge.a, text)
 				else follow(merge.a, text)
+			},
+			{defer: true},
+		),
+	)
+	createEffect(
+		on(
+			() => config.compare()?.base,
+			text => {
+				if (text === undefined) return
+				for (const side of [merge.a, merge.b]) side.dispatch({effects: setBase.of(text)})
 			},
 			{defer: true},
 		),
@@ -392,50 +486,100 @@ export function follow(view: EditorView, text: string) {
 const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
 const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
 
-// What's only in this version and only in the other, in the colours the
-// panel showing it gives them: beside the other version, as added and
-// removed, each side headed by its draft; inline, with nothing to say which
-// is which, in the drafts' own colours.
+// What each draft changed, in the colours the panel showing it gives them:
+// on its own or beside the other version, as added, removed, and changed
+// lines, each side headed by its draft; combined, with nothing else to say
+// which is which, in the drafts' own colours.
 const INSERTED = "var(--compare-inserted, #22bb22)"
 const DELETED = "var(--compare-deleted, #ee4433)"
+const MODIFIED = "var(--compare-modified, #dba617)"
 const OURS = "var(--compare-ours, #3b7dd8)"
 const THEIRS = "var(--compare-theirs, #9b5de5)"
 const tint = (colour: string, amount: number) =>
 	`color-mix(in srgb, ${colour} ${amount}%, transparent)`
 const underline = (colour: string) =>
-	`linear-gradient(${tint(colour, 60)}, ${tint(colour, 60)}) bottom/100% 2px no-repeat !important`
+	`linear-gradient(${tint(colour, 60)}, ${tint(colour, 60)}) bottom/100% 2px no-repeat`
 
-const diffColours = (inserted: string, deleted: string) =>
-	EditorView.theme({
-		".cm-changedLine, .cm-inlineChangedLine": {
-			backgroundColor: `${tint(inserted, 10)} !important`,
-		},
-		"&.cm-merge-a .cm-changedLine": {backgroundColor: `${tint(deleted, 9)} !important`},
-		".cm-changedText": {background: underline(inserted)},
-		"&.cm-merge-a .cm-changedText": {background: underline(deleted)},
-		".cm-deletedChunk": {backgroundColor: `${tint(deleted, 9)} !important`},
-		".cm-deletedChunk .cm-deletedText": {background: underline(deleted)},
-		".cm-changedLineGutter": {background: `${inserted} !important`},
-		"&.cm-merge-a .cm-changedLineGutter": {background: `${deleted} !important`},
-		".cm-deletedLineGutter": {background: `${deleted} !important`},
-	})
+// Text taken out, shown struck through where it was: in a line, or as lines
+// of its own where whole lines went.
+class Ghost extends WidgetType {
+	constructor(
+		readonly text: string,
+		readonly className: string,
+		readonly block: boolean,
+	) {
+		super()
+	}
+	eq(other: Ghost) {
+		return other.text === this.text && other.className === this.className && other.block === this.block
+	}
+	toDOM() {
+		const element = document.createElement(this.block ? "div" : "span")
+		element.className = `cm-ghost ${this.className}`
+		element.textContent = this.text
+		return element
+	}
+	ignoreEvent() {
+		return false
+	}
+}
 
-const DIFF_COLOURS = diffColours(INSERTED, DELETED)
-const DRAFT_COLOURS = diffColours(OURS, THEIRS)
+// `text` shown at `at` in `doc`. Whole lines, taken out from the start of
+// one, show as lines of their own before the line at `at`, or after the
+// last line at the end.
+function ghost(doc: Text, at: number, text: string, className: string, lineStart: boolean) {
+	const line = doc.lineAt(at)
+	if (lineStart && text.endsWith("\n") && at === line.from)
+		return Decoration.widget({widget: new Ghost(text.slice(0, -1), className, true), block: true, side: -1}).range(at)
+	if (text.startsWith("\n") && at === line.to && at === doc.length)
+		return Decoration.widget({widget: new Ghost(text.slice(1), className, true), block: true, side: 1}).range(at)
+	return Decoration.widget({widget: new Ghost(text, className, false), side: -1}).range(at)
+}
 
-// Lines changed on both sides, rather than only added or only removed:
-// beside the other version, they're marked in a colour of their own on
-// each side, as are the parts of them that differ and their gutter.
-const MODIFIED = "var(--compare-modified, #dba617)"
+const isLineStart = (doc: Text, at: number) => doc.lineAt(at).from === at
+
+// Marked, and the lines they touch, so unchanged ones can fold away.
+type Marks = {deco: DecorationSet; touched: readonly number[]}
+
+const NONE: readonly number[] = []
+
+// The lines marked, which don't fold away, nor do those around them.
+const touchedBy = Facet.define<
+	(state: EditorState) => readonly number[],
+	(state: EditorState) => readonly number[]
+>({combine: values => values[0] ?? (() => NONE)})
+
+function touchedLines(doc: Text, ranges: readonly Range<Decoration>[]) {
+	const lines = new Set<number>()
+	for (const {from, to} of ranges) {
+		const last = doc.lineAt(to).number
+		for (let line = doc.lineAt(from).number; line <= last; line++) lines.add(line)
+	}
+	return [...lines].sort((x, y) => x - y)
+}
+
+// --- This draft's own changes: on its own, and side by side ---
+
+const insertedLine = Decoration.line({class: "cm-insertedLine"})
 const modifiedLine = Decoration.line({class: "cm-modifiedLine"})
-const modifiedGutter = new (class extends GutterMarker {
-	elementClass = "cm-modifiedLineGutter"
-})()
+const insertedText = Decoration.mark({class: "cm-insertedText"})
+const marker = (className: string) =>
+	new (class extends GutterMarker {
+		elementClass = className
+	})()
+const insertedGutter = marker("cm-insertedLineGutter")
+const modifiedGutter = marker("cm-modifiedLineGutter")
+const deletedGutter = marker("cm-deletedLineGutter")
 
-type Modified = {
-	chunks: readonly Chunk[] | undefined
-	lines: DecorationSet
+/** Sets the text both drafts came from. */
+const setBase = StateEffect.define<string>()
+
+type OwnChanges = Marks & {
+	base: string
+	baseText: Text
+	chunks: readonly Chunk[]
 	gutter: RangeSet<GutterMarker>
+	modified: readonly number[]
 }
 
 // Whether the chunk takes something out and puts something in, rather than
@@ -446,62 +590,283 @@ function changedOnBoth(chunk: Chunk) {
 	return removes && inserts
 }
 
-function modifiedIn(state: EditorState): Modified {
-	const found = getChunks(state)
-	const lines = new RangeSetBuilder<Decoration>()
-	const gutter = new RangeSetBuilder<GutterMarker>()
-	if (found?.side) {
-		for (const chunk of found.chunks) {
-			if (!changedOnBoth(chunk)) continue
-			const [from, end] =
-				found.side === "a" ? [chunk.fromA, chunk.endA] : [chunk.fromB, chunk.endB]
-			for (let at = from; at <= end && at <= state.doc.length; ) {
-				const line = state.doc.lineAt(at)
-				lines.add(line.from, line.from, modifiedLine)
-				gutter.add(line.from, line.from, modifiedGutter)
+function addsTo(line: {from: number; to: number}, start: number, change: Change) {
+	const [from, to] = [start + change.fromB, start + change.toB]
+	if (from >= to) return false
+	if (line.from === line.to) return from <= line.from && line.from < to
+	return Math.max(from, line.from) < Math.min(to, line.to)
+}
+
+function ownChangesIn(base: string, baseText: Text, doc: Text, chunks: readonly Chunk[]): OwnChanges {
+	const ranges: Range<Decoration>[] = []
+	const gutters: Range<GutterMarker>[] = []
+	const modified: number[] = []
+	for (const chunk of chunks) {
+		const both = changedOnBoth(chunk)
+		if (chunk.fromB < chunk.toB) {
+			for (let at = chunk.fromB; at <= chunk.endB; ) {
+				const line = doc.lineAt(at)
 				at = line.to + 1
+				// Only adding, a line is only marked for what's added in it, not
+				// for a line break added at its end.
+				if (!both && !chunk.changes.some(change => addsTo(line, chunk.fromB, change))) continue
+				ranges.push((both ? modifiedLine : insertedLine).range(line.from))
+				gutters.push((both ? modifiedGutter : insertedGutter).range(line.from))
+				if (both) modified.push(line.number)
+			}
+		} else {
+			const at = Math.min(chunk.fromB, doc.length)
+			gutters.push(deletedGutter.range(doc.lineAt(at).from))
+		}
+		for (const change of chunk.changes) {
+			const from = chunk.fromB + change.fromB
+			if (change.fromB < change.toB) ranges.push(insertedText.range(from, chunk.fromB + change.toB))
+			if (change.fromA < change.toA) {
+				const start = chunk.fromA + change.fromA
+				const text = baseText.sliceString(start, chunk.fromA + change.toA)
+				ranges.push(ghost(doc, Math.min(from, doc.length), text, "cm-deletedGhost", isLineStart(baseText, start)))
 			}
 		}
 	}
-	return {chunks: found?.chunks, lines: lines.finish(), gutter: gutter.finish()}
+	return {
+		base,
+		baseText,
+		chunks,
+		deco: Decoration.set(ranges, true),
+		gutter: RangeSet.of(gutters, true),
+		touched: touchedLines(doc, ranges),
+		modified,
+	}
 }
 
-const modifiedChunks = StateField.define<Modified>({
-	create: modifiedIn,
+const textOf = (text: string) => Text.of(text.split("\n"))
+
+function ownChangesFor(base: string, doc: Text) {
+	const baseText = textOf(base)
+	return ownChangesIn(base, baseText, doc, Chunk.build(baseText, doc))
+}
+
+const ownChangesField = StateField.define<OwnChanges>({
+	create: state => ownChangesFor("", state.doc),
 	update(value, transaction) {
-		if (getChunks(transaction.state)?.chunks !== value.chunks) return modifiedIn(transaction.state)
+		let base = value.base
+		for (const effect of transaction.effects) if (effect.is(setBase)) base = effect.value
+		if (base !== value.base) return ownChangesFor(base, transaction.state.doc)
 		if (!transaction.docChanged) return value
-		return {
-			chunks: value.chunks,
-			lines: value.lines.map(transaction.changes),
-			gutter: value.gutter.map(transaction.changes),
-		}
+		const doc = transaction.state.doc
+		const chunks = Chunk.updateB(value.chunks, value.baseText, doc, transaction.changes)
+		return ownChangesIn(base, value.baseText, doc, chunks)
 	},
 	provide: field => [
-		EditorView.decorations.from(field, value => value.lines),
-		gutterLineClass.from(field, value => value.gutter),
+		EditorView.decorations.from(field, value => value.deco),
+		touchedBy.of(state => state.field(field, false)?.touched ?? NONE),
 	],
 })
 
 /** The numbers of the lines marked as changed on both sides, in `state`. */
-export function modifiedLines(state: EditorState): number[] {
-	const numbers: number[] = []
-	state.field(modifiedChunks, false)?.lines.between(0, state.doc.length, from => {
-		numbers.push(state.doc.lineAt(from).number)
-	})
-	return numbers
+export function modifiedLines(state: EditorState): readonly number[] {
+	return state.field(ownChangesField, false)?.modified ?? NONE
 }
 
-const CHANGED_ON_BOTH: Extension = [
-	modifiedChunks,
+/** What this draft changed since `base`, marked as it changes. */
+function ownChanges(base: string): Extension {
+	return [
+		ownChangesField.init(state => ownChangesFor(base, state.doc)),
+		gutter({
+			class: "cm-ownChangeGutter",
+			markers: view => view.state.field(ownChangesField).gutter,
+		}),
+		OWN_THEME,
+	]
+}
+
+// Beats the merge view's own colouring, which is put out below.
+const LINE = "&.cm-editor .cm-line"
+const OWN_THEME = EditorView.theme({
+	[`${LINE}.cm-insertedLine`]: {backgroundColor: `${tint(INSERTED, 10)} !important`},
+	[`${LINE}.cm-modifiedLine`]: {backgroundColor: `${tint(MODIFIED, 14)} !important`},
+	".cm-insertedText": {background: underline(INSERTED)},
+	".cm-modifiedLine .cm-insertedText": {background: underline(MODIFIED)},
+	".cm-deletedGhost": {
+		backgroundColor: tint(DELETED, 9),
+		textDecoration: `line-through ${tint(DELETED, 70)}`,
+		opacity: "0.8",
+	},
+	"div.cm-deletedGhost": {padding: "0 2px 0 6px"},
+	".cm-ownChangeGutter": {width: "3px", paddingLeft: "1px"},
+	".cm-ownChangeGutter .cm-insertedLineGutter": {background: INSERTED},
+	".cm-ownChangeGutter .cm-modifiedLineGutter": {background: MODIFIED},
+	".cm-ownChangeGutter .cm-deletedLineGutter": {
+		background: `linear-gradient(${DELETED}, ${DELETED}) top/100% 3px no-repeat`,
+	},
+})
+
+// The merge view's own marks are of how the two versions differ, not what
+// each draft changed: they're put out.
+const UNMARKED = EditorView.theme({
+	"&.cm-merge-a .cm-changedLine, &.cm-merge-b .cm-changedLine": {
+		backgroundColor: "transparent !important",
+	},
+})
+
+// --- Both drafts' changes, combined in this draft's text ---
+
+/** Sets the text both drafts came from, and the other draft's. */
+const setCombined = StateEffect.define<{base: string; theirs: string}>()
+
+type Combined = Marks & {base: string; theirs: string}
+
+const oursInserted = Decoration.mark({class: "cm-oursInserted"})
+const theirsDeleted = Decoration.mark({class: "cm-theirsDeleted"})
+
+/**
+ * Both drafts' changes since `base` in `ours`: this draft's in it, and the
+ * other's, which are of `base`, where they fall in it.
+ */
+export function combinedRanges(base: string, ours: Text, theirs: string): Range<Decoration>[] {
+	const oursText = ours.toString()
+	const baseText = textOf(base)
+	const changes = presentableDiff(base, oursText)
+	const ranges: Range<Decoration>[] = []
+	for (const change of changes) {
+		if (change.fromB < change.toB) ranges.push(oursInserted.range(change.fromB, change.toB))
+		if (change.fromA < change.toA)
+			ranges.push(
+				ghost(ours, change.fromB, base.slice(change.fromA, change.toA), "cm-oursDeleted", isLineStart(baseText, change.fromA)),
+			)
+	}
+	// From where it was to where it is in this draft.
+	const moved = ChangeSet.of(
+		changes.map(change => ({from: change.fromA, to: change.toA, insert: oursText.slice(change.fromB, change.toB)})),
+		base.length,
+	)
+	for (const change of presentableDiff(base, theirs)) {
+		// Only what's still here can be marked taken out.
+		if (change.fromA < change.toA)
+			moved.iterGaps((fromA, fromB, length) => {
+				const from = Math.max(change.fromA, fromA)
+				const to = Math.min(change.toA, fromA + length)
+				if (from < to) ranges.push(theirsDeleted.range(fromB + from - fromA, fromB + to - fromA))
+			})
+		if (change.fromB < change.toB) {
+			const at = moved.mapPos(change.toA, 1)
+			const text = theirs.slice(change.fromB, change.toB)
+			const lineStart = isLineStart(baseText, change.toA)
+			const mark = ghost(ours, at, text, "cm-theirsInserted", lineStart)
+			ranges.push(mark)
+		}
+	}
+	return ranges
+}
+
+function combinedFor(base: string, theirs: string, doc: Text): Combined {
+	const ranges = combinedRanges(base, doc, theirs)
+	return {base, theirs, deco: Decoration.set(ranges, true), touched: touchedLines(doc, ranges)}
+}
+
+const combinedField = StateField.define<Combined>({
+	create: state => combinedFor("", "", state.doc),
+	update(value, transaction) {
+		let {base, theirs} = value
+		for (const effect of transaction.effects)
+			if (effect.is(setCombined)) ({base, theirs} = effect.value)
+		if (base === value.base && theirs === value.theirs && !transaction.docChanged) return value
+		return combinedFor(base, theirs, transaction.state.doc)
+	},
+	provide: field => [
+		EditorView.decorations.from(field, value => value.deco),
+		touchedBy.of(state => state.field(field, false)?.touched ?? NONE),
+	],
+})
+
+function combined(base: string, theirs: string): Extension {
+	return [combinedField.init(state => combinedFor(base, theirs, state.doc)), COMBINED_THEME]
+}
+
+const COMBINED_THEME = EditorView.theme({
+	".cm-oursInserted": {background: `${underline(OURS)}, ${tint(OURS, 10)}`},
+	".cm-oursDeleted, .cm-theirsDeleted": {textDecorationLine: "line-through"},
+	".cm-oursDeleted": {
+		backgroundColor: tint(OURS, 9),
+		textDecorationColor: tint(OURS, 80),
+		opacity: "0.75",
+	},
+	".cm-theirsDeleted": {backgroundColor: tint(THEIRS, 9), textDecorationColor: tint(THEIRS, 80)},
+	".cm-theirsInserted": {background: `${underline(THEIRS)}, ${tint(THEIRS, 10)}`, opacity: "0.75"},
+	"div.cm-ghost": {padding: "0 2px 0 6px"},
+})
+
+// --- Folding away what's unchanged, on its own ---
+
+const unfold = StateEffect.define<number>({map: (at, changes) => changes.mapPos(at)})
+
+class Folded extends WidgetType {
+	constructor(readonly lines: number) {
+		super()
+	}
+	eq(other: Folded) {
+		return other.lines === this.lines
+	}
+	toDOM(view: EditorView) {
+		const element = document.createElement("div")
+		element.className = "cm-collapsedLines"
+		element.textContent = view.state.phrase("$ unchanged lines", this.lines)
+		element.addEventListener("click", event => {
+			view.dispatch({effects: unfold.of(view.posAtDOM(event.target as Node))})
+		})
+		return element
+	}
+	ignoreEvent(event: Event) {
+		return event instanceof MouseEvent
+	}
+	get estimatedHeight() {
+		return 27
+	}
+}
+
+function foldedIn(state: EditorState, touched: readonly number[], unfolded: readonly number[]) {
+	const {doc} = state
+	const ranges: Range<Decoration>[] = []
+	let after = 0
+	for (const line of [...touched, null]) {
+		const first = after ? after + COLLAPSE.margin + 1 : 1
+		const last = line === null ? doc.lines : line - COLLAPSE.margin - 1
+		const from = first <= doc.lines ? doc.line(first).from : -1
+		if (last - first + 1 >= COLLAPSE.minSize && !unfolded.includes(from))
+			ranges.push(
+				Decoration.replace({widget: new Folded(last - first + 1), block: true}).range(from, doc.line(last).to),
+			)
+		if (line !== null) after = line
+	}
+	return Decoration.set(ranges)
+}
+
+type Folding = {deco: DecorationSet; touched: readonly number[]; unfolded: readonly number[]}
+
+const collapseUnchanged = [
+	StateField.define<Folding>({
+		create(state) {
+			const touched = state.facet(touchedBy)(state)
+			return {deco: foldedIn(state, touched, NONE), touched, unfolded: NONE}
+		},
+		update(value, transaction) {
+			let unfolded = transaction.docChanged
+				? value.unfolded.map(at => transaction.changes.mapPos(at))
+				: value.unfolded
+			for (const effect of transaction.effects) if (effect.is(unfold)) unfolded = [...unfolded, effect.value]
+			const touched = transaction.state.facet(touchedBy)(transaction.state)
+			if (touched === value.touched && unfolded === value.unfolded) return value
+			return {deco: foldedIn(transaction.state, touched, unfolded), touched, unfolded}
+		},
+		provide: field => EditorView.decorations.from(field, value => value.deco),
+	}),
 	EditorView.theme({
-		"&.cm-merge-a .cm-modifiedLine, &.cm-merge-b .cm-modifiedLine": {
-			backgroundColor: `${tint(MODIFIED, 14)} !important`,
+		".cm-collapsedLines": {
+			padding: "5px 5px 5px 10px",
+			cursor: "pointer",
+			fontSize: "90%",
+			opacity: "0.7",
+			background: "var(--compare-folded, rgb(128 128 128 / 0.08))",
 		},
-		"&.cm-merge-a .cm-modifiedLine .cm-changedText, &.cm-merge-b .cm-modifiedLine .cm-changedText": {
-			background: underline(MODIFIED),
-		},
-		"&.cm-merge-a .cm-changeGutter .cm-modifiedLineGutter, &.cm-merge-b .cm-changeGutter .cm-modifiedLineGutter":
-			{background: `${MODIFIED} !important`},
 	}),
 ]

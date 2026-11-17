@@ -95,7 +95,7 @@ type EditorProps = {
 // rebuilt going in or out of it.
 export function TextFileEditor(props: EditorProps) {
 	const compare =
-		props.handle && props.element ? useDraftCompare(props.element) : () => undefined
+		props.handle && props.element ? useDraftCompare(props.element, props.handle) : () => undefined
 	const beside = createMemo(() => compare()?.mode === "side-by-side")
 	return (
 		<Show

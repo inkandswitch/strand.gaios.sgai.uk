@@ -1,4 +1,4 @@
-import { save, splice } from "@automerge/automerge/slim";
+import { getHeads, save, splice } from "@automerge/automerge/slim";
 import {
   isValidAutomergeUrl,
   type AutomergeUrl,
@@ -46,11 +46,13 @@ export type CompareChanges = {
 };
 
 // The compared draft's version of a document, saved, or null when that
-// draft doesn't have it. Merging, that's the target's version before the
-// merge, and `removed` says the merge takes the document out.
+// draft doesn't have it, and the checked-out draft's (`ours`) likewise.
+// Merging, those are the target's version before the merge and after it,
+// and `removed` says the merge takes the document out.
 export type ComparedVersion = {
   draft: AutomergeUrl;
   doc: Uint8Array | null;
+  ours: Uint8Array | null;
   removed: boolean;
 } | null;
 
@@ -455,13 +457,14 @@ export function CompareProvider(element: HTMLElement & { repo: Repo }): () => vo
     for (const respond of changeSubscribers) respond(changes);
   }
 
-  // Answers again whenever the compared draft, whether it has the document,
-  // or the document there changes.
+  // Answers again whenever the compared draft, whether either draft has the
+  // document, or the document in either changes.
   function answerVersion(url: AutomergeUrl, respond: (value: ComparedVersion) => void) {
     let stop = () => {};
     const answer = () => {
       stop();
       const target = theirs;
+      const result = after;
       if (!target) {
         stop = () => {};
         respond(null);
@@ -469,30 +472,47 @@ export function CompareProvider(element: HTMLElement & { repo: Repo }): () => vo
       }
       let cancelled = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      let handle: DocHandle<unknown> | null = null;
+      let handles: (DocHandle<unknown> | null)[] = [];
       let removed = false;
-      const send = () =>
-        respond({ draft: target.draft, doc: save(handle!.doc() as never), removed });
+      // Saved again only once changed, so the other stays the same bytes.
+      const kept = new Map<DocHandle<unknown>, { heads: string; bytes: Uint8Array }>();
+      const saved = (handle: DocHandle<unknown> | null) => {
+        if (!handle) return null;
+        const doc = handle.doc() as never;
+        const heads = getHeads(doc).join();
+        const last = kept.get(handle);
+        if (last?.heads === heads) return last.bytes;
+        const bytes = save(doc);
+        kept.set(handle, { heads, bytes });
+        return bytes;
+      };
+      const send = () => {
+        const [handle, mine] = handles;
+        respond({ draft: target.draft, doc: saved(handle), ours: saved(mine), removed });
+      };
       const onChange = () => {
         clearTimeout(timer);
         timer = setTimeout(send, REFRESH_DEBOUNCE_MS);
       };
       void (async () => {
-        const [repo, result] = await Promise.all([target.repo, comparison]);
+        const [repo, comparing] = await Promise.all([target.repo, comparison]);
         if (cancelled) return;
-        removed = !!result?.afterFiles && !result.afterFiles.has(url);
-        const missing = { draft: target.draft, doc: null, removed };
-        if (!result?.theirFiles.has(url)) return respond(missing);
-        handle = await find(repo, url);
+        removed = !!comparing?.afterFiles && !comparing.afterFiles.has(url);
+        // Merging, ours is the target after the merge, once it's made.
+        const ourRepo = result ? await result.repo : merging ? null : ours;
         if (cancelled) return;
-        if (!handle) return respond(missing);
+        handles = await Promise.all([
+          comparing?.theirFiles.has(url) ? find(repo, url) : null,
+          ourRepo && comparing?.ourFiles.has(url) ? find(ourRepo, url) : null,
+        ]);
+        if (cancelled) return;
         send();
-        handle.on("change", onChange);
+        for (const handle of handles) handle?.on("change", onChange);
       })();
       stop = () => {
         cancelled = true;
         clearTimeout(timer);
-        handle?.off("change", onChange);
+        for (const handle of handles) handle?.off("change", onChange);
       };
     };
     answer();
@@ -565,6 +585,7 @@ function sameAgainst(a: CompareAgainst, b: CompareAgainst): boolean {
 function sameFiles(a: Comparison, b: Comparison): boolean {
   return (
     sameSet(a.theirFiles, b.theirFiles) &&
+    sameSet(a.ourFiles, b.ourFiles) &&
     (a.afterFiles && b.afterFiles ? sameSet(a.afterFiles, b.afterFiles) : a.afterFiles === b.afterFiles)
   );
 }
