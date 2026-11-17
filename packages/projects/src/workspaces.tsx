@@ -34,6 +34,10 @@ export function WorkspaceList(props: {
 	hidden: AutomergeUrl | undefined
 	open(url: AutomergeUrl): void
 	packages(): void
+	/** the account page */
+	account(): void
+	/** the page shown, to mark its button */
+	page: string
 }) {
 	const list = useDoc(props.recents)
 	const groups = () =>
@@ -128,8 +132,19 @@ export function WorkspaceList(props: {
 				</For>
 			</div>
 			<footer class="projects__workspaces-footer">
-				<button type="button" class="projects__workspace-new" onClick={() => props.packages()}>
+				<button
+					type="button"
+					class="projects__workspace-new"
+					aria-current={props.page === "packages" ? "page" : undefined}
+					onClick={() => props.packages()}>
 					Packages
+				</button>
+				<button
+					type="button"
+					class="projects__workspace-new"
+					aria-current={props.page === "account" ? "page" : undefined}
+					onClick={() => props.account()}>
+					Account
 				</button>
 			</footer>
 		</aside>

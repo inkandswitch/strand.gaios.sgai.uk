@@ -56,6 +56,16 @@ declare module "solid-js" {
 
 const ACCOUNT_URL_STORAGE_KEY = "tinyPatchworkAccountUrl";
 
+/**
+ * Where the site keeps the account's url: the `account-key` attribute on the
+ * view showing the picker (a site's own setup names its key), else the
+ * default.
+ */
+function accountStorageKey(element: HTMLElement) {
+  const view = element.closest("patchwork-view") ?? element;
+  return view.getAttribute("account-key") || ACCOUNT_URL_STORAGE_KEY;
+}
+
 enum AccountPickerTab {
   LogIn = "logIn",
   SignUp = "signUp",
@@ -247,12 +257,12 @@ export const AccountPicker = (props: PatchworkToolProps<any>) => {
   const onLogIn = async () => {
     const url = accountAutomergeUrlToLogin();
     if (!currentAccount || !url) return;
-    localStorage.setItem(ACCOUNT_URL_STORAGE_KEY, url);
+    localStorage.setItem(accountStorageKey(props.element), url);
     window.location.replace("/");
   };
 
   const onLogout = async () => {
-    localStorage.removeItem(ACCOUNT_URL_STORAGE_KEY);
+    localStorage.removeItem(accountStorageKey(props.element));
     window.location.replace("/");
   };
 

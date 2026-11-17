@@ -56,6 +56,7 @@ export type Route =
 	| {page: "loading"}
 	| {page: "home"}
 	| {page: "packages"}
+	| {page: "account"}
 	| ({page: "project"} & ProjectRoute)
 
 /** The project whose drafts are mounted, and the draft to start it on. */
@@ -75,6 +76,8 @@ export type Navigation = {
 	compare(draft: AutomergeUrl | undefined): void
 	/** the page for installing packages: tools, datatypes */
 	packages(): void
+	/** the page for the account: who's signed in, signing in and out */
+	account(): void
 	/** where a draft provider should be mounted, if anywhere */
 	scope: Accessor<DraftScope | undefined>
 	/** the open project's repo, reading its checked-out draft */
@@ -86,6 +89,7 @@ export type Navigation = {
 type HistoryMode = "push" | "replace"
 
 const PACKAGES_HASH = "packages"
+const ACCOUNT_HASH = "account"
 
 type Attached = {
 	projectUrl: AutomergeUrl
@@ -172,6 +176,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		focus,
 		compare,
 		packages,
+		account,
 		scope,
 		projectRepo,
 		attach,
@@ -245,8 +250,13 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		write(PACKAGES_HASH, "push")
 	}
 
+	function account() {
+		leave("account")
+		write(ACCOUNT_HASH, "push")
+	}
+
 	// To a page outside any project, unmounting its drafts.
-	function leave(page: "home" | "packages") {
+	function leave(page: "home" | "packages" | "account") {
 		attempt++
 		setRoute({page})
 		setScope(undefined)
@@ -257,6 +267,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		written = hash
 		if (!hash) return leave("home")
 		if (hash === PACKAGES_HASH) return leave("packages")
+		if (hash === ACCOUNT_HASH) return leave("account")
 		const location = parseHash(hash)
 		if (location) void go(location, "replace")
 		else reject(new LocationError("not-a-project"), "replace")
