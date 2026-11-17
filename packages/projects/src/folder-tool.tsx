@@ -3,7 +3,6 @@ import type {ToolElement} from "@inkandswitch/patchwork-plugins"
 import {Show} from "solid-js"
 import {render} from "solid-js/web"
 import {Dock} from "./dock.tsx"
-import {Provider} from "./provider.tsx"
 import {injectStyles} from "./styles.ts"
 import {connectWorkspace} from "./workspace.ts"
 import {useWorkspaceState} from "./workspace-state.ts"
@@ -34,9 +33,8 @@ function FolderWorkspace(props: {element: ToolElement; rootUrl: AutomergeUrl}) {
 					doc-url={props.rootUrl}
 				/>
 			</aside>
-			<Provider component="patchwork-comments-provider">
-				<Provider component="patchwork-focus-provider">
-					<main class="projects__main">
+			{/* the comments and focus providers are the project card's, around this */}
+			<main class="projects__main">
 						<Show when={workspace.route() && state.drafts()}>
 							<Dock
 								route={workspace.route()!}
@@ -48,9 +46,7 @@ function FolderWorkspace(props: {element: ToolElement; rootUrl: AutomergeUrl}) {
 								workspace={workspace.compare}
 							/>
 						</Show>
-					</main>
-				</Provider>
-			</Provider>
+			</main>
 		</div>
 	)
 }

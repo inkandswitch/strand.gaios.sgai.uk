@@ -59,11 +59,15 @@ export type CompareSelector = {
  * What it's told while its draft is compared with another: the mode, its
  * options, the other draft's version of the document, saved, or `missing`
  * when that draft doesn't have it, and whether to fold what's unchanged.
- * `editable` while that version can be changed with `compare:edit`: the
- * other draft has the document, and it isn't a merge being looked over.
- * `names` are the two drafts', to label each version with. `merging` while
- * a merge is looked over: the view shows the document after the merge, and
- * `other` is the target's before it. All null when nothing's compared.
+ * Both drafts' views are told, each with the other's version: the
+ * checked-out draft's, and where the panel lays the other draft's view out
+ * beside it, that one too, with `names` the other way round. `editable`
+ * while that version can be changed with `compare:edit`: told to the
+ * checked-out draft's view, while the other draft has the document and it
+ * isn't a merge being looked over. `names` are the two drafts', this view's
+ * first, to label each version with. `merging` while a merge is looked
+ * over: the checked-out draft's view shows the document after the merge,
+ * and the other the target's before it. All null when nothing's compared.
  */
 export type CompareView = {
 	mode: string | null
@@ -140,10 +144,16 @@ function sameModes(a: Mode[], b: Mode[]) {
 
 /**
  * The compare provider's `compare:version`: null when nothing's compared.
- * Merging, it's the target's version before the merge, and `removed` says
- * the merge takes the document out.
+ * `doc` is the other draft's version, `ours` the checked-out draft's.
+ * Merging, they're the target's before the merge and after it, and
+ * `removed` says the merge takes the document out.
  */
-export type ComparedVersion = {draft: AutomergeUrl; doc: Uint8Array | null; removed?: boolean} | null
+export type ComparedVersion = {
+	draft: AutomergeUrl
+	doc: Uint8Array | null
+	ours?: Uint8Array | null
+	removed?: boolean
+} | null
 
 /** The registered compare modes, loaded, kept current as packages come and go. */
 export function useCompareModes(): Accessor<Mode[]> {

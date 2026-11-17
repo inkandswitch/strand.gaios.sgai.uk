@@ -3,6 +3,7 @@ import {request, subscribe, type Selector} from "@inkandswitch/patchwork-provide
 import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type JSX} from "solid-js"
 import type {WorkspaceCompare} from "./compare.ts"
 import {ComparePicker, ModeControls} from "./compare-ui.tsx"
+import {CommentsButton, type CommentsToggle} from "./comments.tsx"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 import type {CompareAgainst, CompareChanges, DraftEntry, DraftsState} from "./types.ts"
 import {NameInput, SidebarButton, type SidebarToggle} from "./workspaces.tsx"
@@ -23,10 +24,14 @@ export function WorkspaceHeader(props: {
 	element: HTMLElement
 	/** the sidebar, shown or hidden from the card header */
 	sidebar: SidebarToggle
+	/** the comments sidebar, shown or hidden from the header's end */
+	comments: CommentsToggle
 	/** the compare modes every panel shares */
 	compare: WorkspaceCompare
 	/** where a root shown on its own puts its own controls */
 	actions?(element: HTMLElement): void
+	/** where a root shown on its own puts its compare controls, beside the drafts */
+	compareControls?(element: HTMLElement): void
 }) {
 	const [renaming, setRenaming] = createSignal(false)
 	const [changes, setChanges] = createSignal<CompareChanges>()
@@ -113,14 +118,22 @@ export function WorkspaceHeader(props: {
 					</div>
 				)}
 			</Show>
-			<div class="projects__header-end">
-				<div ref={element => props.actions?.(element)} class="projects__header-actions" />
+			{/* comparing: the mode, then its controls, beside the drafts */}
+			<div class="projects__header-compare">
 				<Show when={props.against && props.compare.offered().length > 0}>
 					<WorkspaceModes compare={props.compare} />
 				</Show>
+				<div
+					ref={element => props.compareControls?.(element)}
+					class="projects__header-actions"
+				/>
+			</div>
+			<div class="projects__header-end">
+				<div ref={element => props.actions?.(element)} class="projects__header-actions" />
 				<Show when={merging()}>
 					<MergeButton changes={changes()} element={props.element} />
 				</Show>
+				<CommentsButton comments={props.comments} />
 			</div>
 		</header>
 	)
@@ -146,6 +159,12 @@ function WorkspaceModes(props: {compare: WorkspaceCompare}) {
 			.filter(mode => mode.module.scope === "workspace" && mode.module.controls)
 	return (
 		<div class="projects__workspace-modes">
+			<ComparePicker
+				modes={props.compare.offered()}
+				current={current()}
+				title="Compare every panel"
+				pick={props.compare.pick}
+			/>
 			<For each={shared()}>
 				{mode => (
 					<ModeControls
@@ -155,12 +174,6 @@ function WorkspaceModes(props: {compare: WorkspaceCompare}) {
 					/>
 				)}
 			</For>
-			<ComparePicker
-				modes={props.compare.offered()}
-				current={current()}
-				title="Compare every panel"
-				pick={props.compare.pick}
-			/>
 		</div>
 	)
 }

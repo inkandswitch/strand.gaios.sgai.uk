@@ -6,6 +6,7 @@ import {render} from "solid-js/web"
 import {DraftScopeView} from "./drafts.tsx"
 import {useDoc, useDocTitle, useHandle} from "./hooks.ts"
 import {createNavigation, type DraftScope} from "./navigation.ts"
+import {AccountPage} from "./account-page.tsx"
 import {PackagesPage} from "./packages.tsx"
 import {ProjectView} from "./project.tsx"
 import {Provider} from "./provider.tsx"
@@ -56,6 +57,7 @@ function Frame(props: {
 		const page = navigation.route().page
 		if (page === "home") document.title = props.siteTitle
 		if (page === "packages") document.title = `Packages | ${props.siteTitle}`
+		if (page === "account") document.title = `Account | ${props.siteTitle}`
 	})
 
 	const [sidebar, setSidebar] = createSignal(localStorage.getItem(SIDEBAR_KEY) !== "hidden")
@@ -95,6 +97,8 @@ function Frame(props: {
 								hidden={account()?.moduleSettingsUrl}
 								open={url => navigation.open(url)}
 								packages={navigation.packages}
+								account={navigation.account}
+								page={navigation.route().page}
 							/>
 						</Show>
 						<Show when={navigation.route().page === "home"}>
@@ -104,6 +108,9 @@ function Frame(props: {
 								</header>
 								<p class="projects__empty">Open a workspace, or make a new one.</p>
 							</div>
+						</Show>
+						<Show when={navigation.route().page === "account"}>
+							<AccountPage url={props.account.url} sidebar={sidebarToggle} />
 						</Show>
 						<Show when={navigation.route().page === "packages"}>
 							<PackagesPage

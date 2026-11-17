@@ -1,9 +1,9 @@
-// Comments on a text file's content: select some text, hit "Comment", and a
-// thread is started on that range, stored on the file doc. Commented ranges
-// are highlighted (more strongly when they're focused from the Comments
-// sidebar), clicking one reopens its thread, and the editor's selection is
-// written to `patchwork:focus` so the sidebar can follow it along. Adapted
-// from codemirror-base's tool.tsx.
+// Comments on a text file's content: select some text, hit "Comment", and the
+// frame starts a thread on that range (in the project's root doc) and opens
+// it in the Comments sidebar. Commented ranges are highlighted (more strongly
+// when they're focused from the sidebar), clicking one opens its thread in the
+// sidebar, and the editor's selection is written to `patchwork:focus` so the
+// sidebar can follow it along. Adapted from codemirror-base's tool.tsx.
 
 import {
 	createEffect,
@@ -12,12 +12,7 @@ import {
 	createSignal,
 	onCleanup,
 } from "solid-js"
-import {
-	cursor,
-	type AutomergeUrl,
-	type DocHandle,
-	type Repo,
-} from "@automerge/automerge-repo/slim"
+import type {AutomergeUrl, DocHandle, Repo} from "@automerge/automerge-repo/slim"
 import {
 	EditorSelection,
 	RangeSet,
@@ -30,15 +25,14 @@ import {subscribe, subscribeDoc} from "@inkandswitch/patchwork-providers-solid"
 import {commentUI} from "./commentUI"
 import {
 	commentRanges,
-	createCommentForRange,
-	discardEmptyOwnDraft,
-	findThreadByUrl,
-	hasOwnDraft,
+	createThread,
+	rangeRef,
+	refsByThread,
+	showComments,
+	type CommentEntry,
 } from "./threads"
 
 const PATH = ["content"]
-
-type CommentEntry = {targetUrl: AutomergeUrl; threadUrl: AutomergeUrl}
 
 type Focus = {
 	selection: Record<AutomergeUrl, true>
@@ -67,9 +61,6 @@ export function createFileComments(props: {
 	const [focusDoc, focusHandle] = subscribeDoc<Focus>(element, {
 		type: "patchwork:focus",
 	})
-	const contactUrl = subscribe<AutomergeUrl>(element, {
-		type: "patchwork:contact",
-	})
 
 	const [targets] = createResource(
 		entries,
@@ -92,6 +83,28 @@ export function createFileComments(props: {
 		{initialValue: []},
 	)
 
+	// The last selection the editor wrote to focus, so it isn't revealed back.
+	let lastSelectionUrl: AutomergeUrl | undefined
+
+	// The selection to reveal: what's selected in this file, unless it's what
+	// the editor itself just wrote.
+	const revealUrls = createMemo(
+		() => {
+			const urls = Object.keys(focusDoc()?.selection ?? {}).filter((url) =>
+				url.startsWith(handle.url),
+			) as AutomergeUrl[]
+			if (urls.length === 1 && urls[0] === lastSelectionUrl) return []
+			return urls
+		},
+		[],
+		{equals: (a, b) => a.length === b.length && a.every((url, i) => url === b[i])},
+	)
+	const [revealed] = createResource(
+		revealUrls,
+		(urls) => findAll(element.repo, urls),
+		{initialValue: []},
+	)
+
 	// Bumped after every change to the file, since that can move the ranges.
 	// Deferred so the editor has taken the same change first.
 	const [revision, setRevision] = createSignal(0)
@@ -108,49 +121,36 @@ export function createFileComments(props: {
 			if (!range || range[0] === range[1]) continue
 			if (pos < range[0] || pos > range[1]) continue
 			const threadUrl = threadByTarget.get(target.url)
-			if (threadUrl) return {threadUrl, from: range[0]}
+			if (threadUrl) return threadUrl
 		}
 		return null
 	}
 
-	const createThreadForRange = (from: number, to: number) => {
-		const contact = contactUrl()
-		if (!contact) {
-			console.warn("Cannot create comment: no contactUrl available")
-			return null
-		}
-		return createCommentForRange(handle, PATH, from, to, contact)
+	const selectRefs = (refs: AutomergeUrl[]) =>
+		focusHandle()?.change((doc) => {
+			doc.selection = Object.fromEntries(refs.map((r) => [r, true as const]))
+		})
+
+	const createThreadForRange = async (from: number, to: number) => {
+		if (!canComment()) return
+		const ref = rangeRef(handle, PATH, from, to)
+		const threadUrl = await createThread(element, [ref])
+		if (threadUrl) selectRefs([ref])
 	}
 
-	// Close the popover once the author's draft is sent (or cancelled), or the
-	// thread goes away.
-	const watchThreadForClose = (threadUrl: AutomergeUrl, close: () => void) => {
-		const contact = contactUrl()
-		const seed = findThreadByUrl(handle, threadUrl)
-		let sawDraft = !!seed && hasOwnDraft(seed, contact)
-		const onChange = () => {
-			const thread = findThreadByUrl(handle, threadUrl)
-			if (!thread) return close()
-			if (hasOwnDraft(thread, contact)) sawDraft = true
-			else if (sawDraft) close()
-		}
-		handle.on("change", onChange)
-		return () => handle.off("change", onChange)
+	// Focus the thread's ranges and open it in the sidebar.
+	const openThreadAtPos = (pos: number) => {
+		const threadUrl = threadAtPos(pos)
+		if (!threadUrl) return
+		selectRefs(refsByThread(entries()).get(threadUrl) ?? [])
+		showComments(element, threadUrl)
 	}
 
-	// Deferred so the write doesn't land inside the CodeMirror update that tore
-	// the popover down.
-	const onClose = (threadUrl: AutomergeUrl) => {
-		const contact = contactUrl()
-		queueMicrotask(() => discardEmptyOwnDraft(handle, threadUrl, contact))
-	}
-
-	let lastSelectionUrl: AutomergeUrl | undefined
 	const followSelection = EditorView.updateListener.of((update) => {
 		const focus = focusHandle()
 		if (!update.selectionSet || !focus || !isText()) return
 		const {from, to} = update.state.selection.main
-		const url = handle.sub(...PATH, cursor(from, to)).url
+		const url = rangeRef(handle, PATH, from, to)
 		if (url === lastSelectionUrl) return
 		lastSelectionUrl = url
 		focus.change((doc) => {
@@ -164,9 +164,7 @@ export function createFileComments(props: {
 		followSelection,
 		commentUI({
 			createThreadForRange,
-			threadAtPos,
-			watchThreadForClose,
-			onClose,
+			openThreadAtPos,
 			canComment,
 		}),
 	]
@@ -181,9 +179,11 @@ export function createFileComments(props: {
 			})
 		})
 
-		// Bring a thread picked in the sidebar into view, if it isn't already.
+		// Bring a range selected elsewhere (a thread card clicked in the
+		// sidebar, or a doc opened to show one) into view, if it isn't already.
+		// Not the editor's own selection, nor what the sidebar merely hovers.
 		createEffect(() => {
-			const ranges = commentRanges(focused())
+			const ranges = commentRanges(revealed())
 			if (!ranges.length) return
 			const length = view.state.doc.length
 			const from = Math.min(Math.min(...ranges.map((r) => r[0])), length)
@@ -248,17 +248,16 @@ export function buildHighlights(
 	return RangeSet.of(marks, true)
 }
 
-// Highlighter over paper: the editor's surface tinted with the secondary
-// accent, leaving the text in the editor's own ink so it reads in light and
-// dark themes alike.
+// A light yellow highlighter over the editor's surface, leaving the text in
+// the editor's own ink so it reads in light and dark themes alike.
 const highlightTheme = EditorView.baseTheme({
 	".cm-comment-target": {
-		borderBottom: "2px solid var(--text-editor-secondary-text)",
+		borderBottom: "2px solid var(--comment-mark, #f2c94c)",
 		backgroundColor:
-			"color-mix(in oklch, var(--studio-secondary), var(--text-editor-fill) 82%)",
+			"var(--comment-highlight, color-mix(in oklch, #ffd84d 30%, var(--text-editor-fill, white)))",
 	},
 	".cm-comment-target-focused": {
 		backgroundColor:
-			"color-mix(in oklch, var(--studio-secondary), var(--text-editor-fill) 56%)",
+			"var(--comment-highlight-focused, color-mix(in oklch, #ffd84d 62%, var(--text-editor-fill, white)))",
 	},
 })

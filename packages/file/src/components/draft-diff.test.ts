@@ -1,7 +1,7 @@
 import {describe, expect, it} from "vitest"
-import {EditorState} from "@codemirror/state"
+import {EditorState, Text} from "@codemirror/state"
 import {EditorView} from "@codemirror/view"
-import {diffEditor, follow, modifiedLines, splicesOf} from "./draft-diff"
+import {combinedRanges, diffEditor, follow, modifiedLines, splicesOf, type DraftCompare} from "./draft-diff"
 
 // Makes the splices, one after another, to `text`.
 const apply = (text: string, splices: ReturnType<typeof splicesOf>) =>
@@ -59,25 +59,93 @@ describe("follow", () => {
 	})
 })
 
+const comparing = (mode: DraftCompare["mode"], base: string, original: string): DraftCompare => ({
+	mode,
+	original,
+	base,
+	collapsed: false,
+	editable: false,
+	names: null,
+	merging: false,
+})
+
+const ghosts = (view: EditorView, kind: string) =>
+	[...view.dom.querySelectorAll(`.${kind}`)].map(each => each.textContent)
+
 describe("side by side", () => {
-	it("marks lines changed on both sides, but not ones only added", () => {
+	it("marks on each side what its draft changed since they parted", () => {
+		const base = "one\ntwo\nthree\nfour\nfive"
 		const editor = diffEditor({
-			doc: "one\nTWO\nthree\nfour\nadded",
+			doc: "one\nTWO\nthree\nfour\nfive\nadded",
 			extensions: [],
 			besideExtensions: [],
 			beside: true,
-			compare: () => ({
-				mode: "side-by-side",
-				original: "one\ntwo\nthree\nfour",
-				collapsed: false,
-				editable: false,
-				names: null,
-				merging: false,
-			}),
+			compare: () => comparing("side-by-side", base, "one\ntwo\nthree\nFOUR\nfive"),
 		})
 		const [ours, theirs] = editor.views
 		expect(modifiedLines(ours.state)).toEqual([2])
-		expect(modifiedLines(theirs.state)).toEqual([2])
+		expect(modifiedLines(theirs.state)).toEqual([4])
+		expect(ours.dom.querySelectorAll(".cm-line.cm-insertedLine")).toHaveLength(1)
+		expect(theirs.dom.querySelectorAll(".cm-line.cm-insertedLine")).toHaveLength(0)
 		editor.destroy()
+	})
+
+	it("marks nothing on the side whose draft changed nothing", () => {
+		const base = "one\ntwo\nthree"
+		const editor = diffEditor({
+			doc: "one\nthree",
+			extensions: [],
+			besideExtensions: [],
+			beside: true,
+			compare: () => comparing("side-by-side", base, base),
+		})
+		const [ours, theirs] = editor.views
+		expect(ghosts(ours, "cm-deletedGhost")).toEqual(["two"])
+		expect(theirs.dom.querySelectorAll(".cm-deletedGhost, .cm-line.cm-insertedLine, .cm-line.cm-modifiedLine")).toHaveLength(0)
+		editor.destroy()
+	})
+})
+
+describe("stacked", () => {
+	it("marks what this draft changed since they parted", () => {
+		const editor = diffEditor({
+			doc: "one\nTWO\nthree",
+			extensions: [],
+			besideExtensions: [],
+			beside: false,
+			compare: () => comparing("stacked", "one\ntwo\nthree", "one\ntwo\nthree\nfour"),
+		})
+		expect(modifiedLines(editor.view.state)).toEqual([2])
+		expect(editor.view.state.readOnly).toBe(false)
+		editor.destroy()
+	})
+})
+
+describe("combined", () => {
+	it("marks both drafts' changes since they parted, in this draft's text", () => {
+		const editor = diffEditor({
+			doc: "one TWO three",
+			extensions: [],
+			besideExtensions: [],
+			beside: false,
+			compare: () => comparing("inline", "one two three", "two three four"),
+		})
+		const view = editor.view
+		expect(view.state.doc.toString()).toBe("one TWO three")
+		expect(view.state.readOnly).toBe(true)
+		expect(ghosts(view, "cm-oursInserted")).toEqual(["TWO"])
+		expect(ghosts(view, "cm-oursDeleted")).toEqual(["two"])
+		expect(ghosts(view, "cm-theirsDeleted")).toEqual(["one "])
+		expect(ghosts(view, "cm-theirsInserted")).toEqual([" four"])
+		editor.destroy()
+	})
+
+	it("puts the other draft's changes where they fall in this draft's text", () => {
+		const ours = Text.of(["added", "a b c"])
+		const ranges = combinedRanges("a b c", ours, "a b c d")
+		const theirs = ranges.find(
+			each => (each.value.spec.widget as {className?: string})?.className === "cm-theirsInserted",
+		)
+		expect(theirs?.from).toBe(ours.length)
 	})
 })

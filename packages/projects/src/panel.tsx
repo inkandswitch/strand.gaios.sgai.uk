@@ -175,6 +175,14 @@ export function PanelCompareControls(props: {
 		<Show when={props.comparing && props.modes.modeOf(props.panel)}>
 			{mode => (
 				<>
+					<Show when={props.picker !== false}>
+						<ComparePicker
+							modes={props.modes.offeredTo(props.panel)}
+							current={mode()}
+							title="Compare"
+							pick={props.panel.setPicked}
+						/>
+					</Show>
 					<Show when={mode().module.scope !== "workspace"}>
 						<ModeControls
 							mode={mode()}
@@ -186,14 +194,6 @@ export function PanelCompareControls(props: {
 						<CollapseToggle
 							collapsed={props.panel.collapsed()}
 							toggle={() => props.panel.setCollapsed(yn => !yn)}
-						/>
-					</Show>
-					<Show when={props.picker !== false}>
-						<ComparePicker
-							modes={props.modes.offeredTo(props.panel)}
-							current={mode()}
-							title="Compare"
-							pick={props.panel.setPicked}
 						/>
 					</Show>
 				</>
@@ -220,6 +220,7 @@ export function Compared(props: {
 	let host!: HTMLDivElement
 	let slotA!: HTMLDivElement
 	let view!: HTMLElement
+	let viewB: HTMLElement | undefined
 	const comparing = () => props.compare.comparing()
 	const mode = () => (comparing() ? props.compare.mode() : undefined)
 	const laidOut = () => {
@@ -251,7 +252,22 @@ export function Compared(props: {
 	})
 
 	const told = new Set<(view: CompareView) => void>()
+	const toldB = new Set<(view: CompareView) => void>()
 	let latest: () => CompareView = () => NOT_COMPARED
+	// The other draft's view, laid out beside it, is told the same the other
+	// way round: the checked-out draft's version is the other one there.
+	const mirrored = (): CompareView => {
+		const ours = latest()
+		if (!ours.mode) return ours
+		const mine = version()?.ours
+		return {
+			...ours,
+			other: mine ?? null,
+			missing: mine === null,
+			editable: false,
+			names: ours.names && {ours: ours.names.theirs, theirs: ours.names.ours},
+		}
+	}
 	createEffect(() => {
 		const current = mode()
 		const other = version()
@@ -269,13 +285,14 @@ export function Compared(props: {
 		})
 		const tell = () => {
 			for (const respond of told) respond(latest())
+			for (const respond of toldB) respond(mirrored())
 		}
 		tell()
 		if (options) onCleanup(options.subscribe(tell))
 	})
 
-	// Only the document's own view is told: views inside it aren't comparing
-	// anything, and nor are the other draft's.
+	// Only the document's own views are told, the checked-out draft's and the
+	// other's: views inside them aren't comparing anything.
 	const onSubscribe = (event: SubscribeEvent) => {
 		const selector = event.detail.selector as CompareSelector | CompareEdit
 		const target = event.target as HTMLElement
@@ -306,6 +323,12 @@ export function Compared(props: {
 					told.delete(respond)
 					if (props.compare.asked() === selector) props.compare.setAsked(undefined)
 				}
+			})
+		} else if (target === viewB && slotB()?.contains(target)) {
+			accept<CompareView>(event, respond => {
+				toldB.add(respond)
+				respond(mirrored())
+				return () => toldB.delete(respond)
 			})
 		} else if (slotB()?.contains(target)) {
 			accept<CompareView>(event, respond => respond(NOT_COMPARED))
@@ -372,6 +395,7 @@ export function Compared(props: {
 								{_draft => (
 									<OtherDraft workspace={other().workspace} draft={other().draft}>
 										<patchwork-view
+											ref={element => (viewB = element)}
 											class="projects__document"
 											doc-url={props.url}
 											tool-id={props.tool() ?? props.toolId}

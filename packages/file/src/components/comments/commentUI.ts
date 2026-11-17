@@ -1,7 +1,10 @@
-// Copied from codemirror-base's lib/extensions/commentUI.ts (tools don't share
-// code at build time). The one change: whether comments can be made is asked
-// of the host (`canComment`) instead of read off the editor's readOnly, since
-// a file the editor won't let you edit can still take comments.
+// Adapted from codemirror-base's lib/extensions/commentUI.ts (tools don't
+// share code at build time): a floating "Comment" button on a selection that
+// starts a thread on it, and clicking commented text to open its thread in the
+// comments sidebar. The threads themselves are shown and written there.
+// Whether comments can be made is asked of the host (`canComment`) instead of
+// read off the editor's readOnly, since a file the editor won't let you edit
+// can still take comments.
 
 import {
 	Extension,
@@ -9,63 +12,27 @@ import {
 	StateField,
 	type EditorState,
 } from "@codemirror/state"
-import {
-	EditorView,
-	showTooltip,
-	type Tooltip,
-	type TooltipView,
-} from "@codemirror/view"
-import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
-import {COMMENT_THREAD_TYPE} from "./threads"
+import {EditorView, showTooltip, type Tooltip} from "@codemirror/view"
 
-// The data hooks the editor UI needs from its host (the CodeMirror tool). The
-// extension owns all the DOM/positioning/lifecycle; the host owns everything
-// that needs the repo, the current contact, or the comment index.
 export type CommentUIOptions = {
-	// Create a thread targeting [from, to] and return its url, or null if it
-	// couldn't be created (e.g. no current contact). Called when the floating
-	// "Comment" button is clicked.
-	createThreadForRange: (from: number, to: number) => AutomergeUrl | null
-	// Map a document position to the thread whose commented range covers it (and
-	// that range's start), or null. Called when the user clicks commented text so
-	// we can pop that thread open under the range's start.
-	threadAtPos: (
-		pos: number
-	) => {threadUrl: AutomergeUrl; from: number} | null
-	// Watch a thread and invoke `close` once its pending draft is submitted (or
-	// cancelled, or the thread is removed). Returns an unsubscribe. Lets the
-	// popover dismiss itself the moment the comment is saved.
-	watchThreadForClose: (threadUrl: AutomergeUrl, close: () => void) => () => void
-	// Called whenever a popover closes, for any reason. Lets the host discard an
-	// abandoned, never-filled-in draft so dismissing the popover doesn't litter
-	// the document with empty comments.
-	onClose: (threadUrl: AutomergeUrl) => void
+	// Start a thread on [from, to]. Called when the "Comment" button is clicked.
+	createThreadForRange: (from: number, to: number) => void
+	// Open the thread whose commented range covers `pos`, if there is one.
+	// Called when the user clicks text.
+	openThreadAtPos: (pos: number) => void
 	// Whether the doc will take a comment right now. When it won't, there's no
-	// "Comment" button and clicking commented text doesn't open the thread (its
-	// reply box would write into a doc that rejects writes).
+	// "Comment" button.
 	canComment: () => boolean
 }
 
-// Which thread the popover is showing, and the document position it hangs off.
-type PopoverState = {threadUrl: AutomergeUrl; anchor: number}
-
-const openPopover = StateEffect.define<PopoverState>()
-const closePopover = StateEffect.define<null>()
-// Hide the floating "Comment" button until the next selection change (Escape).
+// Hide the floating "Comment" button until the next selection change (after
+// Escape, or once it's been pressed).
 const dismissButton = StateEffect.define<null>()
-
-// Mutable UI state shared across the extension's pieces (not editor state
-// because it isn't versioned/undoable): the thread we most recently dismissed,
-// so a click that stays inside it doesn't immediately pop it back open.
-type CommentUIState = {suppressed: AutomergeUrl | null}
-
-const POPOVER_CLASS = "cm-comment-popover"
 
 // A speech-bubble icon + "Comment" label, shown floating above the selection.
 const buildCommentButton = (
 	from: number,
 	to: number,
-	head: number,
 	view: EditorView,
 	options: CommentUIOptions
 ): HTMLElement => {
@@ -85,9 +52,7 @@ const buildCommentButton = (
 	// Without this, the browser focuses the button on mousedown, the editor
 	// blurs, the selection collapses, our tooltip source returns null, and
 	// CodeMirror tears down the button before `click` fires — so the first
-	// press silently does nothing and the user has to click twice. Swallowing
-	// mousedown keeps the editor focused and the selection (and button) alive
-	// long enough for the click to land.
+	// press silently does nothing and the user has to click twice.
 	button.addEventListener("mousedown", (e) => {
 		e.preventDefault()
 		e.stopPropagation()
@@ -96,66 +61,11 @@ const buildCommentButton = (
 	button.addEventListener("click", (e) => {
 		e.preventDefault()
 		e.stopPropagation()
-		const threadUrl = options.createThreadForRange(from, to)
-		if (!threadUrl) return
-		// Open the popover right where the button was (the selection head).
-		view.dispatch({effects: openPopover.of({threadUrl, anchor: head})})
+		view.dispatch({effects: dismissButton.of(null)})
+		options.createThreadForRange(from, to)
 	})
 
 	return button
-}
-
-// The popover body: the shared comment-thread tool, rendered inline via the
-// `patchwork-view` custom element. It's mounted inside `view.dom`, so the
-// element's provider events (repo, contact, …) still bubble up to the host.
-const buildThreadPopover = (
-	view: EditorView,
-	state: PopoverState,
-	options: CommentUIOptions,
-	ui: CommentUIState
-): TooltipView => {
-	const dom = document.createElement("div")
-	dom.className = POPOVER_CLASS
-
-	const threadView = document.createElement("patchwork-view")
-	threadView.setAttribute("doc-url", state.threadUrl)
-	threadView.setAttribute("tool-id", COMMENT_THREAD_TYPE)
-	dom.append(threadView)
-
-	const close = () => view.dispatch({effects: closePopover.of(null)})
-
-	// Dismiss on a click anywhere outside the popover, or on Escape. Both are
-	// armed on a deferred tick so the very interaction that opened the popover
-	// (the button click / the click on commented text) doesn't also close it.
-	const onOutsideMouseDown = (event: MouseEvent) => {
-		if (!dom.contains(event.target as Node)) close()
-	}
-	const onKeyDown = (event: KeyboardEvent) => {
-		if (event.key === "Escape") close()
-	}
-	const doc = view.dom.ownerDocument
-	const win = doc.defaultView ?? window
-	const armTimer = win.setTimeout(() => {
-		doc.addEventListener("mousedown", onOutsideMouseDown, true)
-		doc.addEventListener("keydown", onKeyDown, true)
-	}, 0)
-
-	// Close as soon as the draft is submitted (or the thread goes away).
-	const stopWatch = options.watchThreadForClose(state.threadUrl, close)
-
-	return {
-		dom,
-		destroy() {
-			win.clearTimeout(armTimer)
-			doc.removeEventListener("mousedown", onOutsideMouseDown, true)
-			doc.removeEventListener("keydown", onKeyDown, true)
-			stopWatch()
-			// Remember this thread as dismissed so clicking within its range again
-			// doesn't immediately reopen it (cleared once a click lands elsewhere).
-			ui.suppressed = state.threadUrl
-			options.onClose(state.threadUrl)
-		},
-	}
 }
 
 const buttonTooltip = (
@@ -174,148 +84,69 @@ const buttonTooltip = (
 		strictSide: false,
 		arrow: false,
 		create: (view) => ({
-			dom: buildCommentButton(sel.from, sel.to, sel.head, view, options),
+			dom: buildCommentButton(sel.from, sel.to, view, options),
 		}),
 	}
 }
 
-const popoverTooltip = (
-	state: PopoverState,
-	options: CommentUIOptions,
-	ui: CommentUIState
-): Tooltip => ({
-	pos: state.anchor,
-	above: false, // comes out underneath the anchor
-	strictSide: false,
-	arrow: false,
-	create: (view) => buildThreadPopover(view, state, options, ui),
-})
-
 type FieldValue = {
-	popover: PopoverState | null
-	// The floating button is hidden while this is true — after Escape, or after a
-	// comment is added — until a fresh selection re-arms it.
-	buttonDismissed: boolean
+	// The button is hidden while this is true, until a fresh selection re-arms it.
+	dismissed: boolean
 	tooltip: Tooltip | null
 }
 
-// A single field driving the one tooltip slot: the thread popover when one is
-// open, otherwise the selection's "Comment" button.
-const commentUIField = (options: CommentUIOptions, ui: CommentUIState) =>
+const commentButtonField = (options: CommentUIOptions) =>
 	StateField.define<FieldValue>({
 		create: (state) => ({
-			popover: null,
-			buttonDismissed: false,
+			dismissed: false,
 			tooltip: buttonTooltip(state, options),
 		}),
 		update(value, tr) {
-			let popover = value.popover
-			let buttonDismissed = value.buttonDismissed
-			let popoverChanged = false
-
-			// Keep the popover pinned to its text as the document shifts under it.
-			if (popover && tr.docChanged) {
-				popover = {...popover, anchor: tr.changes.mapPos(popover.anchor)}
-				popoverChanged = true
-			}
+			let dismissed = value.dismissed
 			for (const effect of tr.effects) {
-				if (effect.is(openPopover)) {
-					popover = effect.value
-					popoverChanged = true
-				} else if (effect.is(closePopover)) {
-					popover = null
-					popoverChanged = true
-					// A comment was just added (or dismissed): don't flash the button
-					// back up over the still-selected text.
-					buttonDismissed = true
-				} else if (effect.is(dismissButton)) {
-					buttonDismissed = true
-				}
+				if (effect.is(dismissButton)) dismissed = true
 			}
 			// Any fresh selection re-arms the button.
-			if (tr.selection) buttonDismissed = false
-
-			if (popover) {
-				// Reuse the exact same tooltip object unless the popover state itself
-				// changed. Otherwise an unrelated transaction (a stray selection
-				// change, an extension reconfigure, …) would hand CodeMirror a fresh
-				// Tooltip and it would tear down and remount the thread view mid-edit.
-				if (!popoverChanged) {
-					return buttonDismissed === value.buttonDismissed
-						? value
-						: {...value, buttonDismissed}
-				}
-				return {
-					popover,
-					buttonDismissed,
-					tooltip: popoverTooltip(popover, options, ui),
-				}
-			}
-
-			// No popover: show the selection button, unless it's been dismissed.
-			// Recompute only when something relevant changed.
-			if (
-				!popoverChanged &&
-				!tr.docChanged &&
-				!tr.selection &&
-				buttonDismissed === value.buttonDismissed
-			) {
+			if (tr.selection) dismissed = false
+			if (!tr.docChanged && !tr.selection && dismissed === value.dismissed) {
 				return value
 			}
 			return {
-				popover: null,
-				buttonDismissed,
-				tooltip: buttonDismissed ? null : buttonTooltip(tr.state, options),
+				dismissed,
+				tooltip: dismissed ? null : buttonTooltip(tr.state, options),
 			}
 		},
 		provide: (field) => showTooltip.from(field, (value) => value.tooltip),
 	})
 
-// Editor-level interactions: click commented text to (re)open its thread, and
+// Click commented text to open its thread in the sidebar (on click, so it
+// lands after the editor has moved its cursor and written that to focus), and
 // Escape to dismiss the floating button.
 const commentInteractions = (
 	options: CommentUIOptions,
-	ui: CommentUIState,
 	field: StateField<FieldValue>
 ): Extension =>
 	EditorView.domEventHandlers({
-		mousedown(event, view) {
+		click(event, view) {
 			if (
 				event.button !== 0 ||
 				event.metaKey ||
 				event.ctrlKey ||
 				event.altKey ||
-				event.shiftKey
+				event.shiftKey ||
+				!view.state.selection.main.empty
 			) {
 				return false
 			}
-			// Clicks inside an open popover are the thread tool's own business.
-			if ((event.target as HTMLElement | null)?.closest("." + POPOVER_CLASS)) {
-				return false
-			}
-			if (!options.canComment()) return false
 			const pos = view.posAtCoords({x: event.clientX, y: event.clientY})
 			if (pos == null) return false
-			const hit = options.threadAtPos(pos)
-			if (!hit) {
-				ui.suppressed = null // clicked away from any comment; re-arm reopening
-				return false
-			}
-			// Don't reopen the thread we just dismissed while the click stays inside
-			// it — the user has to click elsewhere (or another comment) first.
-			if (hit.threadUrl === ui.suppressed) return false
-			ui.suppressed = null
-			view.dispatch({
-				effects: openPopover.of({threadUrl: hit.threadUrl, anchor: hit.from}),
-			})
-			return false; // let the click also move the cursor as usual
+			options.openThreadAtPos(pos)
+			return false
 		},
 		keydown(event, view) {
 			if (event.key !== "Escape") return false
 			const state = view.state.field(field, false)
-			// While a popover is open its own Escape handler wins (it also works when
-			// the popover's textarea holds focus); here we only hide the button.
-			if (!state || state.popover || !state.tooltip) return false
+			if (!state?.tooltip) return false
 			view.dispatch({effects: dismissButton.of(null)})
 			return true
 		},
@@ -382,54 +213,12 @@ const commentUITheme = EditorView.baseTheme({
 	".cm-comment-button svg": {
 		display: "block",
 	},
-	// The thread tool carries its own card (background, border, padding), so the
-	// tooltip wrapper is just a transparent, softly-lifted host for it.
-	".cm-tooltip:has(.cm-comment-popover)": {
-		border: "none",
-		background: "transparent",
-		boxShadow: "none",
-	},
-	".cm-comment-popover": {
-		width: "min(360px, 92vw)",
-		marginTop: "6px",
-		fontFamily: "var(--editor-family)",
-		filter: "drop-shadow(0 4px 14px rgba(0, 0, 0, 0.25))",
-	},
-	// The popover supplies its own frame (the tooltip wrapper's shadow), so the
-	// thread card inside drops its own border and shadow to avoid doubling up.
-	".cm-comment-popover .comments-thread-card": {
-		border: "0",
-		boxShadow: "none",
-	},
-	// The draft textarea is width:100% with its own padding + border; without
-	// border-box it spills out of the card's right edge (the card's own reset is
-	// scoped to the sidebar panel, which the popover isn't inside).
-	".cm-comment-popover .comment-draft-editor": {
-		boxSizing: "border-box",
-		maxWidth: "100%",
-		minWidth: "0",
-		width: "100%",
-	},
-	".cm-comment-popover .comment-draft-editor .cm-content": {
-		minHeight: "0",
-		minWidth: "0",
-		margin: "0",
-		padding: "8px",
-	},
-	".cm-comment-popover .comment-draft-editor .cm-line": {
-		margin: "0",
-		padding: "0",
-	},
-	".cm-comment-popover .comment-draft-editor .cm-scroller": {
-		minWidth: "0",
-	},
 })
 
-// The comment UI: the floating "Comment" button on a selection, and the thread
-// popover it (and clicking commented text) opens.
+// The comment UI: the floating "Comment" button on a selection, and clicking
+// commented text to open its thread.
 export const commentUI = (options: CommentUIOptions): Extension => {
 	ensureCommentButtonVars()
-	const ui: CommentUIState = {suppressed: null}
-	const field = commentUIField(options, ui)
-	return [field, commentInteractions(options, ui, field), commentUITheme]
+	const field = commentButtonField(options)
+	return [field, commentInteractions(options, field), commentUITheme]
 }

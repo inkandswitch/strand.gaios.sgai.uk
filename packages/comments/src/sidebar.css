@@ -1,0 +1,318 @@
+.gc-sidebar {
+  --gc-fg: var(--projects-fg, var(--studio-line, #1f1e1d));
+  --gc-muted: var(--projects-muted, var(--studio-line-offset-50, #77756f));
+  --gc-bg: var(--projects-field, #faf9f6);
+  --gc-surface: var(--projects-surface, var(--studio-fill, #fff));
+  --gc-edge: var(--projects-surface-edge, rgb(31 30 29 / 0.12));
+  --gc-hover: var(--projects-hover, rgb(31 30 29 / 0.05));
+  /* comments are marked like a highlighter: light yellow */
+  --gc-mark: var(--comment-mark, #f2c94c);
+  --gc-mark-fill: var(
+    --comment-highlight,
+    color-mix(in oklch, #ffd84d 32%, var(--gc-surface))
+  );
+  --gc-mark-ink: var(--comment-ink, color-mix(in oklch, #7a5c00 80%, var(--gc-fg)));
+  /* a card at rest sits a little into the field; the selected one is lifted, white */
+  --gc-rest: color-mix(in oklch, var(--gc-fg) 2.5%, var(--gc-bg));
+  --gc-ours: var(--projects-ours, #3b7dd8);
+  --gc-ours-fill: var(--projects-ours-fill, #e6effb);
+  --gc-ours-ink: var(--projects-ours-ink, #1b4a8a);
+  --gc-theirs: var(--projects-theirs, #9b5de5);
+  --gc-theirs-fill: var(--projects-theirs-fill, #f2eafc);
+  --gc-theirs-ink: var(--projects-theirs-ink, #4f2585);
+  --comments-accent: color-mix(in oklch, var(--gc-fg) 30%, transparent);
+
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  /* what's inside never widens the sidebar: long quotes and titles cut off */
+  contain: inline-size;
+  overflow: hidden;
+  padding: 12px 12px 0;
+  color: var(--gc-fg);
+  background: var(--gc-bg);
+  font-family: var(--studio-family-sans, system-ui, sans-serif);
+  font-size: 13px;
+}
+.gc-sidebar *,
+.gc-sidebar *::before,
+.gc-sidebar *::after {
+  box-sizing: border-box;
+}
+.gc-sidebar [hidden] {
+  display: none !important;
+}
+.gc-sidebar > *,
+.gc-list > *,
+.gc-card > *,
+.gc-group > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.gc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.gc-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+
+
+.gc-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin: 0 -4px;
+  padding-inline: 4px;
+}
+.gc-empty {
+  padding: 24px 0;
+  color: var(--gc-muted);
+  text-align: center;
+}
+
+.gc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--gc-surface);
+  border: 1px solid var(--gc-edge);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.gc-card:hover,
+.gc-card[data-state="secondary"] {
+  border-color: color-mix(in oklch, var(--gc-fg) 22%, transparent);
+}
+/* the selected thread: white and lifted, like the selected tab above */
+.gc-card[data-state="primary"] {
+  background: var(--gc-surface);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 6px 16px -8px rgb(0 0 0 / 0.18);
+}
+.gc-card > patchwork-view {
+  display: block;
+}
+/* the thread tool draws its own card: inside ours it's just the content */
+.gc-card .comments-thread-card {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  opacity: 1 !important;
+}
+.gc-card[data-draft="theirs"] {
+  border-style: dashed;
+}
+
+.gc-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+.gc-chip--compact {
+  padding: 0;
+  background: none;
+  flex: none;
+  max-width: 100%;
+}
+.gc-chip[data-removed] .gc-chip-label {
+  color: var(--gc-muted);
+  font-style: italic;
+}
+.gc-chip-thumb:empty {
+  display: none;
+}
+.gc-chip-thumb {
+  flex: none;
+  width: 56px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 4px;
+  border: 1px solid var(--gc-edge);
+  background: var(--gc-surface);
+}
+.gc-chip-thumb > * {
+  max-width: 100%;
+  max-height: 100%;
+}
+.gc-chip-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--gc-muted);
+}
+.gc-chip-bar {
+  flex: none;
+  align-self: stretch;
+  width: 3px;
+  min-height: 16px;
+  border-radius: 2px;
+  background: var(--gc-mark);
+}
+/* a quote reads like the highlighted text it came from */
+.gc-chip-bar[data-quote] {
+  display: none;
+}
+.gc-chip-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.gc-chip-label {
+  font-weight: 600;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gc-chip-label--quote {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-weight: 400;
+  background: var(--gc-mark-fill);
+  box-shadow: inset 0 -2px 0 var(--gc-mark);
+}
+.gc-chip-doc {
+  color: var(--gc-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gc-draft {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--gc-ours-fill);
+  color: var(--gc-ours-ink);
+}
+.gc-draft::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gc-ours);
+}
+.gc-draft[data-draft="theirs"] {
+  background: var(--gc-theirs-fill);
+  color: var(--gc-theirs-ink);
+}
+.gc-draft[data-draft="theirs"]::before {
+  background: var(--gc-theirs);
+}
+
+
+.gc-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.gc-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px 0;
+}
+.gc-group-name {
+  font-weight: 600;
+  font-size: 12.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gc-row-text {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gc-row-meta {
+  color: var(--gc-muted);
+  font-size: 11px;
+}
+
+/* the filter: a quiet select at the head's end */
+.gc-filter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--gc-muted);
+}
+.gc-filter select {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 3px 22px 3px 8px;
+  cursor: pointer;
+}
+.gc-filter:hover select {
+  border-color: var(--gc-edge);
+  background: var(--gc-surface);
+  color: var(--gc-fg);
+}
+.gc-filter select:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--gc-fg) 40%, transparent);
+}
+.gc-filter svg {
+  position: absolute;
+  right: 6px;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+.gc-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.gc-group {
+  gap: 6px;
+}
+.gc-group + .gc-group {
+  margin-top: 6px;
+}
+.gc-group-name {
+  color: var(--gc-muted);
+}
+.gc-theirs-note {
+  margin: 4px 0 0;
+  color: var(--gc-muted);
+  font-size: 11.5px;
+}

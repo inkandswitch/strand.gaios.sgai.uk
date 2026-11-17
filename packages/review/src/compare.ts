@@ -28,6 +28,9 @@ export type Comparison = {
   // The files the other draft has: the compared one, or the merge's target
   // as it is now.
   theirFiles: Set<AutomergeUrl>;
+  // The files the checked-out draft has, or merging, the target once the
+  // draft is merged in.
+  ourFiles: Set<AutomergeUrl>;
   // Merging, the files the target has once the draft is merged in.
   afterFiles: Set<AutomergeUrl> | null;
   // The docs a change to which can change the comparison.
@@ -64,6 +67,7 @@ export async function compareTrees(
     folders: foldersHolding(files, ghosts, mine, yours),
     ghosts,
     theirFiles: new Set(fileUrls(yours)),
+    ourFiles: new Set(fileUrls(mine)),
     afterFiles: null,
     watched,
   };
@@ -111,6 +115,7 @@ export async function compareMerge(
     folders: foldersHolding(files, ghosts, mine, was, will),
     ghosts,
     theirFiles: new Set(fileUrls(was)),
+    ourFiles: new Set(fileUrls(will)),
     afterFiles: new Set(fileUrls(will)),
     watched,
   };
