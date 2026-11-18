@@ -1,7 +1,7 @@
 import {describe, expect, it} from "vitest"
 import {EditorState, Text} from "@codemirror/state"
 import {EditorView} from "@codemirror/view"
-import {combinedRanges, diffEditor, follow, modifiedLines, splicesOf, type DraftCompare} from "./draft-diff"
+import {combinedRanges, diffEditor, follow, modifiedLines, splicesOf, versionRanges, type DraftCompare} from "./draft-diff"
 
 // Makes the splices, one after another, to `text`.
 const apply = (text: string, splices: ReturnType<typeof splicesOf>) =>
@@ -72,36 +72,76 @@ const comparing = (mode: DraftCompare["mode"], base: string, original: string): 
 const ghosts = (view: EditorView, kind: string) =>
 	[...view.dom.querySelectorAll(`.${kind}`)].map(each => each.textContent)
 
-describe("side by side", () => {
-	it("marks on each side what its draft changed since they parted", () => {
-		const base = "one\ntwo\nthree\nfour\nfive"
-		const editor = diffEditor({
-			doc: "one\nTWO\nthree\nfour\nfive\nadded",
-			extensions: [],
-			besideExtensions: [],
-			beside: true,
-			compare: () => comparing("side-by-side", base, "one\ntwo\nthree\nFOUR\nfive"),
-		})
-		const [ours, theirs] = editor.views
-		expect(modifiedLines(ours.state)).toEqual([2])
-		expect(modifiedLines(theirs.state)).toEqual([4])
-		expect(ours.dom.querySelectorAll(".cm-line.cm-insertedLine")).toHaveLength(1)
-		expect(theirs.dom.querySelectorAll(".cm-line.cm-insertedLine")).toHaveLength(0)
-		editor.destroy()
-	})
+const lineClasses = (view: EditorView, kind: string) =>
+	[...view.dom.querySelectorAll(`.cm-line.${kind}`)].map(each => each.textContent)
 
-	it("marks nothing on the side whose draft changed nothing", () => {
+describe("side by side", () => {
+	it("marks lines that differ yellow on both sides, nothing struck out", () => {
 		const base = "one\ntwo\nthree"
 		const editor = diffEditor({
-			doc: "one\nthree",
+			doc: "one\nTWO\nthree",
 			extensions: [],
 			besideExtensions: [],
 			beside: true,
 			compare: () => comparing("side-by-side", base, base),
 		})
 		const [ours, theirs] = editor.views
-		expect(ghosts(ours, "cm-deletedGhost")).toEqual(["two"])
-		expect(theirs.dom.querySelectorAll(".cm-deletedGhost, .cm-line.cm-insertedLine, .cm-line.cm-modifiedLine")).toHaveLength(0)
+		expect(lineClasses(ours, "cm-differsLine")).toEqual(["TWO"])
+		expect(lineClasses(theirs, "cm-differsLine")).toEqual(["two"])
+		expect(ours.dom.querySelectorAll(".cm-ghost")).toHaveLength(0)
+		editor.destroy()
+	})
+
+	it("marks lines only one side has: added by its draft, or removed by the other's", () => {
+		const base = "one\ntwo\nthree"
+		const editor = diffEditor({
+			doc: "one\nthree\nmine",
+			extensions: [],
+			besideExtensions: [],
+			beside: true,
+			compare: () => comparing("side-by-side", base, base),
+		})
+		const [ours, theirs] = editor.views
+		expect(lineClasses(ours, "cm-addedLine")).toEqual(["mine"])
+		expect(lineClasses(theirs, "cm-removedLine")).toEqual(["two"])
+		expect(theirs.dom.querySelectorAll(".cm-line.cm-addedLine, .cm-line.cm-differsLine")).toHaveLength(0)
+		editor.destroy()
+	})
+})
+
+describe("versionRanges", () => {
+	it("tells added from removed by the ancestor", () => {
+		const doc = Text.of(["a", "new", "b"])
+		const kinds = versionRanges("a\nb", doc, "a\nb").map(each => each.value.spec.class)
+		expect(kinds).toEqual(["cm-addedLine"])
+		const kept = versionRanges("a\nold\nb", Text.of(["a", "old", "b"]), "a\nb").map(each => each.value.spec.class)
+		expect(kept).toEqual(["cm-removedLine"])
+	})
+})
+
+describe("merging", () => {
+	it("marks a combined merge as added and removed, not by draft", () => {
+		const before = "one\ntwo"
+		const editor = diffEditor({
+			doc: "one\nTWO",
+			extensions: [],
+			besideExtensions: [],
+			beside: false,
+			compare: () => ({...comparing("inline", before, before), merging: true}),
+		})
+		expect(editor.view.dom.classList.contains("cm-diff-merge")).toBe(true)
+		editor.destroy()
+	})
+
+	it("doesn't while comparing", () => {
+		const editor = diffEditor({
+			doc: "one\nTWO",
+			extensions: [],
+			besideExtensions: [],
+			beside: false,
+			compare: () => comparing("inline", "one\ntwo", "one\ntwo"),
+		})
+		expect(editor.view.dom.classList.contains("cm-diff-merge")).toBe(false)
 		editor.destroy()
 	})
 })
@@ -122,30 +162,33 @@ describe("stacked", () => {
 })
 
 describe("combined", () => {
-	it("marks both drafts' changes since they parted, in this draft's text", () => {
+	it("shows both versions where they differ, in their drafts' colours, nothing struck out", () => {
 		const editor = diffEditor({
-			doc: "one TWO three",
+			doc: "one\nTWO\nthree",
 			extensions: [],
 			besideExtensions: [],
 			beside: false,
-			compare: () => comparing("inline", "one two three", "two three four"),
+			compare: () => comparing("inline", "one\ntwo\nthree", "one\nTwo\nthree"),
 		})
 		const view = editor.view
-		expect(view.state.doc.toString()).toBe("one TWO three")
 		expect(view.state.readOnly).toBe(true)
-		expect(ghosts(view, "cm-oursInserted")).toEqual(["TWO"])
-		expect(ghosts(view, "cm-oursDeleted")).toEqual(["two"])
-		expect(ghosts(view, "cm-theirsDeleted")).toEqual(["one "])
-		expect(ghosts(view, "cm-theirsInserted")).toEqual([" four"])
+		expect(lineClasses(view, "cm-oursLine")).toEqual(["TWO"])
+		expect(ghosts(view, "cm-theirsLines")).toEqual(["Two"])
+		expect(view.dom.querySelector(".cm-oursDeleted, .cm-theirsDeleted")).toBeNull()
 		editor.destroy()
 	})
 
-	it("puts the other draft's changes where they fall in this draft's text", () => {
-		const ours = Text.of(["added", "a b c"])
-		const ranges = combinedRanges("a b c", ours, "a b c d")
-		const theirs = ranges.find(
-			each => (each.value.spec.widget as {className?: string})?.className === "cm-theirsInserted",
-		)
-		expect(theirs?.from).toBe(ours.length)
+	it("puts lines only theirs has where they'd be", () => {
+		const ours = Text.of(["a", "c"])
+		const ranges = combinedRanges(ours, "a\nb\nc")
+		expect(ranges).toHaveLength(1)
+		expect(ranges[0].from).toBe(2)
+		expect(ranges[0].value.spec.side).toBe(-1)
+	})
+
+	it("puts lines only theirs has at the end after the last line", () => {
+		const ours = Text.of(["a", "b"])
+		const ranges = combinedRanges(ours, "a\nb\nc")
+		expect(ranges.map(each => [each.from, each.value.spec.side])).toEqual([[ours.length, 1]])
 	})
 })

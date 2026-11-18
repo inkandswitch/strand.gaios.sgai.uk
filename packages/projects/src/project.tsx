@@ -61,20 +61,26 @@ export function ProjectView(props: {
 		return current?.previewing || current?.merging ? previous : current?.draft
 	})
 
-	// What the two versions are called: merging, A is what the merge leaves
-	// the target as.
+	// What the two versions are called. Compared, each is its draft, in its
+	// colour. Merging, it's what happens to the target: before the merge (B)
+	// and after it (A), in no draft's colour.
 	createEffect(() => {
 		const drafts = state.drafts()
 		const current = state.against()
 		const ours = drafts?.drafts.find(entry => entry.url === drafts.checkedOut)?.name
 		const theirs = drafts?.drafts.find(entry => entry.url === current?.draft)?.name
 		workspaceCompare.setVersions(
-			current && ours !== undefined && theirs !== undefined
-				? {
-						a: {name: current.merging ? "Merged" : ours, color: "var(--projects-ours)"},
-						b: {name: theirs, color: "var(--projects-theirs)"},
-					}
-				: undefined
+			!current || ours === undefined || theirs === undefined
+				? undefined
+				: current.merging
+					? {
+							a: {name: "After", color: "var(--projects-changed)"},
+							b: {name: "Before", color: "var(--projects-changed)"},
+						}
+					: {
+							a: {name: ours, color: "var(--projects-ours)"},
+							b: {name: theirs, color: "var(--projects-theirs)"},
+						}
 		)
 	})
 

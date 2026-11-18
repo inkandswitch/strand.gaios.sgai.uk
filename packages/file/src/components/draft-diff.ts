@@ -32,7 +32,7 @@ import {
 	gutter,
 	type DecorationSet,
 } from "@codemirror/view"
-import {Chunk, MergeView, presentableDiff, type Change} from "@codemirror/merge"
+import {Chunk, MergeView, diff, type Change} from "@codemirror/merge"
 import {request} from "@inkandswitch/patchwork-providers"
 import {subscribe} from "@inkandswitch/patchwork-providers-solid"
 import {fileText} from "../datatype"
@@ -210,11 +210,19 @@ export function diffEditor(config: {
 }): {view: EditorView; dom: HTMLElement; views: EditorView[]; destroy(): void} {
 	if (config.beside) return besideDiff(config)
 	const marks = new Compartment()
+	const merge = new Compartment()
 	const view = new EditorView({
 		doc: config.doc,
-		extensions: [config.extensions, marks.of([])],
+		extensions: [config.extensions, marks.of([]), merge.of(merging(!!untrack(config.compare)?.merging))],
 	})
 	followAlone(view, marks, config.compare)
+	createEffect(
+		on(
+			() => !!config.compare()?.merging,
+			current => view.dispatch({effects: merge.reconfigure(merging(current))}),
+			{defer: true},
+		),
+	)
 	return {view, dom: view.dom, views: [view], destroy: () => view.destroy()}
 }
 
@@ -257,9 +265,11 @@ function followAlone(
 }
 
 // The editor goes first, as B, and the other version after it, as A, lined
-// up by how they differ, but each marked with what its own draft changed
-// since they parted. What's typed into A goes to the other draft, while it
-// can.
+// up by how they differ. Each side is one version, so it's marked against
+// the other: lines that differ on both sides are yellow on both, the two
+// alternatives facing each other; lines only one side has are green where
+// its draft added them, red where the other draft took them out. What's
+// typed into A goes to the other draft, while it can.
 function besideDiff(config: {
 	doc: string
 	extensions: Extension[]
@@ -280,17 +290,42 @@ function besideDiff(config: {
 				lock.of(writable(initial) ? [] : LOCKED),
 				config.besideExtensions,
 				UNMARKED,
-				ownChanges(base),
+				versionMarks(base),
 				theirs?.extension ?? [],
+				EditorView.updateListener.of(update => {
+					if (update.docChanged) otherChanged(merge.b, update.state.doc)
+				}),
 			],
 		},
-		b: {doc: config.doc, extensions: [config.extensions, UNMARKED, ownChanges(base)]},
+		b: {
+			doc: config.doc,
+			extensions: [
+				config.extensions,
+				UNMARKED,
+				versionMarks(base),
+				EditorView.updateListener.of(update => {
+					if (update.docChanged) otherChanged(merge.a, update.state.doc)
+				}),
+			],
+		},
 		orientation: "b-a",
 		highlightChanges: false,
 		gutter: false,
 		collapseUnchanged: initial?.collapsed ? COLLAPSE : undefined,
 	})
 	Object.assign(merge.dom.style, {flex: "1", minHeight: "0", overflow: "auto"})
+	// Each side is marked against the other's text, told again once typing
+	// settles.
+	let pendingOther: ReturnType<typeof setTimeout> | undefined
+	const otherChanged = (view: EditorView, doc: Text) => {
+		clearTimeout(pendingOther)
+		pendingOther = setTimeout(
+			() => view.dispatch({effects: setOther.of(doc.toString())}),
+			OTHER_DEBOUNCE_MS,
+		)
+	}
+	merge.a.dispatch({effects: setOther.of(merge.b.state.doc.toString())})
+	merge.b.dispatch({effects: setOther.of(merge.a.state.doc.toString())})
 
 	// Each side headed by its draft's dot and name, above where it scrolls.
 	const frame = document.createElement("div")
@@ -307,8 +342,15 @@ function besideDiff(config: {
 		const names = current?.names
 		headings.hidden = !names
 		if (!names) return
-		ours.show(current.merging ? "Merged" : names.ours, OURS)
-		other.show(names.theirs, THEIRS)
+		// A merge is what happens to the target: before it, after it, in no
+		// draft's colour. Compared, each side is its draft.
+		if (current.merging) {
+			ours.show("After", NEUTRAL)
+			other.show("Before", NEUTRAL)
+		} else {
+			ours.show(names.ours, OURS)
+			other.show(names.theirs, THEIRS)
+		}
 	})
 
 	createEffect(
@@ -353,9 +395,15 @@ function besideDiff(config: {
 		view: merge.b,
 		dom: frame,
 		views: [merge.b, merge.a],
-		destroy: () => merge.destroy(),
+		destroy: () => {
+			clearTimeout(pendingOther)
+			merge.destroy()
+		},
 	}
 }
+
+// What's typed is let settle this long before the other side is marked again.
+const OTHER_DEBOUNCE_MS = 150
 
 const EDGE = "1px solid var(--compare-edge, rgb(0 0 0 / 0.08))"
 
@@ -486,15 +534,23 @@ export function follow(view: EditorView, text: string) {
 const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
 const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
 
-// What each draft changed, in the colours the panel showing it gives them:
-// on its own or beside the other version, as added, removed, and changed
-// lines, each side headed by its draft; combined, with nothing else to say
-// which is which, in the drafts' own colours.
+// What each draft changed, in the colours the panel showing it gives them.
+// A pane showing one version (on its own, or beside the other) marks added,
+// removed, and changed lines in green, red and amber: its heading already
+// says which draft it is. Combined, both drafts' changes share one text,
+// so they're told apart by the drafts' own colours; while merging, that's
+// what the merge does to the target, in green and red.
 const INSERTED = "var(--compare-inserted, #22bb22)"
 const DELETED = "var(--compare-deleted, #ee4433)"
 const MODIFIED = "var(--compare-modified, #dba617)"
 const OURS = "var(--compare-ours, #3b7dd8)"
 const THEIRS = "var(--compare-theirs, #9b5de5)"
+const NEUTRAL = "var(--compare-neutral, #8a8883)"
+
+// Merging, combined marks what the merge does to the target, in green and
+// red, not by draft (see COMBINED_THEME).
+const merging = (on: boolean): Extension =>
+	on ? EditorView.editorAttributes.of({class: "cm-diff-merge"}) : []
 const tint = (colour: string, amount: number) =>
 	`color-mix(in srgb, ${colour} ${amount}%, transparent)`
 const underline = (colour: string) =>
@@ -641,6 +697,30 @@ function ownChangesIn(base: string, baseText: Text, doc: Text, chunks: readonly 
 
 const textOf = (text: string) => Text.of(text.split("\n"))
 
+const linesOf = (text: Text) => text.toString().split("\n")
+
+/**
+ * How lines `b` differ from lines `a`, in line numbers (from 0): each line
+ * stands for one character, so the diff can't split or shift a line.
+ */
+export function lineDiff(a: readonly string[], b: readonly string[]) {
+	const codes = new Map<string, string>()
+	const encode = (lines: readonly string[]) =>
+		lines
+			.map(line => {
+				let code = codes.get(line)
+				if (code === undefined) {
+					// From U+0100, stepping over the surrogates.
+					const n = 0x100 + codes.size
+					code = String.fromCharCode(n < 0xd800 ? n : n + 0x800)
+					codes.set(line, code)
+				}
+				return code
+			})
+			.join("")
+	return diff(encode(a), encode(b))
+}
+
 function ownChangesFor(base: string, doc: Text) {
 	const baseText = textOf(base)
 	return ownChangesIn(base, baseText, doc, Chunk.build(baseText, doc))
@@ -709,6 +789,82 @@ const UNMARKED = EditorView.theme({
 	},
 })
 
+// --- One version against the other, side by side ---
+
+/** Sets the other side's text, which this side is marked against. */
+const setOther = StateEffect.define<string>()
+
+const differsLine = Decoration.line({class: "cm-differsLine"})
+const addedLine = Decoration.line({class: "cm-addedLine"})
+const removedLine = Decoration.line({class: "cm-removedLine"})
+
+type VersionMarks = Marks & {base: string; other: string}
+
+/**
+ * This side's lines marked against `other`'s, line by line: where both
+ * sides have lines, they differ (yellow); where only this side has them,
+ * they're added if they aren't in `base` (this draft added them), else
+ * removed (the other draft took them out).
+ */
+export function versionRanges(base: string, doc: Text, other: string): Range<Decoration>[] {
+	const ranges: Range<Decoration>[] = []
+	const lines = linesOf(doc)
+	// The lines this side's draft added since the ancestor.
+	const added = new Set<number>()
+	for (const change of lineDiff(base.split("\n"), lines))
+		for (let line = change.fromB; line < change.toB; line++) added.add(line)
+	for (const change of lineDiff(other.split("\n"), lines)) {
+		const both = change.fromA < change.toA
+		for (let line = change.fromB; line < change.toB; line++) {
+			const decoration = both ? differsLine : added.has(line) ? addedLine : removedLine
+			ranges.push(decoration.range(doc.line(line + 1).from))
+		}
+	}
+	return ranges
+}
+
+function versionMarksFor(base: string, other: string, doc: Text): VersionMarks {
+	const ranges = versionRanges(base, doc, other)
+	return {base, other, deco: Decoration.set(ranges, true), touched: touchedLines(doc, ranges)}
+}
+
+const versionMarksField = StateField.define<VersionMarks>({
+	create: state => versionMarksFor("", state.doc.toString(), state.doc),
+	update(value, transaction) {
+		let {base, other} = value
+		for (const effect of transaction.effects) {
+			if (effect.is(setBase)) base = effect.value
+			if (effect.is(setOther)) other = effect.value
+		}
+		if (base === value.base && other === value.other && !transaction.docChanged) return value
+		return versionMarksFor(base, other, transaction.state.doc)
+	},
+	provide: field => [
+		EditorView.decorations.from(field, value => value.deco),
+		touchedBy.of(state => state.field(field, false)?.touched ?? NONE),
+	],
+})
+
+/** This side, marked against the other side's text (sent with `setOther`). */
+function versionMarks(base: string): Extension {
+	return [versionMarksField.init(state => versionMarksFor(base, state.doc.toString(), state.doc)), VERSION_THEME]
+}
+
+const VERSION_THEME = EditorView.theme({
+	[`${LINE}.cm-differsLine`]: {
+		backgroundColor: `${tint(MODIFIED, 18)} !important`,
+		boxShadow: `inset 3px 0 ${MODIFIED}`,
+	},
+	[`${LINE}.cm-addedLine`]: {
+		backgroundColor: `${tint(INSERTED, 12)} !important`,
+		boxShadow: `inset 3px 0 ${INSERTED}`,
+	},
+	[`${LINE}.cm-removedLine`]: {
+		backgroundColor: `${tint(DELETED, 10)} !important`,
+		boxShadow: `inset 3px 0 ${DELETED}`,
+	},
+})
+
 // --- Both drafts' changes, combined in this draft's text ---
 
 /** Sets the text both drafts came from, and the other draft's. */
@@ -716,56 +872,43 @@ const setCombined = StateEffect.define<{base: string; theirs: string}>()
 
 type Combined = Marks & {base: string; theirs: string}
 
-const oursInserted = Decoration.mark({class: "cm-oursInserted"})
-const theirsDeleted = Decoration.mark({class: "cm-theirsDeleted"})
+const oursLine = Decoration.line({class: "cm-oursLine"})
 
 /**
- * Both drafts' changes since `base` in `ours`: this draft's in it, and the
- * other's, which are of `base`, where they fall in it.
+ * Where this draft's text and the other's differ, line by line, both
+ * versions as alternatives: this draft's lines where they are, and the
+ * other's, as lines of their own, right after them (or where they'd be).
+ * Nothing's struck out; each is in its draft's colour (merging, the target
+ * after the merge, and before it).
  */
-export function combinedRanges(base: string, ours: Text, theirs: string): Range<Decoration>[] {
-	const oursText = ours.toString()
-	const baseText = textOf(base)
-	const changes = presentableDiff(base, oursText)
+export function combinedRanges(ours: Text, theirs: string): Range<Decoration>[] {
+	const theirLines = theirs.split("\n")
 	const ranges: Range<Decoration>[] = []
-	for (const change of changes) {
-		if (change.fromB < change.toB) ranges.push(oursInserted.range(change.fromB, change.toB))
-		if (change.fromA < change.toA)
-			ranges.push(
-				ghost(ours, change.fromB, base.slice(change.fromA, change.toA), "cm-oursDeleted", isLineStart(baseText, change.fromA)),
-			)
-	}
-	// From where it was to where it is in this draft.
-	const moved = ChangeSet.of(
-		changes.map(change => ({from: change.fromA, to: change.toA, insert: oursText.slice(change.fromB, change.toB)})),
-		base.length,
-	)
-	for (const change of presentableDiff(base, theirs)) {
-		// Only what's still here can be marked taken out.
-		if (change.fromA < change.toA)
-			moved.iterGaps((fromA, fromB, length) => {
-				const from = Math.max(change.fromA, fromA)
-				const to = Math.min(change.toA, fromA + length)
-				if (from < to) ranges.push(theirsDeleted.range(fromB + from - fromA, fromB + to - fromA))
-			})
-		if (change.fromB < change.toB) {
-			const at = moved.mapPos(change.toA, 1)
-			const text = theirs.slice(change.fromB, change.toB)
-			const lineStart = isLineStart(baseText, change.toA)
-			const mark = ghost(ours, at, text, "cm-theirsInserted", lineStart)
-			ranges.push(mark)
-		}
+	for (const change of lineDiff(theirLines, linesOf(ours))) {
+		for (let line = change.fromB; line < change.toB; line++)
+			ranges.push(oursLine.range(ours.line(line + 1).from))
+		if (change.fromA >= change.toA) continue
+		const widget = new Ghost(theirLines.slice(change.fromA, change.toA).join("\n"), "cm-theirsLines", true)
+		ranges.push(
+			change.toB > change.fromB
+				? // right after this draft's alternative
+					Decoration.widget({widget, block: true, side: 1}).range(ours.line(change.toB).to)
+				: change.fromB < ours.lines
+					? // where they'd be: before the line that follows them here
+						Decoration.widget({widget, block: true, side: -1}).range(ours.line(change.fromB + 1).from)
+					: Decoration.widget({widget, block: true, side: 1}).range(ours.length),
+		)
 	}
 	return ranges
 }
 
 function combinedFor(base: string, theirs: string, doc: Text): Combined {
-	const ranges = combinedRanges(base, doc, theirs)
+	const ranges = combinedRanges(doc, theirs)
 	return {base, theirs, deco: Decoration.set(ranges, true), touched: touchedLines(doc, ranges)}
 }
 
 const combinedField = StateField.define<Combined>({
-	create: state => combinedFor("", "", state.doc),
+	create: state => combinedFor("", state.doc.toString(), state.doc),
 	update(value, transaction) {
 		let {base, theirs} = value
 		for (const effect of transaction.effects)
@@ -784,16 +927,19 @@ function combined(base: string, theirs: string): Extension {
 }
 
 const COMBINED_THEME = EditorView.theme({
-	".cm-oursInserted": {background: `${underline(OURS)}, ${tint(OURS, 10)}`},
-	".cm-oursDeleted, .cm-theirsDeleted": {textDecorationLine: "line-through"},
-	".cm-oursDeleted": {
-		backgroundColor: tint(OURS, 9),
-		textDecorationColor: tint(OURS, 80),
-		opacity: "0.75",
+	"&": {"--combined-ours": OURS, "--combined-theirs": THEIRS},
+	// Merging: what the merge leaves (added) and what it replaces (removed).
+	"&.cm-diff-merge": {"--combined-ours": INSERTED, "--combined-theirs": DELETED},
+	[`${LINE}.cm-oursLine`]: {
+		backgroundColor: `${tint("var(--combined-ours)", 12)} !important`,
+		boxShadow: "inset 3px 0 var(--combined-ours)",
 	},
-	".cm-theirsDeleted": {backgroundColor: tint(THEIRS, 9), textDecorationColor: tint(THEIRS, 80)},
-	".cm-theirsInserted": {background: `${underline(THEIRS)}, ${tint(THEIRS, 10)}`, opacity: "0.75"},
-	"div.cm-ghost": {padding: "0 2px 0 6px"},
+	"div.cm-theirsLines": {
+		padding: "0 2px 0 6px",
+		whiteSpace: "pre-wrap",
+		backgroundColor: tint("var(--combined-theirs)", 12),
+		boxShadow: "inset 3px 0 var(--combined-theirs)",
+	},
 })
 
 // --- Folding away what's unchanged, on its own ---

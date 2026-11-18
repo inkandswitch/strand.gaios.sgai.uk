@@ -696,6 +696,7 @@ button.projects__token:hover {
    sides as modified, each side headed by its draft's colour and name;
    inline, they're in the drafts' own colours */
 .projects__compare {
+	--compare-neutral: var(--projects-changed);
 	--compare-inserted: var(--projects-added);
 	--compare-deleted: var(--projects-removed);
 	--compare-modified: var(--projects-modified);
@@ -709,9 +710,11 @@ button.projects__token:hover {
 	--compare-removed: var(--projects-removed);
 }
 
+/* merging: what happens to the target, before and after, in no draft's colour */
 .projects__compare--merge {
 	--compare-inserted: var(--projects-added);
 	--compare-deleted: var(--projects-removed);
+	--compare-neutral: var(--projects-changed);
 }
 
 .projects__read-only {
