@@ -1,6 +1,12 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import * as Automerge from "@automerge/automerge/slim";
-import { Repo, initSubduction, type AutomergeUrl, type DocHandle } from "@automerge/automerge-repo";
+import {
+  Repo,
+  initSubduction,
+  parseAutomergeUrl,
+  type AutomergeUrl,
+  type DocHandle,
+} from "@automerge/automerge-repo";
 import { getRegistry } from "@inkandswitch/patchwork-plugins";
 
 import { forkDraft, mergeInto, renameDraft } from "../draft-actions.js";
@@ -87,8 +93,10 @@ async function draftLine(ctx: GitContext, url: AutomergeUrl): Promise<Line> {
 async function files(line: Line): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const [path, file] of (await readFiles(line)).files) {
-    out[path] =
-      typeof file.content === "string" ? file.content : new TextDecoder().decode(file.content);
+    if (file.kind === "json") out[path] = JSON.stringify(file.value);
+    else
+      out[path] =
+        typeof file.content === "string" ? file.content : new TextDecoder().decode(file.content);
   }
   return out;
 }
@@ -357,4 +365,132 @@ describe("drafts and branches", () => {
     const main = await mainDraft(ctx);
     expect(syncPoints(main)).toHaveLength(1);
   });
+});
+
+describe(".pushworkattributes, as pushwork reads it", () => {
+  const RULES =
+    "*.nb  datatype=notebook  import=automerge:2a5Rkw9LkqXfBAQZbcBWjTcf15Mc  strip-metadata\n";
+  // a notebook laid out with one-space indents, as Jupyter writes them
+  const notebook = (cells: string[]) => JSON.stringify({ cells, nbformat: 4 }, null, 1) + "\n";
+
+  async function docAt(ctx: GitContext, line: Line, path: string) {
+    const file = (await readFiles(line)).files.get(path)!;
+    const url = file.doc;
+    const entry = line.draft?.doc()?.clones?.[url];
+    return { file, doc: (await ctx.repo.find<any>(entry?.cloneUrl ?? url)).doc() };
+  }
+
+  async function linkOf(ctx: GitContext, name: string) {
+    const root = (ctx.root as unknown as DocHandle<Folder>).doc();
+    return root.docs.find((link) => link.name === name)!;
+  }
+
+  it("brings a file a datatype rule covers in as a JSON document of that type", async () => {
+    const { ctx } = await setup({}, { ".pushworkattributes": RULES, "a.nb": notebook(["one"]) });
+    await connect(ctx, CONFIG, "Connect");
+
+    const { file, doc } = await docAt(ctx, mainLine(ctx), "a.nb");
+    expect(file.kind).toBe("json");
+    expect(doc.cells).toEqual(["one"]);
+    expect(doc["@patchwork"]).toEqual({
+      type: "notebook",
+      suggestedImportUrl: "automerge:2a5Rkw9LkqXfBAQZbcBWjTcf15Mc",
+    });
+    expect((await linkOf(ctx, "a.nb")).type).toBe("notebook");
+    expect(await status(ctx, null)).toMatchObject({ local: [], incoming: [] });
+  });
+
+  it("writes a JSON document back without its metadata, laid out like git's file", async () => {
+    const { ctx, remote } = await setup(
+      {},
+      { ".pushworkattributes": RULES, "a.nb": notebook(["one"]) },
+    );
+    await connect(ctx, CONFIG, "Connect");
+    const { file } = await docAt(ctx, mainLine(ctx), "a.nb");
+    (await writableHandle(mainLine(ctx), file.doc)).change((d: any) => {
+      d.cells.push("two");
+    });
+
+    expect(await status(ctx, null)).toMatchObject({ local: ["a.nb"] });
+    await sync(ctx, null, "");
+    expect((await tipFiles(remote))["a.nb"]).toBe(notebook(["one", "two"]));
+  });
+
+  it("merges a notebook edited in git and here, key by key", async () => {
+    const { ctx, remote } = await setup(
+      {},
+      { ".pushworkattributes": RULES, "a.nb": notebook(["one", "two"]) },
+    );
+    await connect(ctx, CONFIG, "Connect");
+    const { file } = await docAt(ctx, mainLine(ctx), "a.nb");
+    (await writableHandle(mainLine(ctx), file.doc)).change((d: any) => {
+      d.cells[0] = "ONE";
+    });
+    await remote.push("main", { "a.nb": notebook(["one", "two", "three"]) });
+
+    await sync(ctx, null, "");
+    const { doc } = await docAt(ctx, mainLine(ctx), "a.nb");
+    expect(doc.cells).toEqual(["ONE", "two", "three"]);
+    expect(doc["@patchwork"].type).toBe("notebook");
+    expect((await tipFiles(remote))["a.nb"]).toBe(notebook(["ONE", "two", "three"]));
+  });
+
+  it("writes a JSON document no rule covers with its metadata, as pushwork does", async () => {
+    const { ctx, remote, repo, root } = await setup({ "a.txt": "a\n" });
+    const board = repo.create({ "@patchwork": { type: "tldraw" }, shapes: [] });
+    root.change((d) => {
+      d.docs.push({ name: "board.tldraw", type: "tldraw", url: board.url });
+    });
+    await connect(ctx, CONFIG, "Connect");
+
+    expect(JSON.parse((await tipFiles(remote))["board.tldraw"])).toEqual({
+      "@patchwork": { type: "tldraw" },
+      shapes: [],
+    });
+    expect(await status(ctx, null)).toMatchObject({ local: [], incoming: [] });
+  });
+
+  it("turns a file into a JSON document when a rule comes to cover it", async () => {
+    const { ctx, remote } = await setup({}, { "a.nb": notebook(["one"]) });
+    await connect(ctx, CONFIG, "Connect");
+    expect((await docAt(ctx, mainLine(ctx), "a.nb")).file.kind).toBe("text");
+
+    await remote.push("main", { ".pushworkattributes": RULES });
+    await sync(ctx, null, "");
+    const { file, doc } = await docAt(ctx, mainLine(ctx), "a.nb");
+    expect(file.kind).toBe("json");
+    expect(doc.cells).toEqual(["one"]);
+    expect(await status(ctx, null)).toMatchObject({ local: [], incoming: [] });
+  });
+
+  it("stores an artifact's text whole, linked pinned to its version", async () => {
+    const { ctx, remote } = await setup({}, { "dist/app.js": "v1\n" });
+    await connect(ctx, CONFIG, "Connect");
+    const before = await docAt(ctx, mainLine(ctx), "dist/app.js");
+    expect(before.file.kind).toBe("immutable");
+
+    await remote.push("main", { "dist/app.js": "v2\n" });
+    await sync(ctx, null, "");
+    const after = await docAt(ctx, mainLine(ctx), "dist/app.js");
+    expect(after.file.kind === "immutable" && after.file.content).toBe("v2\n");
+    const dist = (await readFiles(mainLine(ctx))).folders.get("dist")!;
+    const link = (await ctx.repo.find<Folder>(dist)).doc().docs[0];
+    expect(parseAutomergeUrl(link.url).heads).toEqual(
+      (await ctx.repo.find(after.file.doc)).heads(),
+    );
+  });
+
+  it("never deletes the file of a doc it can't read", async () => {
+    const { ctx, remote, root } = await setup({ "a.txt": "a\n" }, { "lost.txt": "keep me\n" });
+    await connect(ctx, CONFIG, "Connect");
+    // the doc lost.txt links to is gone from here
+    root.change((d) => {
+      const link = d.docs.find((l) => l.name === "lost.txt")!;
+      link.url = "automerge:4NMNnkMhL8jXrdJ9jamS58PAVdXu" as AutomergeUrl;
+    });
+    await edit(mainLine(ctx), "a.txt", "A\n");
+
+    await sync(ctx, null, "");
+    expect(await tipFiles(remote)).toMatchObject({ "a.txt": "A\n", "lost.txt": "keep me\n" });
+  }, 30_000);
 });

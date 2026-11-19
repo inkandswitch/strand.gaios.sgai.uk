@@ -202,7 +202,7 @@ export async function status(
     readFiles(line),
     ctx.remote.readTree(last.tree),
   ]);
-  const local = (await changesFrom(tree, now)).map((change) => change.path);
+  const local = (await changesFrom(tree, now, ctx.remote)).map((change) => change.path);
   const duplicate = syncPoints(state).filter((point) => point.sha === last.sha).length > 1;
   const base = {
     kind: "linked" as const,
@@ -262,7 +262,7 @@ export async function sync(
     const tree = await ctx.remote.treeOf(tip);
     const entries = await ctx.remote.readTree(tree);
     const now = await readFiles(line);
-    if (await matches(now, entries)) {
+    if (await matches(now, entries, ctx.remote)) {
       // Already here: an export whose sync point never got recorded, or a sync
       // someone else made that hasn't reached its record yet.
       base = record(state, { sha: tip, tree, heads: now.heads });
@@ -296,7 +296,7 @@ async function exportLine(
   if (base.heads && sameHeadsMap(base.heads, now.heads) && !extraParents.length) {
     return { sha: base.sha, paths: [] };
   }
-  const changes = await changesFrom(entries, now);
+  const changes = await changesFrom(entries, now, ctx.remote);
   const parents = [base.sha];
   for (const sha of extraParents) {
     if (sha === base.sha) continue;
@@ -335,8 +335,8 @@ function defaultMessage(paths: string[]): string {
 }
 
 // Whether the snapshot's files are exactly those of the tree.
-async function matches(now: Snapshot, entries: TreeEntry[]): Promise<boolean> {
-  return (await changesFrom(entries, now)).length === 0;
+async function matches(now: Snapshot, entries: TreeEntry[], remote: Remote): Promise<boolean> {
+  return (await changesFrom(entries, now, remote)).length === 0;
 }
 
 function sameHeadsMap(
@@ -404,7 +404,7 @@ export async function publishDraft(
   const branch = branchOf(main, draft);
   const entries = await ctx.remote.readTree(base.tree);
   const now = await readFiles(lineOf(ctx, draft));
-  const changes = await changesFrom(entries, now);
+  const changes = await changesFrom(entries, now, ctx.remote);
   const commit = changes.length
     ? await ctx.remote.commit({
         parents: [base.sha],

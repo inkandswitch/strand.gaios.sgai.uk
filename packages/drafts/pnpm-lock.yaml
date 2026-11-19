@@ -20,6 +20,12 @@ importers:
       '@inkandswitch/patchwork-providers':
         specifier: ^0.5.2
         version: 0.5.2(@automerge/automerge-repo@2.6.0-subduction.47(supports-color@7.2.0))
+      diff:
+        specifier: ^8.0.4
+        version: 8.0.4
+      ignore:
+        specifier: ^5.3.2
+        version: 5.3.2
       solid-js:
         specifier: ^1.9.14
         version: 1.9.14
@@ -733,6 +739,10 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
+  diff@8.0.4:
+    resolution: {integrity: sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw==}
+    engines: {node: '>=0.3.1'}
+
   electron-to-chromium@1.5.372:
     resolution: {integrity: sha512-M3yhbAlilnwqC8D21t28UCDGHyitShTmmLRU/H+b74P6Ski16Nb9HONYEaVpMj/pwC7BEo5B95FpjODLCWbtfA==}
 
@@ -797,6 +807,10 @@ packages:
 
   html-entities@2.3.3:
     resolution: {integrity: sha512-DV5Ln36z34NNTDgnz0EWGBLZENelNAtkiFA4kyNOG2tDI6Mz1uSWiq1wAKdyjnJwyDiDO7Fa2SO1CTxPXL8VxA==}
+
+  ignore@5.3.2:
+    resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
+    engines: {node: '>= 4'}
 
   is-what@4.1.16:
     resolution: {integrity: sha512-ZhMwEosbFJkA0YhFnNDgTM4ZxDRsS6HqTo7qsZM08fehyRYIYa0yHu5R6mgo1n/8MgaPBXiPimPD77baVFYg+A==}
@@ -1806,6 +1820,8 @@ snapshots:
   detect-libc@2.1.2:
     optional: true
 
+  diff@8.0.4: {}
+
   electron-to-chromium@1.5.372: {}
 
   entities@4.5.0: {}
@@ -1874,6 +1890,8 @@ snapshots:
     optional: true
 
   html-entities@2.3.3: {}
+
+  ignore@5.3.2: {}
 
   is-what@4.1.16: {}
 
