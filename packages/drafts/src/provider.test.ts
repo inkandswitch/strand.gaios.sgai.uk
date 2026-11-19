@@ -205,3 +205,19 @@ describe("the draft provider", () => {
     dispose();
   });
 });
+
+describe("the draft provider's git commands", () => {
+  it("says a workspace isn't connected, and needs a token to connect", async () => {
+    const { child, dispose } = workspace();
+    await watch(child).until((s) => s.status === "ready");
+
+    expect(await request(child, { type: "git:status", draft: null })).toEqual({
+      ok: true,
+      status: { kind: "not-connected" },
+    });
+    expect(
+      await request(child, { type: "git:connect", owner: "o", repo: "r", branch: "main" })
+    ).toEqual({ ok: false, error: "Add a GitHub token first." });
+    dispose();
+  });
+});

@@ -4,6 +4,7 @@ import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type J
 import type {WorkspaceCompare} from "./compare.ts"
 import {ComparePicker, ModeControls} from "./compare-ui.tsx"
 import {CommentsButton, type CommentsToggle} from "./comments.tsx"
+import {GitDialog} from "./git-dialog.tsx"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 import type {CompareAgainst, CompareChanges, DraftEntry, DraftsState} from "./types.ts"
 import {NameInput, SidebarButton, type SidebarToggle} from "./workspaces.tsx"
@@ -34,6 +35,7 @@ export function WorkspaceHeader(props: {
 	compareControls?(element: HTMLElement): void
 }) {
 	const [renaming, setRenaming] = createSignal(false)
+	const [gitOpen, setGitOpen] = createSignal(false)
 	const [changes, setChanges] = createSignal<CompareChanges>()
 	const send = (selector: Selector) => void request(props.element, selector)
 	const entries = () => props.drafts?.drafts ?? []
@@ -92,6 +94,15 @@ export function WorkspaceHeader(props: {
 								compared={props.compared}
 								send={send}
 								rename={() => setRenaming(true)}
+								git={() => setGitOpen(true)}
+							/>
+						</Show>
+						<Show when={gitOpen()}>
+							<GitDialog
+								draft={checkedOut()}
+								isMain={checkedOut().parent === null}
+								element={props.element}
+								onClose={() => setGitOpen(false)}
 							/>
 						</Show>
 						<Show when={theirs()}>
@@ -190,6 +201,8 @@ function DraftMenu(props: {
 	compared: AutomergeUrl | undefined
 	send(selector: Selector): void
 	rename(): void
+	/** opens syncing with git */
+	git(): void
 }) {
 	const id = createUniqueId()
 	const compareId = createUniqueId()
@@ -244,6 +257,10 @@ function DraftMenu(props: {
 		rename() {
 			close()
 			props.rename()
+		},
+		git() {
+			close()
+			props.git()
 		},
 		remove() {
 			close()
@@ -327,6 +344,10 @@ function DraftMenu(props: {
 					<button type="button" role="menuitem" class="projects__menu-item" onClick={actions.rename}>
 						<span class="projects__menu-icon" />
 						Rename
+					</button>
+					<button type="button" role="menuitem" class="projects__menu-item" onClick={actions.git}>
+						<span class="projects__menu-icon" />
+						Git…
 					</button>
 					<Show when={parent()}>
 						<button

@@ -1170,3 +1170,184 @@ button.projects__token:hover {
 	overflow: auto;
 	padding: var(--projects-space-md, 1rem);
 }
+
+/* syncing a draft with git */
+
+.projects__dialog {
+	width: min(32rem, calc(100vw - 2rem));
+	max-height: min(40rem, calc(100dvh - 2rem));
+	padding: var(--projects-space-lg);
+	overflow-y: auto;
+	box-sizing: border-box;
+	border: 1px solid var(--projects-divider);
+	border-radius: var(--projects-radius-lg);
+	background: var(--projects-surface);
+	color: var(--projects-fg);
+	box-shadow: var(--projects-elevation);
+	font-family: var(--projects-family);
+	font-size: 0.9rem;
+	line-height: 1.45;
+}
+
+.projects__dialog::backdrop {
+	background: rgb(0 0 0 / 0.25);
+}
+
+.projects__dialog-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--projects-space);
+	margin-bottom: var(--projects-space);
+}
+
+.projects__dialog-header h2 {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 600;
+}
+
+.projects__git p {
+	margin: 0 0 var(--projects-space-sm);
+}
+
+.projects__git code {
+	padding: 0 0.25em;
+	border-radius: var(--projects-radius);
+	background: var(--projects-field);
+	font-size: 0.85em;
+}
+
+.projects__git h3 {
+	margin: var(--projects-space) 0 var(--projects-space-xs);
+	color: var(--projects-secondary);
+	font-size: 0.8rem;
+	font-weight: 600;
+}
+
+.projects__git ul {
+	margin: 0;
+	padding-left: 1.1rem;
+}
+
+.projects__git-section {
+	margin: 0 0 var(--projects-space);
+}
+
+.projects__git-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--projects-space-xs);
+	margin: var(--projects-space-sm) 0;
+	color: var(--projects-secondary);
+	font-size: 0.8rem;
+}
+
+.projects__git-field input,
+.projects__git-field textarea {
+	padding: var(--projects-space-sm);
+	box-sizing: border-box;
+	border: 1px solid var(--projects-divider);
+	border-radius: var(--projects-radius);
+	background: var(--projects-field);
+	color: var(--projects-fg);
+	font: inherit;
+	font-size: 0.9rem;
+	resize: vertical;
+}
+
+.projects__git-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: var(--projects-space-sm);
+	margin-top: var(--projects-space);
+}
+
+.projects__git .projects__button {
+	color: var(--projects-fg);
+	font: inherit;
+}
+
+.projects__git .projects__button:disabled {
+	opacity: 0.5;
+}
+
+.projects__button.projects__button--primary {
+	border-color: var(--projects-fg);
+	background: var(--projects-fg);
+	color: var(--projects-surface);
+}
+
+.projects__button.projects__button--primary:hover:not(:disabled) {
+	background: color-mix(in oklch, var(--projects-fg) 85%, var(--projects-surface));
+}
+
+.projects__git-hint {
+	color: var(--projects-muted);
+	font-size: 0.8rem;
+}
+
+.projects__git-warning {
+	padding: var(--projects-space-sm);
+	border-radius: var(--projects-radius);
+	background: var(--projects-review-fill);
+	color: var(--projects-review);
+}
+
+.projects__git-error {
+	padding: var(--projects-space-sm);
+	border-radius: var(--projects-radius);
+	background: color-mix(in oklch, var(--projects-danger) 12%, var(--projects-surface));
+	color: var(--projects-danger);
+}
+
+.projects__git-done {
+	padding: var(--projects-space-sm);
+	border-radius: var(--projects-radius);
+	background: color-mix(in oklch, var(--projects-added) 12%, var(--projects-surface));
+	color: color-mix(in oklch, var(--projects-added) 70%, var(--projects-fg));
+}
+
+.projects__git-branches {
+	margin-top: var(--projects-space);
+	padding-top: var(--projects-space-sm);
+	border-top: 1px solid var(--projects-surface-edge);
+}
+
+.projects__git-branches ul {
+	padding: 0;
+	list-style: none;
+}
+
+.projects__git-branches li {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--projects-space-sm);
+	padding: var(--projects-space-xs) 0;
+}
+
+.projects__git-footer {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--projects-space);
+	margin-top: var(--projects-space);
+	padding-top: var(--projects-space-sm);
+	border-top: 1px solid var(--projects-surface-edge);
+}
+
+.projects__git-link {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--projects-secondary);
+	font: inherit;
+	font-size: 0.8rem;
+	text-decoration: underline;
+	cursor: pointer;
+}
+
+.projects__git-link--danger {
+	color: var(--projects-danger);
+}

@@ -23,6 +23,7 @@ import {
 } from "../draft-actions.js";
 import { DraftRepo, baseRepo, type HandleDescriptor } from "../draft-repo.js";
 import { createDraftState, type DraftState } from "./draft-state.js";
+import { beforeMerge, handleGitCommand, type GitCommandHost } from "../git/commands.js";
 
 // How long the starting draft gets to show up among the root's drafts before
 // it's reported unavailable. It's still taken if it shows up later.
@@ -48,6 +49,7 @@ const VERIFY_TIMEOUT_MS = 5000;
 //   - `repo:handle-descriptor { url }` → where the views beneath read and
 //     write `url` (see `DraftRepo.descriptorFor`), pushed again when that
 //     moves
+//   - `git:*` → syncing drafts with git branches (see `git/commands.ts`)
 // Main is named by its url in `drafts` (`main`); the workspace's url names it
 // too. A failed command answers null.
 //
@@ -97,6 +99,15 @@ export const DraftProvider = (
       })
     : null;
   const stopList = drafts?.subscribeList(() => publish()) ?? (() => {});
+  const git: GitCommandHost | null = drafts
+    ? {
+        repo,
+        root: () => drafts.root(),
+        draftIn: (value) => draftIn(value),
+        checkedOut: () => selection.checkedOut,
+        select: (draft) => select(draft),
+      }
+    : null;
 
   const verifyTimer = initial
     ? setTimeout(() => {
@@ -107,6 +118,7 @@ export const DraftProvider = (
 
   const onSubscribe = (event: SubscribeEvent) => {
     const { selector } = event.detail;
+    if (git && handleGitCommand(event, git)) return;
 
     switch (selector.type) {
       case "drafts":
@@ -147,6 +159,7 @@ export const DraftProvider = (
         // Checked out first: a checked-out draft that goes away falls back to main.
         command(event, async () => {
           if (selection.checkedOut === target) await select(into);
+          await beforeMerge(git!, target, into);
           await mergeInto(repo, await drafts.root(), target, into);
           return { into: external(into) };
         });

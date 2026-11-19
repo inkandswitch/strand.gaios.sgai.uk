@@ -43,6 +43,37 @@ export type DraftDoc = {
   // Main draft only: monotonic counter behind new forks' default names
   // ("Draft N"). Never decremented, so numbers aren't reused after deletes.
   draftCounter?: number;
+  // The git branch this draft syncs with: main's is `remote.branch`, any
+  // other draft's is the branch of its name. Absent until it's linked.
+  git?: DraftGit;
+  // Main draft only: the repo the workspace syncs with.
+  remote?: GitRemoteConfig;
+};
+
+// A git commit and the version of the draft both sides agree it is: the heads
+// of every folder and file doc in the draft, keyed by original url, when the
+// commit was made or imported. Written once, never edited.
+export type SyncPoint = {
+  sha: string;
+  // the commit's tree, so it needn't be looked up
+  tree: string;
+  heads: Record<AutomergeUrl, UrlHeads>;
+  at: number;
+};
+
+export type DraftGit = {
+  // Keyed `${sha}/${random id}`, so two clients recording the same commit
+  // both survive the merge: that's how a commit imported twice shows up.
+  syncPoints: Record<string, SyncPoint>;
+  // Main only: the commits of linked drafts merged into main in Patchwork
+  // since main's last export, which becomes their merge commit.
+  mergedBranches?: Record<string, true>;
+};
+
+export type GitRemoteConfig = {
+  owner: string;
+  repo: string;
+  branch: string;
 };
 
 // One member doc's pinned view within a checkpoint. `to` is the heads to render
