@@ -218,6 +218,10 @@ export class GitHubRemote implements Remote {
         ...(options.body ? { "Content-Type": "application/json" } : {}),
       },
       body: options.body ? JSON.stringify(options.body) : undefined,
+      // GitHub lets browsers reuse its answers for a minute, so a branch read
+      // straight after moving it would still name the old commit. Trees and
+      // blobs are kept above, by their ids, which never change.
+      cache: "no-store",
     });
     if (res.ok) return res.json();
     if (options.allow?.includes(res.status)) return null;
