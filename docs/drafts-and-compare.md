@@ -1,7 +1,7 @@
 # Overlays and comparison: a simpler interface
 
-Status: proposal, not implemented. Not backwards compatible, on purpose:
-existing drafts and links are not read or migrated.
+Status: implemented on the `overlays` branch. Not backwards compatible, on
+purpose: existing drafts and links are not read or migrated.
 
 This note describes a smaller interface between the overlay provider (today's
 draft provider), the compare provider and the views that show two versions of
@@ -29,7 +29,10 @@ a document.
 4. **A comparison is two versions**, named by overlay. The compare provider
    holds which two and nothing else.
 5. **A view reads and edits both versions through ordinary handles.** No
-   contents are passed in messages, and there is no special way to edit.
+   contents are passed in messages, and there is no special way to edit. A
+   view asks the overlay provider where the other version lives, with
+   `repo:handle-descriptor { url, overlay }`, and opens that like any other
+   document.
 
 ## What is stored
 
@@ -49,7 +52,6 @@ type DraftDoc = {
   name?: string                   // absent: "Draft"
   parent: AutomergeUrl | null     // the draft it was forked off; null is main
   clones: Record<AutomergeUrl, CloneEntry>   // per member: this draft's version of it
-  mergedAt?: number               // set once merged; it then drops out of the list
 }
 
 type MergeDoc = {
@@ -69,10 +71,14 @@ type MergeDoc = {
 - A merge has no name and no parent. It is named after the two it joins.
 - A merge's source and target are drafts or main, never another merge, and
   never the same.
-- `CloneEntry` is as today.
+- `CloneEntry` is as today, minus `mergedAt`. A merge records only
+  `cloneUrl`, with `clonedAt` the heads it was cloned at.
+- A draft that's merged, or deleted, comes off the index. Nothing marks it as
+  merged: a draft whose `parent` is no longer listed is listed under the
+  nearest ancestor that is.
 
 Gone from storage: the "main draft" document with `isMain`, a draft's `drafts`
-list, `preview`, and the counter behind numbered default names.
+list, `preview`, `mergedAt`, and the counter behind numbered default names.
 
 ## What belongs to an overlay
 
@@ -96,10 +102,16 @@ type ChildrenOf = (doc: unknown) => AutomergeUrl[]
 - A member with overlays of its own is read as a plain member. Only the root's
   overlays count.
 
-This works as it does today, with two changes: the plugin type moves into a
-package of its own, and a child is just a url. Today a child also carries its
-datatype, so the walk can skip loading leaves; with `overlay:members` every
-member is loaded anyway.
+This works as it did, with two changes: a child is just a url, and the walk
+reads each member through the overlay, so a merge's tree is walked as merged.
+A child used to carry its datatype, so the walk could skip loading leaves;
+with `overlay:members` every member is loaded anyway.
+
+The plugin type and the walk are a module of their own in the drafts package
+(`children.ts`), not a package. Every folder under `packages/` is built and
+shipped as a tool, and the only thing that walks the tree is the overlay
+provider; a datatype's package registers its plugin by type name and imports
+nothing.
 
 The folder package registers the only two plugins so far, for `folder` and
 pushwork `directory` documents.
@@ -164,9 +176,17 @@ type Member = {
 - `overlay:members` answers for any overlay, not only the checked-out one, and
   pushes again when the members or any heads change.
 - `repo:handle-descriptor` with an `overlay` says where that overlay's version
-  of `url` lives. Without one it answers for the checked-out overlay, as
-  today. This is the one place where leaving an argument out differs from
-  `null`.
+  of `url` lives, whatever is checked out. Without one it answers for the
+  checked-out overlay, as before. This is the one place where leaving an
+  argument out differs from `null`. Like a write, it clones the member into
+  the overlay first, merges included, so what it names is always a stored
+  document, read and written like any other.
+
+Every view in the page reads through this: Patchwork gives each view a repo
+of its own that resolves what the view finds with `repo:handle-descriptor`,
+and that repo doesn't carry an overlay. So a view that needs the other
+version asks the provider itself, naming the overlay, and opens what it's
+told on the base repo (`repo.baseRepo`).
 
 Main isn't in either list, has no name to carry, and can't be renamed.
 
@@ -191,7 +211,8 @@ A merge:
 | edited in the merge | the merge's own clone, with both inputs' new changes merged into it as they come |
 
 The in-memory case is a stand-in handle: it keeps the member's url, reads
-`Automerge.merge` of the two versions, and saves nothing. The first write to it
+`Automerge.merge` of the two versions, and saves nothing. It lives in a repo
+of its own that neither stores nor syncs. The first write to it
 saves that merge as the merge's clone, records it in `clones`, turns the
 stand-in into a real handle on the clone, and makes the change there.
 
@@ -277,10 +298,12 @@ comparison.
 | `compare-mode:report { offered, inUse }` | command | the frame | `true` |
 
 - `compare-mode:view` is what a view asks: which mode to draw, given the ones
-  it supports. It replaces `compare:view`.
+  it supports. It replaces `compare:view`. A's and B's views of the document
+  are both told; a view nested inside B is told null.
 - The other four are today's `workspace:compare*` messages renamed, without
   the versions' names. They have not been simplified here.
-- Folding unchanged stretches away is an option of the mode.
+- Folding unchanged stretches away is an option of the mode: a view is told
+  `collapsed` inside `options`.
 
 ## Navigation
 
@@ -292,15 +315,15 @@ comparison.
 1. Open its document as usual. That is its own side.
 2. Subscribe to `compare` for A and B, and to `overlays` for its own overlay
    (`checkedOut`). The other side is whichever of A and B isn't its own.
-3. Ask `repo:handle-descriptor { url, overlay }` for the other side's version
-   and open it. If there is none, the document is missing on that side.
+3. Ask `repo:handle-descriptor { url, overlay }` for the other side, and open
+   its `cloneUrl ?? url` on `repo.baseRepo`. If `overlay:members` for that
+   side doesn't list the document, it's missing there.
 4. Ask `compare-mode:view` which mode to draw.
 5. Diff the two handles and paint with the CSS variables.
 6. Edit either side through its handle, where `isReadOnly()` allows.
 
 A mode that lays out two views wraps the B view in an overlay provider checked
-out on B. That view follows the same steps from the other side. So does a view
-nested inside another, so an embedded document shows the comparison too.
+out on B. That view follows the same steps from the other side.
 
 ## Removed
 
@@ -322,18 +345,21 @@ nested inside another, so an embedded document shows the comparison too.
 | Commands answering with what they were given (`{ name }`, `{ draft }`, `{ into }`, `{ parent }`) | `true` |
 | `draftRepoAbove`, the compare provider's hidden draft providers and tree walks | `overlay:members` |
 
-## Work needed in the drafts package
+## Links
 
-- The rename: the draft provider, its repo and its handle become the overlay
-  provider, repo and handle, and take a draft or a merge.
-- Storage as above: the index, separate draft and merge documents, `parent` as
-  the only record of the draft tree, `null` for main.
-- `repo:handle-descriptor` with an `overlay`.
-- `overlay:members` for any overlay, with heads. Reporting heads loads every
-  member, as today's comparison does. A draft's `clones` record which members
-  it changed and the heads the rest are pinned at, so this can later be
-  answered mostly without loading.
-- Merges: the merge document, the stand-in handle, keeping edited clones
-  merged with both inputs, marking the source merged on accept, deleting a
-  merge when an input goes.
-- The children plugin type in its own package.
+The hash names the checked-out overlay as `overlay=<url>` (main when absent)
+and what it's compared with as `compare=<url>`, or `compare=main`.
+
+## Where it lives
+
+| Part | Code |
+|---|---|
+| Stored shapes and message types | `packages/drafts/src/overlay-types.ts` |
+| Children plugins and the member walk | `packages/drafts/src/children.ts` |
+| Reading through an overlay, merges in memory | `packages/drafts/src/overlay-repo.ts` |
+| Making, deleting, accepting | `packages/drafts/src/overlay-actions.ts` |
+| The overlay provider | `packages/drafts/src/providers/OverlayProvider.ts`, `overlay-list.ts` |
+| The compare provider | `packages/review/src/provider.ts` |
+| The header, panels, links | `packages/projects/src/` |
+| Comparing members, for the sidebar | `packages/sideboard/src/sideboard/document-list/changes.ts` |
+| Text and image views | `packages/file/src/components/draft-diff.ts`, `ImageFileViewer.tsx` |

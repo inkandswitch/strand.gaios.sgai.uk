@@ -1,7 +1,11 @@
-import type {
-  AutomergeUrl,
-  DocHandle,
-  Repo,
+import {
+  encodeHeads,
+  isValidAutomergeUrl,
+  parseAutomergeUrl,
+  stringifyAutomergeUrl,
+  type AutomergeUrl,
+  type DocHandle,
+  type UrlHeads,
 } from "@automerge/automerge-repo/slim";
 import {
   getRegistry,
@@ -9,31 +13,30 @@ import {
   type PluginDescription,
 } from "@inkandswitch/patchwork-plugins";
 
-import { canonicalUrl } from "./clone-policy.js";
+import type { Member } from "./overlay-types.js";
 
 export const CHILDREN_PLUGIN_TYPE = "patchwork:children";
 
-// A document that is part of another one: a folder's entries, a directory's
-// files, an essay's embeds. `type` is the child's datatype when the link
-// records it, so walkers can skip loading docs that can't have children.
-export type ChildLink = { url: AutomergeUrl; type?: string };
-
-// Registered by whichever package knows a datatype's shape. Returns only the
-// docs that belong to the doc, never ones it merely references (authors,
-// accounts, tools). `"*"` answers for every datatype.
+// Registered by whichever package knows a datatype's shape. `"*"` answers for
+// every datatype.
 export type ChildrenDescription = PluginDescription & {
   type: typeof CHILDREN_PLUGIN_TYPE;
   datatypes: string[];
 };
 
-export type ChildrenOf = (doc: unknown) => ChildLink[];
+// What the plugin loads: the documents that are part of `doc`. Only ones that
+// belong to it, never ones it merely refers to (authors, accounts, tools).
+export type ChildrenOf = (doc: unknown) => AutomergeUrl[];
+
+// How the walk reads a member: through an overlay, so it sees the overlay's
+// version of each one.
+export type Open = (url: AutomergeUrl) => Promise<DocHandle<unknown>>;
 
 export type DocTree = {
   // root first, then depth-first in entry order
   urls: () => AutomergeUrl[];
   has: (url: AutomergeUrl) => boolean;
-  // The doc `url` was first reached from; null for the root and strangers.
-  parentOf: (url: AutomergeUrl) => AutomergeUrl | null;
+  members: () => Member[];
   // Resolves once the first walk has finished.
   settled: () => Promise<void>;
   isSettled: () => boolean;
@@ -41,27 +44,19 @@ export type DocTree = {
   dispose: () => void;
 };
 
-export type DocTreeOptions = {
-  // The url to read `url`'s children through, e.g. a draft's clone of it.
-  readUrl?: (url: AutomergeUrl) => AutomergeUrl;
-  onChange?: () => void;
-};
-
 const REBUILD_DEBOUNCE_MS = 50;
 
-// Every document under `root`, by asking each one's children plugins. The
-// first path to a doc wins, so each appears once, and cycles end there. Docs
-// that fail to load are leaves. Every doc read is watched, and any change (or
-// a children plugin registering) walks again.
+// Every member under `root`. The first path to a member wins, so each appears
+// once, and cycles end there. Members that fail to load are leaves. Every
+// member is watched, and any change to one (or a children plugin registering)
+// walks again; `onChange` hears when the members or their heads moved.
 export function watchDocTree(
-  repo: Repo,
   root: AutomergeUrl,
-  options: DocTreeOptions = {}
+  open: Open,
+  onChange?: () => void
 ): DocTree {
-  const readUrl = options.readUrl ?? ((url) => url);
-  let order: AutomergeUrl[] = [];
-  let members = new Set<AutomergeUrl>();
-  let parents = new Map<AutomergeUrl, AutomergeUrl>();
+  let members: Member[] = [];
+  let urls = new Set<AutomergeUrl>();
   const watched = new Map<AutomergeUrl, DocHandle<unknown>>();
   let disposed = false;
   let settled = false;
@@ -78,9 +73,9 @@ export function watchDocTree(
   schedule();
 
   return {
-    urls: () => order,
-    has: (url) => members.has(canonicalUrl(url)),
-    parentOf: (url) => parents.get(canonicalUrl(url)) ?? null,
+    urls: () => members.map((member) => member.url),
+    has: (url) => urls.has(canonicalUrl(url)),
+    members: () => members,
     settled: () => settledPromise,
     isSettled: () => settled,
     refresh: schedule,
@@ -110,17 +105,16 @@ export function watchDocTree(
     }
     building = true;
     try {
-      const next = await walkDocTree(repo, canonicalUrl(root), readUrl);
+      const next = await walkDocTree(canonicalUrl(root), open);
       if (disposed) return;
-      const changed = !sameList(order, next.urls);
-      order = next.urls;
-      members = new Set(next.urls);
-      parents = next.parents;
+      const changed = !sameMembers(members, next.members);
+      members = next.members;
+      urls = new Set(next.members.map((member) => member.url));
       rewatch(next.read);
       settled = true;
-      if (changed) options.onChange?.();
+      if (changed) onChange?.();
     } catch (err) {
-      console.error("[drafts] document tree walk failed:", err);
+      console.error("[drafts] member walk failed:", err);
     } finally {
       building = false;
       resolveSettled();
@@ -145,27 +139,24 @@ export function watchDocTree(
   }
 }
 
-// One walk of the tree under `root`. Children load in parallel; the order
+// One walk of the members under `root`. Children load in parallel; the order
 // stays depth-first in entry order, so the first path is deterministic.
 export async function walkDocTree(
-  repo: Repo,
   root: AutomergeUrl,
-  readUrl: (url: AutomergeUrl) => AutomergeUrl = (url) => url
+  open: Open
 ): Promise<{
-  urls: AutomergeUrl[];
+  members: Member[];
   read: Map<AutomergeUrl, DocHandle<unknown>>;
-  parents: Map<AutomergeUrl, AutomergeUrl>;
 }> {
-  const urls: AutomergeUrl[] = [];
+  const members: Member[] = [];
   const read = new Map<AutomergeUrl, DocHandle<unknown>>();
-  const parents = new Map<AutomergeUrl, AutomergeUrl>();
-  const visited = new Set<AutomergeUrl>();
+  const visited = new Set<AutomergeUrl>([root]);
   const loads = new Map<AutomergeUrl, Promise<DocHandle<unknown> | null>>();
 
   const load = (url: AutomergeUrl) => {
     let promise = loads.get(url);
     if (!promise) {
-      promise = repo.find<unknown>(readUrl(url)).then(
+      promise = open(url).then(
         (handle) => {
           read.set(url, handle);
           return handle;
@@ -177,40 +168,35 @@ export async function walkDocTree(
     return promise;
   };
 
-  const visit = async (url: AutomergeUrl): Promise<void> => {
-    urls.push(url);
+  const visit = async (url: AutomergeUrl, parent: AutomergeUrl | null) => {
     const handle = await load(url);
+    members.push({ url, heads: handle ? headsOf(handle) : encodeHeads([]), parent });
     if (!handle) return;
     const children = (await childrenOf(handle.doc())).filter(
-      (child) => !visited.has(child.url)
+      (child) => !visited.has(child)
     );
     for (const child of children) {
-      visited.add(child.url);
-      parents.set(child.url, url);
-      if (mayHaveChildren(child.type)) void load(child.url);
+      visited.add(child);
+      void load(child);
     }
-    for (const child of children) {
-      if (mayHaveChildren(child.type)) await visit(child.url);
-      else urls.push(child.url);
-    }
+    for (const child of children) await visit(child, url);
   };
 
-  visited.add(root);
-  await visit(root);
-  return { urls, read, parents };
+  await visit(root, null);
+  return { members, read };
 }
 
-// The children of a materialized doc, from every children plugin for its
-// datatype and every `"*"` one.
-export async function childrenOf(doc: unknown): Promise<ChildLink[]> {
+// The children of a document, from every children plugin for its datatype and
+// every `"*"` one.
+export async function childrenOf(doc: unknown): Promise<AutomergeUrl[]> {
   const type = datatypeOf(doc);
   const registry = childrenRegistry();
   const plugins = registry.filter((plugin) => answersFor(plugin, type));
   const loaded = await registry.loadAll(plugins);
-  const out: ChildLink[] = [];
+  const out: AutomergeUrl[] = [];
   const seen = new Set<AutomergeUrl>();
   for (const plugin of loaded) {
-    let links: ChildLink[];
+    let links: unknown[];
     try {
       links = (plugin.module as ChildrenOf)(doc) ?? [];
     } catch (err) {
@@ -218,19 +204,29 @@ export async function childrenOf(doc: unknown): Promise<ChildLink[]> {
       continue;
     }
     for (const link of links) {
-      const url = canonicalUrl(link.url);
+      if (!isValidAutomergeUrl(link)) continue;
+      const url = canonicalUrl(link);
       if (seen.has(url)) continue;
       seen.add(url);
-      out.push({ url, type: link.type });
+      out.push(url);
     }
   }
   return out;
 }
 
-// False only when a link's datatype is known and nothing answers for it.
-export function mayHaveChildren(type: string | undefined): boolean {
-  if (type === undefined) return true;
-  return childrenRegistry().all().some((plugin) => answersFor(plugin, type));
+// A url's bare document identity, without path or heads, so urls arriving
+// from different places name a member the same way.
+export function canonicalUrl(url: AutomergeUrl): AutomergeUrl {
+  const { documentId } = parseAutomergeUrl(url);
+  return stringifyAutomergeUrl({ documentId });
+}
+
+function headsOf(handle: DocHandle<unknown>): UrlHeads {
+  try {
+    return handle.heads() ?? encodeHeads([]);
+  } catch {
+    return encodeHeads([]);
+  }
 }
 
 function childrenRegistry() {
@@ -249,6 +245,20 @@ function datatypeOf(doc: unknown): string | undefined {
   return type === undefined || type === null ? undefined : String(type);
 }
 
-function sameList<T>(a: T[], b: T[]): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
+function sameMembers(a: Member[], b: Member[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (member, i) =>
+        member.url === b[i].url &&
+        member.parent === b[i].parent &&
+        sameHeads(member.heads, b[i].heads)
+    )
+  );
+}
+
+export function sameHeads(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(b);
+  return a.every((h) => set.has(h));
 }

@@ -3,11 +3,11 @@ import type { Plugin } from "@inkandswitch/patchwork-plugins";
 export const plugins: Plugin<any>[] = [
   {
     type: "patchwork:component",
-    id: "patchwork-draft-provider",
-    name: "Draft Provider",
+    id: "patchwork-overlay-provider",
+    name: "Overlay Provider",
     async load() {
-      const { DraftProvider } = await import("./providers/DraftProvider.js");
-      return DraftProvider;
+      const { OverlayProvider } = await import("./providers/OverlayProvider.js");
+      return OverlayProvider;
     },
   },
   {
@@ -26,7 +26,11 @@ export type {
   CloneEntry,
   DraftDoc,
   DraftEntry,
-  DraftStatus,
-  DraftsState,
-} from "./draft-types.js";
-export { isDraftDoc } from "./draft-types.js";
+  Member,
+  MergeDoc,
+  MergeEntry,
+  Overlay,
+  OverlaysState,
+  OverlayStatus,
+} from "./overlay-types.js";
+export { isDraftDoc, isMergeDoc } from "./overlay-types.js";

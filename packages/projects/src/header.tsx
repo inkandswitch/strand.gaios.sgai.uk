@@ -1,25 +1,31 @@
 import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
-import {request, subscribe, type Selector} from "@inkandswitch/patchwork-providers"
-import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type JSX} from "solid-js"
+import {request, type Selector} from "@inkandswitch/patchwork-providers"
+import {createSignal, createUniqueId, For, Show, type JSX} from "solid-js"
 import type {WorkspaceCompare} from "./compare.ts"
 import {ComparePicker, ModeControls} from "./compare-ui.tsx"
 import {CommentsButton, type CommentsToggle} from "./comments.tsx"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
-import type {CompareAgainst, CompareChanges, DraftEntry, DraftsState} from "./types.ts"
+import {
+	mergeOf,
+	overlayName,
+	type Comparison,
+	type DraftEntry,
+	type MergeEntry,
+	type Overlay,
+	type OverlaysState,
+} from "./types.ts"
 import {NameInput, SidebarButton, type SidebarToggle} from "./workspaces.tsx"
 
 /**
- * The workspace card's header: its name, then the checked-out draft as a
- * token opening everything to do with drafts, and the draft it's compared
- * with beside it.
+ * The workspace card's header: its name, then the checked-out overlay as a
+ * token opening everything to do with drafts and merges, and what it's
+ * compared with beside it. A merge checked out shows as the merge, to accept
+ * or drop.
  */
 export function WorkspaceHeader(props: {
 	name: string
-	drafts: DraftsState | undefined
-	/** what's compared with, a merge's target included */
-	against: CompareAgainst
-	/** what's compared with outside a merge */
-	compared: AutomergeUrl | undefined
+	overlays: OverlaysState
+	comparison: Comparison
 	/** inside the compare provider, where requests go from */
 	element: HTMLElement
 	/** the sidebar, shown or hidden from the card header */
@@ -34,93 +40,68 @@ export function WorkspaceHeader(props: {
 	compareControls?(element: HTMLElement): void
 }) {
 	const [renaming, setRenaming] = createSignal(false)
-	const [changes, setChanges] = createSignal<CompareChanges>()
-	const send = (selector: Selector) => void request(props.element, selector)
-	const entries = () => props.drafts?.drafts ?? []
-	const entry = (url: AutomergeUrl | undefined) =>
-		url === undefined ? undefined : entries().find(draft => draft.url === url)
-	const ours = () => entry(props.drafts?.checkedOut)
-	const theirs = () => entry(props.against?.draft)
-
-	createEffect(() => {
-		const element = props.element
-		onCleanup(
-			subscribe<CompareChanges>(element, {type: "compare:changes"}, value => setChanges(value))
-		)
-	})
-
-	const merging = () => {
-		const from = ours()
-		const into = theirs()
-		return props.against?.merging && from && into ? {from, into} : undefined
-	}
+	const send = (selector: Selector) => request(props.element, selector)
+	const ours = () => props.overlays.checkedOut
+	const merge = () => mergeOf(props.overlays, ours())
+	const draft = () => props.overlays.drafts.find(entry => entry.url === ours())
+	const name = (overlay: Overlay) => overlayName(props.overlays, overlay)
 
 	return (
 		<header class="projects__card-header">
 			<SidebarButton sidebar={props.sidebar} />
 			<h1 class="projects__workspace-title">{props.name}</h1>
-			<Show when={merging()}>
-				{merge => (
-					<MergeBar
-						from={merge().from}
-						into={merge().into}
-						element={props.element}
-					/>
-				)}
+			<Show when={merge()}>
+				{current => <MergeBar merge={current()} name={name} send={send} />}
 			</Show>
-			<Show when={!merging() && ours()}>
-				{checkedOut => (
-					<div class="projects__tokens">
-						<Show
-							when={!renaming()}
-							fallback={
-								<NameInput
-									class="projects__token-rename"
-									value={checkedOut().name}
-									label="Draft name"
-									commit={name => {
-										setRenaming(false)
-										send({type: "draft:rename", draft: checkedOut().url, name})
-									}}
-									cancel={() => setRenaming(false)}
-								/>
-							}>
-							<DraftMenu
-								ours={checkedOut()}
-								entries={entries()}
-								comparing={theirs() !== undefined}
-								compared={props.compared}
-								send={send}
-								rename={() => setRenaming(true)}
+			<Show when={!merge()}>
+				<div class="projects__tokens">
+					<Show
+						when={!renaming() || !draft()}
+						fallback={
+							<NameInput
+								class="projects__token-rename"
+								value={draft()!.name}
+								label="Draft name"
+								commit={next => {
+									setRenaming(false)
+									void send({type: "draft:rename", draft: draft()!.url, name: next})
+								}}
+								cancel={() => setRenaming(false)}
 							/>
-						</Show>
-						<Show when={theirs()}>
-							{compared => (
-								<>
-									<span class="projects__tokens-between" aria-hidden="true">
-										↔
-									</span>
-									<span class="projects__token projects__token--theirs" title="Compared with">
-										<span class="projects__token-dot" aria-hidden="true" />
-										<span class="projects__token-name">{compared().name}</span>
-										<button
-											type="button"
-											class="projects__token-clear"
-											title="Stop comparing"
-											aria-label="Stop comparing"
-											onClick={() => send({type: "compare:set", draft: null})}>
-											×
-										</button>
-									</span>
-								</>
-							)}
-						</Show>
-					</div>
-				)}
+						}>
+						<OverlayMenu
+							overlays={props.overlays}
+							comparison={props.comparison}
+							send={send}
+							rename={() => setRenaming(true)}
+						/>
+					</Show>
+					<Show when={props.comparison}>
+						{compared => (
+							<>
+								<span class="projects__tokens-between" aria-hidden="true">
+									↔
+								</span>
+								<span class="projects__token projects__token--theirs" title="Compared with">
+									<span class="projects__token-dot" aria-hidden="true" />
+									<span class="projects__token-name">{name(compared().b)}</span>
+									<button
+										type="button"
+										class="projects__token-clear"
+										title="Stop comparing"
+										aria-label="Stop comparing"
+										onClick={() => void send({type: "compare:clear"})}>
+										×
+									</button>
+								</span>
+							</>
+						)}
+					</Show>
+				</div>
 			</Show>
 			{/* comparing: the mode, then its controls, beside the drafts */}
 			<div class="projects__header-compare">
-				<Show when={props.against && props.compare.offered().length > 0}>
+				<Show when={props.comparison && props.compare.offered().length > 0}>
 					<WorkspaceModes compare={props.compare} />
 				</Show>
 				<div
@@ -130,8 +111,8 @@ export function WorkspaceHeader(props: {
 			</div>
 			<div class="projects__header-end">
 				<div ref={element => props.actions?.(element)} class="projects__header-actions" />
-				<Show when={merging()}>
-					<MergeButton changes={changes()} element={props.element} />
+				<Show when={merge()}>
+					{current => <AcceptButton merge={current()} send={send} />}
 				</Show>
 				<CommentsButton comments={props.comments} />
 			</div>
@@ -179,16 +160,14 @@ function WorkspaceModes(props: {compare: WorkspaceCompare}) {
 }
 
 /**
- * The checked-out draft's token, opening the drafts to check out another,
- * and what to do with this one: compare it with another or merge it into
- * one, copy it, rename it, delete it. Both lists start with the draft it was copied from.
+ * The checked-out overlay's token, opening the drafts and merges to check
+ * out another, and what to do with this one: compare it with another
+ * version or merge it into one, copy it, rename it, delete it.
  */
-function DraftMenu(props: {
-	ours: DraftEntry
-	entries: DraftEntry[]
-	comparing: boolean
-	compared: AutomergeUrl | undefined
-	send(selector: Selector): void
+function OverlayMenu(props: {
+	overlays: OverlaysState
+	comparison: Comparison
+	send(selector: Selector): Promise<unknown>
 	rename(): void
 }) {
 	const id = createUniqueId()
@@ -200,21 +179,24 @@ function DraftMenu(props: {
 	let mergeMenu!: HTMLDivElement
 	let compareItem!: HTMLButtonElement
 	let mergeItem!: HTMLButtonElement
-	const byUrl = (url: AutomergeUrl | null) =>
-		url === null ? undefined : props.entries.find(entry => entry.url === url)
-	const copiedFrom = (entry: DraftEntry) => {
-		const parent = byUrl(entry.parent)
-		return parent && `copied from ${parent.name}`
+	const ours = () => props.overlays.checkedOut
+	const name = (overlay: Overlay) => overlayName(props.overlays, overlay)
+	const draft = () => props.overlays.drafts.find(entry => entry.url === ours())
+	const drafts = () => inTreeOrder(props.overlays.drafts)
+	const copiedFrom = (entry: DraftEntry) => `copied from ${name(entry.parent)}`
+	// What a draft would merge into first: the one it was copied from.
+	const parent = (): Overlay | undefined => draft()?.parent
+	const versions = (): Overlay[] => [null, ...drafts().map(entry => entry.url)]
+	const compareWith = () =>
+		[...versions(), ...props.overlays.merges.map(entry => entry.url)].filter(
+			overlay => overlay !== ours()
+		)
+	const mergeInto = () => {
+		const others = versions().filter(overlay => overlay !== ours())
+		const first = parent()
+		return first === undefined ? others : [first, ...others.filter(overlay => overlay !== first)]
 	}
-	const parent = () => byUrl(props.ours.parent)
-	const others = () =>
-		props.entries.filter(entry => entry.url !== props.ours.url && entry !== parent())
-	const forkedFromOurs = (entry: DraftEntry): boolean => {
-		const up = byUrl(entry.parent)
-		return up !== undefined && (up.url === props.ours.url || forkedFromOurs(up))
-	}
-	const mergeTargets = () => others().filter(entry => !forkedFromOurs(entry))
-	const hasDrafts = () => props.entries.some(entry => entry.parent === props.ours.url)
+	const hasCopies = () => props.overlays.drafts.some(entry => entry.parent === ours())
 	const [submenu, setSubmenu] = createSignal<"compare" | "merge">()
 	const toggled = (which: "compare" | "merge") => (open: boolean) =>
 		setSubmenu(current => (open ? which : current === which ? undefined : current))
@@ -225,34 +207,62 @@ function DraftMenu(props: {
 	}
 
 	const actions = {
-		checkout(draft: AutomergeUrl) {
+		checkout(overlay: Overlay) {
 			close()
-			if (draft !== props.ours.url) props.send({type: "draft:checkout", draft})
+			if (overlay === ours()) return
+			void props.send({type: "overlay:checkout", overlay}).then(done => {
+				// A merge is looked over against its target.
+				const merge = mergeOf(props.overlays, overlay)
+				if (done && merge) void props.send({type: "compare:set", overlay: merge.target})
+			})
 		},
-		compare(draft: AutomergeUrl) {
+		compare(overlay: Overlay) {
 			close()
-			props.send({type: "compare:set", draft})
+			void props.send({type: "compare:set", overlay})
 		},
-		merge(into: AutomergeUrl) {
+		merge(target: Overlay) {
 			close()
-			props.send({type: "merge:start", into})
+			void props.send({type: "merge:create", source: ours(), target}).then(merge => {
+				if (merge) void props.send({type: "compare:set", overlay: target})
+			})
 		},
 		copy() {
 			close()
-			props.send({type: "draft:create", from: props.ours.url})
+			void props.send({type: "draft:create", parent: ours()})
 		},
 		rename() {
 			close()
 			props.rename()
 		},
 		remove() {
+			const current = draft()
 			close()
-			const warning = hasDrafts()
-				? `Delete “${props.ours.name}” and the drafts copied from it? This can't be undone.`
-				: `Delete “${props.ours.name}”? This can't be undone.`
-			if (window.confirm(warning)) props.send({type: "draft:delete", draft: props.ours.url})
+			if (!current) return
+			const warning = hasCopies()
+				? `Delete “${current.name}”? The drafts copied from it stay. This can't be undone.`
+				: `Delete “${current.name}”? This can't be undone.`
+			if (window.confirm(warning)) void props.send({type: "overlay:delete", overlay: current.url})
 		},
 	}
+
+	const item = (overlay: Overlay, meta?: string) => (
+		<button
+			type="button"
+			role="menuitemradio"
+			aria-checked={overlay === ours()}
+			class="projects__menu-item"
+			onClick={() => actions.checkout(overlay)}>
+			<span class="projects__menu-icon projects__menu-check">
+				<Show when={overlay === ours()}>
+					<CheckIcon />
+				</Show>
+			</span>
+			<span class="projects__menu-name">{name(overlay)}</span>
+			<Show when={meta}>
+				<span class="projects__menu-meta">{meta}</span>
+			</Show>
+		</button>
+	)
 
 	return (
 		<>
@@ -260,14 +270,14 @@ function DraftMenu(props: {
 				ref={token}
 				type="button"
 				class="projects__token"
-				classList={{"projects__token--ours": props.comparing}}
+				classList={{"projects__token--ours": !!props.comparison}}
 				aria-haspopup="menu"
 				title="Drafts"
 				popovertarget={id}>
-				<Show when={props.comparing}>
+				<Show when={props.comparison}>
 					<span class="projects__token-dot" aria-hidden="true" />
 				</Show>
-				<span class="projects__token-name">{props.ours.name}</span>
+				<span class="projects__token-name">{name(ours())}</span>
 				<CaretIcon />
 			</button>
 			<div
@@ -281,29 +291,17 @@ function DraftMenu(props: {
 				}}>
 				<p class="projects__menu-heading">Drafts</p>
 				<div onMouseEnter={closeSubmenus}>
-					<For each={props.entries}>
-						{entry => (
-							<button
-								type="button"
-								role="menuitemradio"
-								aria-checked={entry.url === props.ours.url}
-								class="projects__menu-item"
-								onClick={() => actions.checkout(entry.url)}>
-								<span class="projects__menu-icon projects__menu-check">
-									<Show when={entry.url === props.ours.url}>
-										<CheckIcon />
-									</Show>
-								</span>
-								<span class="projects__menu-name">{entry.name}</span>
-								<Show when={copiedFrom(entry)}>
-									{meta => <span class="projects__menu-meta">{meta()}</span>}
-								</Show>
-							</button>
-						)}
-					</For>
+					{item(null)}
+					<For each={drafts()}>{entry => item(entry.url, copiedFrom(entry))}</For>
 				</div>
+				<Show when={props.overlays.merges.length > 0}>
+					<p class="projects__menu-heading">Merges</p>
+					<div onMouseEnter={closeSubmenus}>
+						<For each={props.overlays.merges}>{entry => item(entry.url)}</For>
+					</div>
+				</Show>
 				<hr />
-				<Show when={props.entries.length > 1}>
+				<Show when={compareWith().length > 0}>
 					<SubmenuItem
 						ref={el => (compareItem = el)}
 						expanded={submenu() === "compare"}
@@ -311,7 +309,7 @@ function DraftMenu(props: {
 						Compare with
 					</SubmenuItem>
 				</Show>
-				<Show when={parent()}>
+				<Show when={mergeInto().length > 0}>
 					<SubmenuItem
 						ref={el => (mergeItem = el)}
 						expanded={submenu() === "merge"}
@@ -324,11 +322,11 @@ function DraftMenu(props: {
 						<span class="projects__menu-icon" />
 						Create draft
 					</button>
-					<button type="button" role="menuitem" class="projects__menu-item" onClick={actions.rename}>
-						<span class="projects__menu-icon" />
-						Rename
-					</button>
-					<Show when={parent()}>
+					<Show when={draft()}>
+						<button type="button" role="menuitem" class="projects__menu-item" onClick={actions.rename}>
+							<span class="projects__menu-icon" />
+							Rename
+						</button>
 						<button
 							type="button"
 							role="menuitem"
@@ -340,25 +338,23 @@ function DraftMenu(props: {
 					</Show>
 				</div>
 
-				<DraftSubmenu
+				<OverlaySubmenu
 					ref={el => (compareMenu = el)}
 					id={compareId}
-					label={`Compare ${props.ours.name} with`}
-					parent={parent()}
-					others={others()}
-					checked={url => props.compared === url}
-					copiedFrom={copiedFrom}
+					label={`Compare ${name(ours())} with`}
+					overlays={compareWith()}
+					name={name}
+					checked={overlay => props.comparison?.b === overlay}
 					toggled={toggled("compare")}
 					pick={actions.compare}
 				/>
-				<DraftSubmenu
+				<OverlaySubmenu
 					ref={el => (mergeMenu = el)}
 					id={mergeId}
-					label={`Merge ${props.ours.name} into`}
-					parent={parent()}
-					others={mergeTargets()}
-					suggest
-					copiedFrom={copiedFrom}
+					label={`Merge ${name(ours())} into`}
+					overlays={mergeInto()}
+					name={name}
+					suggested={parent()}
 					toggled={toggled("merge")}
 					pick={actions.merge}
 				/>
@@ -368,35 +364,34 @@ function DraftMenu(props: {
 }
 
 /**
- * While the checked-out draft's merge into another is looked over: the two
- * drafts, the target closing to stop merging.
+ * While a merge is checked out: its source and its target, closing to drop
+ * the merge. Accepting it is at the header's end.
  */
 function MergeBar(props: {
-	from: DraftEntry
-	into: DraftEntry
-	element: HTMLElement
+	merge: MergeEntry
+	name(overlay: Overlay): string
+	send(selector: Selector): Promise<unknown>
 }) {
-	const stop = () => void request(props.element, {type: "merge:cancel"})
-
+	const drop = () => void props.send({type: "overlay:delete", overlay: props.merge.url})
 	return (
 		<div class="projects__merge" role="group" aria-label="Merge">
 			<span class="projects__tokens">
 				<span class="projects__token" title="Merging">
 					<span class="projects__token-dot" aria-hidden="true" />
-					<span class="projects__token-name">{props.from.name}</span>
+					<span class="projects__token-name">{props.name(props.merge.source)}</span>
 				</span>
 				<span class="projects__tokens-between" aria-label="into">
 					→
 				</span>
 				<span class="projects__token projects__token--theirs" title="Merging into">
 					<span class="projects__token-dot" aria-hidden="true" />
-					<span class="projects__token-name">{props.into.name}</span>
+					<span class="projects__token-name">{props.name(props.merge.target)}</span>
 					<button
 						type="button"
 						class="projects__token-clear"
-						title="Stop merging"
-						aria-label="Stop merging"
-						onClick={stop}>
+						title="Drop the merge"
+						aria-label="Drop the merge"
+						onClick={drop}>
 						×
 					</button>
 				</span>
@@ -405,16 +400,13 @@ function MergeBar(props: {
 	)
 }
 
-/**
- * Merges what the merge bar shows, which hides the merged draft and checks
- * the other out. At the very end of the header.
- */
-function MergeButton(props: {changes: CompareChanges | undefined; element: HTMLElement}) {
+/** Accepts the checked-out merge, which checks its target out. */
+function AcceptButton(props: {merge: MergeEntry; send(selector: Selector): Promise<unknown>}) {
 	const [merging, setMerging] = createSignal(false)
-	const merge = async () => {
+	const accept = async () => {
 		setMerging(true)
 		try {
-			await request(props.element, {type: "merge:commit"})
+			await props.send({type: "merge:accept", merge: props.merge.url})
 		} finally {
 			setMerging(false)
 		}
@@ -423,15 +415,74 @@ function MergeButton(props: {changes: CompareChanges | undefined; element: HTMLE
 		<button
 			type="button"
 			class="projects__button projects__merge-button"
-			disabled={!mergeReady(props.changes) || merging()}
-			onClick={merge}>
+			disabled={merging()}
+			onClick={accept}>
 			Merge
 		</button>
 	)
 }
 
-function mergeReady(changes: CompareChanges | undefined) {
-	return changes?.mode === "merge" && changes.status === "ready"
+/** Versions to pick one from, the suggested one first. */
+function OverlaySubmenu(props: {
+	ref(element: HTMLDivElement): void
+	id: string
+	label: string
+	overlays: Overlay[]
+	name(overlay: Overlay): string
+	/** stands out as the one to pick */
+	suggested?: Overlay
+	checked?(overlay: Overlay): boolean
+	toggled(open: boolean): void
+	pick(overlay: Overlay): void
+}) {
+	return (
+		<div
+			ref={props.ref}
+			id={props.id}
+			popover="auto"
+			role="menu"
+			class="projects__menu"
+			onToggle={event => props.toggled(event.newState === "open")}>
+			<p class="projects__menu-label">{props.label}</p>
+			<For each={props.overlays}>
+				{overlay => (
+					<button
+						type="button"
+						role={props.checked ? "menuitemradio" : "menuitem"}
+						aria-checked={props.checked?.(overlay)}
+						class="projects__menu-item projects__menu-item--draft"
+						classList={{"projects__menu-item--suggested": overlay === props.suggested}}
+						onClick={() => props.pick(overlay)}>
+						<span class="projects__menu-line">
+							<span class="projects__menu-name">{props.name(overlay)}</span>
+							<Show when={overlay === props.suggested}>
+								<span class="projects__menu-meta">copied from</span>
+							</Show>
+							<Show when={props.checked?.(overlay)}>
+								<span class="projects__menu-check">
+									<CheckIcon />
+								</span>
+							</Show>
+						</span>
+					</button>
+				)}
+			</For>
+		</div>
+	)
+}
+
+/** Drafts with each one beneath the one it was copied from. */
+function inTreeOrder(drafts: DraftEntry[]): DraftEntry[] {
+	const children = (parent: AutomergeUrl | null) => drafts.filter(entry => entry.parent === parent)
+	const out: DraftEntry[] = []
+	const visit = (parent: AutomergeUrl | null) => {
+		for (const entry of children(parent)) {
+			out.push(entry)
+			visit(entry.url)
+		}
+	}
+	visit(null)
+	return out
 }
 
 function SubmenuItem(props: {
@@ -456,66 +507,6 @@ function SubmenuItem(props: {
 				<ChevronIcon />
 			</span>
 		</button>
-	)
-}
-
-/** Drafts to pick one from, the one this was copied from first. */
-function DraftSubmenu(props: {
-	ref(element: HTMLDivElement): void
-	id: string
-	label: string
-	parent: DraftEntry | undefined
-	others: DraftEntry[]
-	/** the parent stands out as the one to pick */
-	suggest?: boolean
-	checked?(draft: AutomergeUrl): boolean
-	copiedFrom(entry: DraftEntry): string | undefined
-	toggled(open: boolean): void
-	pick(draft: AutomergeUrl): void
-}) {
-	const item = (entry: DraftEntry, meta: string | undefined, suggested = false) => (
-		<button
-			type="button"
-			role={props.checked ? "menuitemradio" : "menuitem"}
-			aria-checked={props.checked?.(entry.url)}
-			class="projects__menu-item projects__menu-item--draft"
-			classList={{"projects__menu-item--suggested": suggested}}
-			onClick={() => props.pick(entry.url)}>
-			<span class="projects__menu-line">
-				<span class="projects__menu-name">{entry.name}</span>
-				<Show when={meta}>
-					<span class="projects__menu-meta">{meta}</span>
-				</Show>
-				<Show when={props.checked?.(entry.url)}>
-					<span class="projects__menu-check">
-						<CheckIcon />
-					</span>
-				</Show>
-			</span>
-		</button>
-	)
-
-	return (
-		<div
-			ref={props.ref}
-			id={props.id}
-			popover="auto"
-			role="menu"
-			class="projects__menu"
-			onToggle={event => props.toggled(event.newState === "open")}>
-			<p class="projects__menu-label">{props.label}</p>
-			<Show when={props.parent}>
-				{parent => (
-					<>
-						{item(parent(), "copied from", props.suggest)}
-						<Show when={props.others.length > 0}>
-							<hr />
-						</Show>
-					</>
-				)}
-			</Show>
-			<For each={props.others}>{entry => item(entry, props.copiedFrom(entry))}</For>
-		</div>
 	)
 }
 

@@ -49,9 +49,9 @@ export default function Item(props: {
   name: string;
   type: string;
   pressed: boolean;
-  /** how it differs, compared with another draft or merged into one */
+  /** how it differs, compared with another version */
   mark?: Mark;
-  /** compared with another draft, and the same on both */
+  /** compared with another version, and the same in both */
   unchanged?: boolean;
   children: JSX.Element;
   /** unset for folders: pressing a folder's row expands it instead */
@@ -320,22 +320,14 @@ export function ChangeMark(props: { mark: Mark }) {
 }
 
 const MARK_TITLES: Record<Mark, string> = {
-  differs: "Different on the two drafts",
-  ours: "Only on this draft",
-  theirs: "Only on the compared draft",
-  added: "Added by the merge",
-  removed: "Removed by the merge",
-  changed: "Changed by the merge",
-  both: "Changed on both drafts: review it",
+  differs: "Different in the two versions",
+  ours: "Only in this version",
+  theirs: "Only in the compared version",
 };
 
-// A dot per draft it's on, compared; merging, one for what the merge does.
+// A dot per version it's in.
 const MARK_DOTS: Record<Mark, string[]> = {
   differs: ["ours", "theirs"],
   ours: ["ours"],
   theirs: ["theirs"],
-  added: ["added"],
-  removed: ["removed"],
-  changed: ["changed"],
-  both: ["changed"],
 };

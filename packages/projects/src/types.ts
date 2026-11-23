@@ -13,46 +13,51 @@ export type AccountDoc = {
 	moduleSettingsUrl?: AutomergeUrl
 }
 
-/** The draft provider's `drafts` state, as the frame reads it. */
-export type DraftsState = {
-	workspace: AutomergeUrl
-	/** main's url: the main draft's, or the workspace's before it has one */
-	main: AutomergeUrl
-	checkedOut: AutomergeUrl
-	status: "verifying" | "ready" | "unavailable"
-	/** main first, then every draft beneath the one it was forked off */
+/** A draft or a merge by its url, or null for main. */
+export type Overlay = AutomergeUrl | null
+
+/** The overlay provider's `overlays`. */
+export type OverlaysState = {
+	checkedOut: Overlay
+	status: "loading" | "ready" | "unavailable"
 	drafts: DraftEntry[]
+	merges: MergeEntry[]
 }
 
 export type DraftEntry = {
 	url: AutomergeUrl
 	name: string
+	/** the nearest listed draft it was forked off; null for main */
 	parent: AutomergeUrl | null
-	depth: number
 }
 
-/**
- * The compare provider's `compare:against`. `merging` while the checked-out
- * draft's merge into `draft` is looked over; `after` is the hidden draft
- * showing what the merge leaves it as, once it's made.
- */
-export type CompareAgainst = {
-	draft: AutomergeUrl
-	previewing: boolean
-	merging: boolean
-	after: AutomergeUrl | null
-} | null
+export type MergeEntry = {
+	url: AutomergeUrl
+	source: AutomergeUrl | null
+	target: AutomergeUrl | null
+}
 
-/**
- * How a file differs: compared, on both drafts and different, or only on
- * ours or theirs; merging, what the merge does to the target's.
- */
-export type Mark = "differs" | "ours" | "theirs" | "added" | "removed" | "changed" | "both"
+/** The compare provider's `compare`: A checked out, B compared with. */
+export type Comparison = {a: Overlay; b: Overlay} | null
 
-/** The compare provider's `compare:changes`: what differs, by file and folder. */
-export type CompareChanges = {
-	status: "off" | "loading" | "ready"
-	mode: "compare" | "merge"
-	files: Record<AutomergeUrl, Mark>
-	folders: Record<AutomergeUrl, Mark>
+/** One member of the root, as an overlay has it: the overlay provider's `overlay:members`. */
+export type Member = {
+	url: AutomergeUrl
+	heads: string[]
+	parent: AutomergeUrl | null
+}
+
+/** What an overlay is called: main, a draft's name, or a merge's two sides. */
+export function overlayName(state: OverlaysState | undefined, overlay: Overlay): string {
+	if (overlay === null) return "Main"
+	const draft = state?.drafts.find(entry => entry.url === overlay)
+	if (draft) return draft.name
+	const merge = state?.merges.find(entry => entry.url === overlay)
+	if (merge) return `${overlayName(state, merge.source)} → ${overlayName(state, merge.target)}`
+	return ""
+}
+
+/** The listed merge `overlay` is, if it's one. */
+export function mergeOf(state: OverlaysState | undefined, overlay: Overlay) {
+	return overlay === null ? undefined : state?.merges.find(entry => entry.url === overlay)
 }

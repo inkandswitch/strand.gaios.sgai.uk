@@ -64,9 +64,7 @@ const comparing = (mode: DraftCompare["mode"], base: string, original: string): 
 	original,
 	base,
 	collapsed: false,
-	editable: false,
 	names: null,
-	merging: false,
 })
 
 const ghosts = (view: EditorView, kind: string) =>
@@ -116,33 +114,6 @@ describe("versionRanges", () => {
 		expect(kinds).toEqual(["cm-addedLine"])
 		const kept = versionRanges("a\nold\nb", Text.of(["a", "old", "b"]), "a\nb").map(each => each.value.spec.class)
 		expect(kept).toEqual(["cm-removedLine"])
-	})
-})
-
-describe("merging", () => {
-	it("marks a combined merge as added and removed, not by draft", () => {
-		const before = "one\ntwo"
-		const editor = diffEditor({
-			doc: "one\nTWO",
-			extensions: [],
-			besideExtensions: [],
-			beside: false,
-			compare: () => ({...comparing("inline", before, before), merging: true}),
-		})
-		expect(editor.view.dom.classList.contains("cm-diff-merge")).toBe(true)
-		editor.destroy()
-	})
-
-	it("doesn't while comparing", () => {
-		const editor = diffEditor({
-			doc: "one\nTWO",
-			extensions: [],
-			besideExtensions: [],
-			beside: false,
-			compare: () => comparing("inline", "one\ntwo", "one\ntwo"),
-		})
-		expect(editor.view.dom.classList.contains("cm-diff-merge")).toBe(false)
-		editor.destroy()
 	})
 })
 

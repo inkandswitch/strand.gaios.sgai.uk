@@ -25,7 +25,7 @@ import {
 	type Resolved,
 } from "./resolve.ts"
 import type {SelectedView} from "./selection.ts"
-import type {DraftsState} from "./types.ts"
+import type {Overlay, OverlaysState} from "./types.ts"
 
 /**
  * What's open in a project's focused panel. `placement` says where an open
@@ -59,11 +59,11 @@ export type Route =
 	| {page: "account"}
 	| ({page: "project"} & ProjectRoute)
 
-/** The project whose drafts are mounted, and the draft to start it on. */
-export type DraftScope = {projectUrl: AutomergeUrl; draft?: AutomergeUrl}
+/** The project whose overlays are mounted, and the overlay to start it on. */
+export type OverlayScope = {projectUrl: AutomergeUrl; overlay?: AutomergeUrl}
 
-/** A mounted draft provider; its repo reads whichever draft is checked out. */
-export type DraftProviderElement = HTMLElement & {repo: Repo}
+/** A mounted overlay provider; its repo reads whichever overlay is checked out. */
+export type OverlayProviderElement = HTMLElement & {repo: Repo}
 
 export type Navigation = {
 	route: Accessor<Route>
@@ -72,18 +72,18 @@ export type Navigation = {
 	open(url: string, toolId?: string | null, placement?: Placement): void
 	/** another panel took focus, or the last one closed */
 	focus(panel: ProjectRoute | undefined): void
-	/** the open project is compared with another of its drafts, or isn't */
-	compare(draft: AutomergeUrl | undefined): void
+	/** the open project is compared with another of its overlays or main, or isn't */
+	compare(overlay: Overlay | undefined): void
 	/** the page for installing packages: tools, datatypes */
 	packages(): void
 	/** the page for the account: who's signed in, signing in and out */
 	account(): void
-	/** where a draft provider should be mounted, if anywhere */
-	scope: Accessor<DraftScope | undefined>
-	/** the open project's repo, reading its checked-out draft */
+	/** where an overlay provider should be mounted, if anywhere */
+	scope: Accessor<OverlayScope | undefined>
+	/** the open project's repo, reading its checked-out overlay */
 	projectRepo: Accessor<Repo | undefined>
 	/** the scope's provider has mounted; returns a detach */
-	attach(projectUrl: AutomergeUrl, provider: DraftProviderElement): () => void
+	attach(projectUrl: AutomergeUrl, provider: OverlayProviderElement): () => void
 }
 
 type HistoryMode = "push" | "replace"
@@ -93,16 +93,14 @@ const ACCOUNT_HASH = "account"
 
 type Attached = {
 	projectUrl: AutomergeUrl
-	provider: DraftProviderElement
+	provider: OverlayProviderElement
 	find: FindDoc
-	/** the draft it was started on */
-	initial: AutomergeUrl | null
-	/** what it has checked out, once it has said; null for main */
-	checkedOut: AutomergeUrl | null | undefined
-	/** main's url, once it has said */
-	main: AutomergeUrl | undefined
+	/** the overlay it was started on */
+	initial: Overlay
+	/** what it has checked out, once it has said */
+	checkedOut: Overlay | undefined
 	/** a switch navigation asked for, so it's not taken for the user's */
-	switching: AutomergeUrl | null | undefined
+	switching: Overlay | undefined
 }
 
 /**
@@ -111,16 +109,16 @@ type Attached = {
  * document is its project, the root, whatever it is: a folder, with
  * documents open in it, or any other document, open on its own.
  *
- * A project is seen through one of its drafts: the frame mounts a draft
- * provider for it (see `scope`), and everything in the project, paths
- * included, is looked up through that provider's repo. The hash's `draft=`
- * and the checked-out draft follow each other, and `compare=` and the draft
- * it's compared with. Opening another project starts it on main.
+ * A project is seen through one of its overlays, or main: the frame mounts
+ * an overlay provider for it (see `scope`), and everything in the project,
+ * paths included, is looked up through that provider's repo. The hash's
+ * `overlay=` and the checked-out overlay follow each other, and `compare=`
+ * and what it's compared with. Opening another project starts it on main.
  */
 export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	const find: FindDoc = async url => (await repo.find(url)).doc()
 	const [route, setRoute] = createSignal<Route>({page: "loading"})
-	const [scope, setScope] = createSignal<DraftScope>()
+	const [scope, setScope] = createSignal<OverlayScope>()
 	const [attached, setAttached] = createSignal<Attached>()
 	let waiting: ((attached: Attached) => void)[] = []
 	let written: string | undefined
@@ -199,14 +197,14 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			reject(new LocationError("not-a-project"), "push")
 			return
 		}
-		// Within a project, stay in the draft it's on, compared as it is.
+		// Within a project, stay in the overlay it's on, compared as it is.
 		const sameProject =
 			current && current.resolved.projectUrl === projectUrlOf(location)
 		void go(
 			{
 				...location,
 				toolId: toolId ?? undefined,
-				draft: sameProject ? current.location.draft : undefined,
+				overlay: sameProject ? current.location.overlay : undefined,
 				compare: sameProject ? current.location.compare : undefined,
 			},
 			"push",
@@ -216,7 +214,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 
 	// The hash follows the focused panel, so going back and forth between
 	// panels doesn't pile up history. Each panel keeps the place it was given,
-	// but they're all on the draft that's checked out.
+	// but they're all on the overlay that's checked out.
 	function focus(panel: ProjectRoute | undefined) {
 		const current = project()
 		if (!current) return
@@ -232,17 +230,17 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			panel.resolved,
 			{
 				...panel.location,
-				draft: current.location.draft,
+				overlay: current.location.overlay,
 				compare: current.location.compare,
 			},
 			"replace"
 		)
 	}
 
-	function compare(draft: AutomergeUrl | undefined) {
+	function compare(overlay: Overlay | undefined) {
 		const current = project()
-		if (!current || current.location.compare === draft) return
-		show(current.resolved, {...current.location, compare: draft}, "replace")
+		if (!current || current.location.compare === overlay) return
+		show(current.resolved, {...current.location, compare: overlay}, "replace")
 	}
 
 	function packages() {
@@ -255,7 +253,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		write(ACCOUNT_HASH, "push")
 	}
 
-	// To a page outside any project, unmounting its drafts.
+	// To a page outside any project, unmounting its overlays.
 	function leave(page: "home" | "packages" | "account") {
 		attempt++
 		setRoute({page})
@@ -285,23 +283,23 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		try {
 			const projectUrl = await findProject(location, find)
 			if (mine !== attempt) return
-			const scoped = await enter(projectUrl, location.draft)
+			const scoped = await enter(projectUrl, location.overlay)
 			if (mine !== attempt) return
-			const draft = location.draft ?? null
-			if (draft !== draftOf(scoped)) {
-				scoped.switching = draft
-				const checkout = await request<{draft: AutomergeUrl} | null>(
-					scoped.provider,
-					{type: "draft:checkout", draft: draft ?? projectUrl}
-				)
-				if (checkout) scoped.checkedOut = mainAsNull(scoped, checkout.draft)
+			const overlay = location.overlay ?? null
+			if (overlay !== overlayOf(scoped)) {
+				scoped.switching = overlay
+				const done = await request<true | null>(scoped.provider, {
+					type: "overlay:checkout",
+					overlay,
+				})
+				if (done) scoped.checkedOut = overlay
 				scoped.switching = undefined
 				if (mine !== attempt) return
 			}
 			const resolved = await resolveLocation(location, scoped.find)
 			const folder = await endsInFolder(resolved, scoped.find)
 			if (mine !== attempt) return
-			const shown = {...location, draft: draftOf(scoped) ?? undefined}
+			const shown = {...location, overlay: overlayOf(scoped) ?? undefined}
 			if (!folder) show(resolved, shown, mode, placement)
 			else if (mode === "replace") show(projectRoot(resolved), atRoot(shown), mode)
 			else if (left?.resolved.projectUrl !== projectUrl) restore(left)
@@ -312,17 +310,17 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		}
 	}
 
-	// Mount the project's draft provider, unless it's already there, and wait
-	// for it.
+	// Mount the project's overlay provider, unless it's already there, and
+	// wait for it.
 	function enter(
 		projectUrl: AutomergeUrl,
-		draft: AutomergeUrl | undefined
+		overlay: AutomergeUrl | undefined
 	): Promise<Attached> {
 		const current = attached()
 		if (current?.projectUrl === projectUrl) return Promise.resolve(current)
 		if (scope()?.projectUrl !== projectUrl) {
 			waiting = []
-			setScope({projectUrl, draft})
+			setScope({projectUrl, overlay})
 		}
 		return new Promise(resolve => waiting.push(resolve))
 	}
@@ -332,24 +330,21 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		if (scope()?.projectUrl === left?.resolved.projectUrl) return
 		waiting = []
 		setScope(
-			left && {projectUrl: left.resolved.projectUrl, draft: left.location.draft}
+			left && {projectUrl: left.resolved.projectUrl, overlay: left.location.overlay}
 		)
 	}
 
-	function attach(projectUrl: AutomergeUrl, provider: DraftProviderElement) {
+	function attach(projectUrl: AutomergeUrl, provider: OverlayProviderElement) {
 		const scoped: Attached = {
 			projectUrl,
 			provider,
 			find: async url => (await provider.repo.find(url)).doc(),
-			initial: scope()?.draft ?? null,
+			initial: scope()?.overlay ?? null,
 			checkedOut: undefined,
-			main: undefined,
 			switching: undefined,
 		}
-		const unsubscribe = subscribe<DraftsState>(provider, {type: "drafts"}, state => {
-			scoped.main = state.main
-			if (state.status !== "verifying")
-				onDraftSelected(scoped, mainAsNull(scoped, state.checkedOut))
+		const unsubscribe = subscribe<OverlaysState>(provider, {type: "overlays"}, state => {
+			if (state.status !== "loading") onOverlaySelected(scoped, state.checkedOut)
 		})
 		setAttached(scoped)
 		const ready = waiting
@@ -361,18 +356,18 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		}
 	}
 
-	// Someone picked another draft, or the one checked out went away: show
+	// Someone picked another overlay, or the one checked out went away: show
 	// the same thing in it, or the project with nothing open if it isn't
 	// there.
-	function onDraftSelected(scoped: Attached, checkedOut: AutomergeUrl | null) {
+	function onOverlaySelected(scoped: Attached, checkedOut: Overlay) {
 		if (scoped.checkedOut === checkedOut) return
 		scoped.checkedOut = checkedOut
 		if (scoped.switching === checkedOut) return
 		const current = project()
 		if (!current || current.resolved.projectUrl !== scoped.projectUrl) return
-		if ((current.location.draft ?? null) === checkedOut) return
+		if ((current.location.overlay ?? null) === checkedOut) return
 		const mine = ++attempt
-		const location = {...current.location, draft: checkedOut ?? undefined}
+		const location = {...current.location, overlay: checkedOut ?? undefined}
 		void relocate(current.resolved, scoped.find).then(
 			next => {
 				if (mine !== attempt) return
@@ -412,7 +407,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	// Entries get renamed while they're open (sideboard names a document's
 	// entry after its title), so watch the folders on the way to the open
 	// document and keep the hash naming things as they're named now. One
-	// that's gone (removed, or not in this draft) leaves the project open
+	// that's gone (removed, or not in this overlay) leaves the project open
 	// with nothing in it.
 	function followRenames() {
 		createEffect(() => {
@@ -457,14 +452,9 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	}
 }
 
-/** The draft a provider is on, or is about to be on. */
-function draftOf(scoped: Attached) {
+/** The overlay a provider is on, or is about to be on. */
+function overlayOf(scoped: Attached) {
 	return scoped.checkedOut === undefined ? scoped.initial : scoped.checkedOut
-}
-
-// The hash leaves main out; the provider names it by a url.
-function mainAsNull(scoped: Attached, draft: AutomergeUrl) {
-	return draft === scoped.main || draft === scoped.projectUrl ? null : draft
 }
 
 function atRoot(location: Location): Location {

@@ -1,12 +1,11 @@
-// What each of two drafts changed in a text file since the version both
-// came from, their common ancestor, which the panel showing it compares
-// with the other draft: marked in this draft's version, alone (stacked) or
-// beside the other's, lined up and scrolling with it, and editable too
-// while the panel says it can be changed; or both drafts' changes marked
-// together in the drafts' own colours, read-only (combined). Unchanged
-// stretches fold away while the panel says to collapse them. Only shows
-// inside something answering `compare:view`, like the GAIOS dock while the
-// checked-out draft is compared with another.
+// What each of two versions changed in a text file since the version both
+// came from, their common ancestor, while the file is compared: marked in
+// this version, alone (stacked) or beside the other, lined up and scrolling
+// with it, and editable too where the other's handle can be written; or both
+// versions' changes marked together in their own colours, read-only
+// (combined). Unchanged stretches fold away while the mode's options say to.
+// Only shows inside something answering `compare-mode:view` and `compare`,
+// like the GAIOS dock while the checked-out overlay is compared.
 
 import {createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor} from "solid-js"
 import {Automerge} from "@automerge/automerge-repo/slim"
@@ -33,76 +32,155 @@ import {
 	type DecorationSet,
 } from "@codemirror/view"
 import {Chunk, MergeView, diff, type Change} from "@codemirror/merge"
-import {request} from "@inkandswitch/patchwork-providers"
 import {subscribe} from "@inkandswitch/patchwork-providers-solid"
 import {fileText} from "../datatype"
 import type {FileDoc} from "../types"
 import {commonAncestor} from "./ancestor"
 
-// The compare view the dock answers with, as this reads it.
-type CompareView = {
-	mode: string | null
-	options: unknown
-	other: Uint8Array | null
-	missing: boolean
-	collapsed?: boolean
-	editable?: boolean
-	names?: Names | null
-	merging?: boolean
-}
+// What the panel showing it says to draw, as this reads it.
+type CompareView = {mode: string; options: {collapsed?: boolean} | null} | null
 
-/** The two drafts' names: this view's, and the other's. */
+// The overlays, and the two versions compared, as this reads them.
+type Overlay = string | null
+type OverlaysState = {
+	checkedOut: Overlay
+	drafts: {url: string; name: string}[]
+	merges: {url: string; source: Overlay; target: Overlay}[]
+}
+type Comparison = {a: Overlay; b: Overlay} | null
+type Member = {url: string}
+
+/** What the two versions are called: this view's, and the other's. */
 type Names = {ours: string; theirs: string}
 
 /**
- * The other draft's text, the text both drafts came from, how to show
- * them, whether to fold what didn't change, and whether the other text can
- * be changed. Empty text when the other draft doesn't have the file.
+ * The other version's text, the text both came from, how to show them,
+ * whether to fold what didn't change, and how to change the other version,
+ * where it can be. Empty text when the other version doesn't have the file.
  */
 export type DraftCompare = {
 	mode: "inline" | "side-by-side" | "stacked"
 	original: string
-	/** the common ancestor's text, which each draft's changes are marked against */
+	/** the common ancestor's text, which each version's changes are marked against */
 	base: string
 	collapsed: boolean
-	editable: boolean
+	/** splices the other version's text, where it can be changed */
+	edit?: (splices: TextSplice[]) => void
 	/** to head each side with, side by side */
 	names: Names | null
-	/** this side shows the file after a merge, the other the target before it */
-	merging: boolean
 }
 
 const MODES = ["inline", "side-by-side", "stacked"] as const
 
 const COLLAPSE = {margin: 3, minSize: 4}
 
-// This draft's version is read again this long after it last changed, for
-// where it parted from the other.
+// This version is read again this long after it last changed, for where it
+// parted from the other.
 const OURS_DEBOUNCE_MS = 300
 
 type Handle = {
+	url: string
 	doc(): unknown
+	isReadOnly?(): boolean
+	change?(callback: (doc: unknown) => void): void
 	on(event: "change", listener: () => void): void
 	off(event: "change", listener: () => void): void
 }
 
+// Where a version of the file lives, as the overlay provider answers
+// `repo:handle-descriptor`.
+type Descriptor = {url: string; cloneUrl?: string}
+
+// The repo a view is handed: Patchwork's, over the page's base repo.
+type ViewRepo = {baseRepo?: ViewRepo; find(url: string): Promise<Handle>}
+
 /**
  * Undefined unless the file is compared in a mode the editor shows.
- * `handle` is this draft's version, to find where it parted from the
- * other's; without it, the other's version is taken as where it started.
+ * `handle` is this version, to find where it parted from the other's;
+ * without it, the other's version is taken as where it started.
  */
 export function useDraftCompare(
-	element: HTMLElement,
+	element: HTMLElement & {repo?: unknown},
 	handle?: Handle,
 ): Accessor<DraftCompare | undefined> {
-	const compare = subscribe(element, {
-		type: "compare:view",
+	const view = subscribe(element, {
+		type: "compare-mode:view",
 		modes: {inline: true, "side-by-side": true, stacked: true},
 		draws: ["side-by-side"],
 		collapses: [...MODES],
 		prefers: "inline",
+	}) as unknown as Accessor<CompareView | undefined>
+	const comparison = subscribe(element, {type: "compare"}) as unknown as Accessor<Comparison | undefined>
+	const overlays = subscribe(element, {type: "overlays"}) as unknown as Accessor<OverlaysState | undefined>
+	// The other version: B to A's view, A to B's.
+	const other = createMemo<{overlay: Overlay} | undefined>(
+		() => {
+			const current = comparison()
+			const state = overlays()
+			if (!current || !state) return undefined
+			return {overlay: state.checkedOut === current.a ? current.b : current.a}
+		},
+		undefined,
+		{equals: (x, y) => x?.overlay === y?.overlay},
+	)
+	const url = handle?.url ?? element.getAttribute("doc-url") ?? ""
+	const members = createMemo(() => {
+		const current = other()
+		return current
+			? (subscribe(element, {type: "overlay:members", overlay: current.overlay} as never) as unknown as Accessor<
+					Member[] | undefined
+				>)
+			: undefined
 	})
-	// Bumped a moment after this draft's version last changed.
+	const missing = () => {
+		const listed = members()?.()
+		if (!listed) return undefined
+		const id = documentId(url)
+		return !listed.some(member => documentId(member.url) === id)
+	}
+
+	// Where the other version lives: the overlay provider says, asked for
+	// that version by name.
+	const descriptor = createMemo(() => {
+		const current = other()
+		return current && url
+			? (subscribe(element, {
+					type: "repo:handle-descriptor",
+					url: `automerge:${documentId(url)}`,
+					overlay: current.overlay,
+				} as never) as unknown as Accessor<Descriptor | undefined>)
+			: undefined
+	})
+
+	// The other version's handle, and its text as it changes.
+	const [theirHandle, setTheirHandle] = createSignal<Handle>()
+	const [theirs, setTheirs] = createSignal<Automerge.Doc<FileDoc>>()
+	createEffect(() => {
+		const answer = descriptor()?.()
+		const repo = element.repo as ViewRepo | undefined
+		setTheirHandle(undefined)
+		setTheirs(undefined)
+		if (!answer || !repo) return
+		let live = true
+		let found: Handle | undefined
+		const read = () => setTheirs(() => found?.doc() as Automerge.Doc<FileDoc>)
+		;(repo.baseRepo ?? repo).find(answer.cloneUrl ?? answer.url).then(
+			next => {
+				if (!live) return
+				found = next
+				setTheirHandle(() => next)
+				read()
+				next.on("change", read)
+			},
+			error => console.warn("[file] couldn't read the version compared with", error),
+		)
+		onCleanup(() => {
+			live = false
+			found?.off("change", read)
+		})
+	})
+
+	// Bumped a moment after this version last changed.
 	const [changed, setChanged] = createSignal(0)
 	if (handle) {
 		let timer: ReturnType<typeof setTimeout> | undefined
@@ -116,46 +194,42 @@ export function useDraftCompare(
 			handle.off("change", bump)
 		})
 	}
-	const view = () => compare() as unknown as CompareView | undefined
-	const theirs = createMemo(() => {
-		const other = view()?.other
-		if (!other) return undefined
-		try {
-			return Automerge.load<FileDoc>(other)
-		} catch (error) {
-			console.warn("[file] couldn't read the version compared with", error)
-			return undefined
-		}
-	})
 	const ours = () => {
 		changed()
 		return handle?.doc() as Automerge.Doc<FileDoc> | undefined
 	}
+	const names = createMemo<Names | null>(
+		() => {
+			const state = overlays()
+			const current = other()
+			return state && current
+				? {ours: overlayName(state, state.checkedOut), theirs: overlayName(state, current.overlay)}
+				: null
+		},
+		null,
+		{equals: (x, y) => x?.ours === y?.ours && x?.theirs === y?.theirs},
+	)
 	return createMemo<DraftCompare | undefined>(
 		() => {
 			const current = view()
 			const mode = MODES.find(each => each === current?.mode)
-			if (!current || !mode) return undefined
-			const collapsed = !!current.collapsed
-			const names = current.names ?? null
-			const merging = !!current.merging
-			if (current.missing) {
-				// Nothing to have parted from: all of it is new here, unless a
-				// merge takes it out, which leaves this side as it was.
-				const base = merging ? fileText(ours()) : ""
-				return {mode, original: "", base, collapsed, editable: false, names, merging}
+			if (!current || !mode || !other()) return undefined
+			const collapsed = !!current.options?.collapsed
+			if (missing()) {
+				// Nothing to have parted from: all of it is new here.
+				return {mode, original: "", base: "", collapsed, names: names()}
 			}
-			const other = theirs()
-			if (!other) return undefined
-			const original = fileText(other)
+			const text = theirs()
+			const writable = theirHandle()
+			if (!text || !writable) return undefined
+			const original = fileText(text)
 			return {
 				mode,
 				original,
-				base: ancestorText(ours(), other) ?? original,
+				base: ancestorText(ours(), text) ?? original,
 				collapsed,
-				editable: !!current.editable,
-				names,
-				merging,
+				edit: writable.change && !writable.isReadOnly?.() ? splices => spliceInto(writable, splices) : undefined,
+				names: names(),
 			}
 		},
 		undefined,
@@ -165,12 +239,32 @@ export function useDraftCompare(
 				a?.original === b?.original &&
 				a?.base === b?.base &&
 				a?.collapsed === b?.collapsed &&
-				a?.editable === b?.editable &&
+				!a?.edit === !b?.edit &&
 				a?.names?.ours === b?.names?.ours &&
-				a?.names?.theirs === b?.names?.theirs &&
-				a?.merging === b?.merging,
+				a?.names?.theirs === b?.names?.theirs,
 		},
 	)
+}
+
+// What an overlay is called: main, a draft's name, or a merge's two sides.
+function overlayName(state: OverlaysState, overlay: Overlay): string {
+	if (overlay === null) return "Main"
+	const draft = state.drafts.find(entry => entry.url === overlay)
+	if (draft) return draft.name
+	const merge = state.merges.find(entry => entry.url === overlay)
+	return merge ? `${overlayName(state, merge.source)} → ${overlayName(state, merge.target)}` : ""
+}
+
+function documentId(url: string) {
+	return url.replace(/^automerge:/, "").split(/[/#]/)[0]
+}
+
+// The splices made to the other version's text, through its handle.
+function spliceInto(handle: Handle, splices: TextSplice[]) {
+	handle.change!(doc => {
+		for (const each of splices)
+			Automerge.splice(doc as Automerge.Doc<unknown>, each.path, each.index, each.remove, each.insert)
+	})
 }
 
 // The file's text where `ours` and `theirs` parted, read from `theirs`,
@@ -189,9 +283,9 @@ function ancestorText(
 }
 
 /**
- * The editor for `doc`: on its own, with what this draft changed marked
- * (stacked), or both drafts' changes marked and nothing typed into it
- * (combined), or beside the other version, each marked with what its draft
+ * The editor for `doc`: on its own, with what this version changed marked
+ * (stacked), or both versions' changes marked and nothing typed into it
+ * (combined), or beside the other version, each marked with what it
  * changed, while it's side by side, which it's built for (see
  * `useDraftCompare`).
  */
@@ -202,27 +296,14 @@ export function diffEditor(config: {
 	besideExtensions: Extension[]
 	compare: Accessor<DraftCompare | undefined>
 	beside: boolean
-	/**
-	 * Where to ask for the other version to be changed from, whenever it can
-	 * be. It's only read without.
-	 */
-	editsFrom?: HTMLElement
 }): {view: EditorView; dom: HTMLElement; views: EditorView[]; destroy(): void} {
 	if (config.beside) return besideDiff(config)
 	const marks = new Compartment()
-	const merge = new Compartment()
 	const view = new EditorView({
 		doc: config.doc,
-		extensions: [config.extensions, marks.of([]), merge.of(merging(!!untrack(config.compare)?.merging))],
+		extensions: [config.extensions, marks.of([])],
 	})
 	followAlone(view, marks, config.compare)
-	createEffect(
-		on(
-			() => !!config.compare()?.merging,
-			current => view.dispatch({effects: merge.reconfigure(merging(current))}),
-			{defer: true},
-		),
-	)
 	return {view, dom: view.dom, views: [view], destroy: () => view.destroy()}
 }
 
@@ -269,19 +350,17 @@ function followAlone(
 // the other: lines that differ on both sides are yellow on both, the two
 // alternatives facing each other; lines only one side has are green where
 // its draft added them, red where the other draft took them out. What's
-// typed into A goes to the other draft, while it can.
+// typed into A goes into the other version, where it can.
 function besideDiff(config: {
 	doc: string
 	extensions: Extension[]
 	besideExtensions: Extension[]
 	compare: Accessor<DraftCompare | undefined>
-	editsFrom?: HTMLElement
 }) {
 	const initial = untrack(config.compare)
-	const writable = (current: DraftCompare | undefined) =>
-		!!config.editsFrom && !!current?.editable
+	const writable = (current: DraftCompare | undefined) => !!current?.edit
 	const lock = new Compartment()
-	const theirs = config.editsFrom ? sendEdits(config.editsFrom) : undefined
+	const theirs = sendEdits(() => config.compare()?.edit)
 	const base = initial?.base ?? initial?.original ?? ""
 	const merge = new MergeView({
 		a: {
@@ -342,15 +421,8 @@ function besideDiff(config: {
 		const names = current?.names
 		headings.hidden = !names
 		if (!names) return
-		// A merge is what happens to the target: before it, after it, in no
-		// draft's colour. Compared, each side is its draft.
-		if (current.merging) {
-			ours.show("After", NEUTRAL)
-			other.show("Before", NEUTRAL)
-		} else {
-			ours.show(names.ours, OURS)
-			other.show(names.theirs, THEIRS)
-		}
+		ours.show(names.ours, OURS)
+		other.show(names.theirs, THEIRS)
 	})
 
 	createEffect(
@@ -358,8 +430,7 @@ function besideDiff(config: {
 			() => config.compare()?.original,
 			text => {
 				if (text === undefined) return
-				if (theirs) theirs.receive(merge.a, text)
-				else follow(merge.a, text)
+				theirs.receive(merge.a, text)
 			},
 			{defer: true},
 		),
@@ -441,27 +512,14 @@ function heading() {
 
 const LOCKED: Extension = [EditorState.readOnly.of(true), EditorView.editable.of(false)]
 
-// Marks what came from the other draft, so it isn't sent back.
+// Marks what came from the other version, so it isn't sent back.
 const FROM_THEM = Annotation.define<boolean>()
 
-// An edit is taken as lost if it isn't answered by then.
-const EDIT_TIMEOUT_MS = 5000
-
 /**
- * What's typed into the other version, asked of `element` as
- * `compare:edit`, and the other version as it comes back, which waits while
- * edits are on their way, so it doesn't undo them for a moment.
+ * What's typed into the other version, spliced into it through `edit`, and
+ * the other version as it comes back.
  */
-function sendEdits(element: HTMLElement) {
-	let pending = 0
-	let waiting: {view: EditorView; text: string} | undefined
-	const settled = () => {
-		pending--
-		if (pending > 0 || !waiting) return
-		const {view, text} = waiting
-		waiting = undefined
-		follow(view, text)
-	}
+function sendEdits(edit: () => DraftCompare["edit"]) {
 	return {
 		extension: EditorView.updateListener.of(update => {
 			const splices = update.transactions.flatMap(transaction =>
@@ -469,21 +527,10 @@ function sendEdits(element: HTMLElement) {
 					? splicesOf(transaction.changes)
 					: [],
 			)
-			if (!splices.length) return
-			pending++
-			let done = false
-			const settle = () => {
-				if (done) return
-				done = true
-				clearTimeout(timer)
-				settled()
-			}
-			const timer = setTimeout(settle, EDIT_TIMEOUT_MS)
-			request(element, {type: "compare:edit", splices}).then(settle, settle)
+			if (splices.length) edit()?.(splices)
 		}),
 		receive(view: EditorView, text: string) {
-			if (pending > 0) waiting = {view, text}
-			else follow(view, text)
+			follow(view, text)
 		},
 	}
 }
@@ -534,23 +581,16 @@ export function follow(view: EditorView, text: string) {
 const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
 const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff
 
-// What each draft changed, in the colours the panel showing it gives them.
-// A pane showing one version (on its own, or beside the other) marks added,
-// removed, and changed lines in green, red and amber: its heading already
-// says which draft it is. Combined, both drafts' changes share one text,
-// so they're told apart by the drafts' own colours; while merging, that's
-// what the merge does to the target, in green and red.
-const INSERTED = "var(--compare-inserted, #22bb22)"
-const DELETED = "var(--compare-deleted, #ee4433)"
-const MODIFIED = "var(--compare-modified, #dba617)"
-const OURS = "var(--compare-ours, #3b7dd8)"
-const THEIRS = "var(--compare-theirs, #9b5de5)"
-const NEUTRAL = "var(--compare-neutral, #8a8883)"
-
-// Merging, combined marks what the merge does to the target, in green and
-// red, not by draft (see COMBINED_THEME).
-const merging = (on: boolean): Extension =>
-	on ? EditorView.editorAttributes.of({class: "cm-diff-merge"}) : []
+// What each version changed, in the colours the host gives them. A pane
+// showing one version (on its own, or beside the other) marks added,
+// removed, and changed-on-both-sides lines: its heading already says which
+// version it is. Combined, both versions' changes share one text, so they're
+// told apart by the versions' own colours, A's and B's.
+const INSERTED = "var(--compare-added, #22bb22)"
+const DELETED = "var(--compare-removed, #ee4433)"
+const MODIFIED = "var(--compare-conflict, #dba617)"
+const OURS = "var(--compare-a, #3b7dd8)"
+const THEIRS = "var(--compare-b, #9b5de5)"
 const tint = (colour: string, amount: number) =>
 	`color-mix(in srgb, ${colour} ${amount}%, transparent)`
 const underline = (colour: string) =>
@@ -878,8 +918,7 @@ const oursLine = Decoration.line({class: "cm-oursLine"})
  * Where this draft's text and the other's differ, line by line, both
  * versions as alternatives: this draft's lines where they are, and the
  * other's, as lines of their own, right after them (or where they'd be).
- * Nothing's struck out; each is in its draft's colour (merging, the target
- * after the merge, and before it).
+ * Nothing's struck out; each is in its version's colour.
  */
 export function combinedRanges(ours: Text, theirs: string): Range<Decoration>[] {
 	const theirLines = theirs.split("\n")
@@ -928,8 +967,6 @@ function combined(base: string, theirs: string): Extension {
 
 const COMBINED_THEME = EditorView.theme({
 	"&": {"--combined-ours": OURS, "--combined-theirs": THEIRS},
-	// Merging: what the merge leaves (added) and what it replaces (removed).
-	"&.cm-diff-merge": {"--combined-ours": INSERTED, "--combined-theirs": DELETED},
 	[`${LINE}.cm-oursLine`]: {
 		backgroundColor: `${tint("var(--combined-ours)", 12)} !important`,
 		boxShadow: "inset 3px 0 var(--combined-ours)",

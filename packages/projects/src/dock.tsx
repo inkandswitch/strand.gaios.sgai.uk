@@ -69,7 +69,7 @@ type Panel = PanelState & {
 export function Dock(props: {
 	route: ProjectRoute
 	repo: Repo
-	draftKey: string
+	overlayKey: string
 	comparing: Comparing | undefined
 	focus(panel: ProjectRoute | undefined): void
 	/** where the dock's groups are offered, for opening into one */
@@ -123,7 +123,7 @@ export function Dock(props: {
 
 	createEffect(on(() => props.route, place))
 
-	createEffect(on(() => props.draftKey, relocateOthers, {defer: true}))
+	createEffect(on(() => props.overlayKey, relocateOthers, {defer: true}))
 
 	createEffect(() => {
 		const host = props.host
@@ -235,7 +235,7 @@ export function Dock(props: {
 		api?.addPanel({id, component: "document", title: "", position})
 	}
 
-	// On another draft, what the other panels show may have moved, or not be
+	// On another overlay, what the other panels show may have moved, or not be
 	// there at all. The focused one goes with the route.
 	function relocateOthers() {
 		const find: FindDoc = async url => (await props.repo.find(url)).doc()
@@ -268,7 +268,7 @@ export function Dock(props: {
 						<DockPanel
 							route={panel.route}
 							repo={props.repo}
-							draftKey={() => props.draftKey}
+							overlayKey={() => props.overlayKey}
 							setTitle={title => {
 								panelApi.setTitle(title)
 								if (api) setGroups(groupsOf(api))
@@ -353,7 +353,7 @@ export function Dock(props: {
 function DockPanel(props: {
 	route: Accessor<ProjectRoute>
 	repo: Repo
-	draftKey: Accessor<string>
+	overlayKey: Accessor<string>
 	setTitle(title: string): void
 	setTool(toolId: string | undefined): void
 	tool: Accessor<string | undefined>
@@ -366,10 +366,10 @@ function DockPanel(props: {
 		<Show when={docUrl()} fallback={<p class="projects__empty">{EMPTY}</p>}>
 			{url => (
 				// Most tools keep showing what they first read when their handle
-				// moves onto another draft's copy, so each draft gets views of its
-				// own.
-				<Show when={props.draftKey()} keyed>
-					{_draft => (
+				// moves onto another overlay's copy, so each overlay gets views of
+				// its own.
+				<Show when={props.overlayKey()} keyed>
+					{_overlay => (
 						<Compared
 							url={url()}
 							toolId={props.route().location.toolId}

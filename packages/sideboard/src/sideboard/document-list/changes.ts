@@ -1,77 +1,225 @@
-import { parseAutomergeUrl, type AutomergeUrl } from "@automerge/automerge-repo/slim";
-import { subscribe } from "@inkandswitch/patchwork-providers-solid";
-import { createMemo, createSignal } from "solid-js";
+import {
+	parseAutomergeUrl,
+	type AutomergeUrl,
+} from "@automerge/automerge-repo/slim"
+import {request} from "@inkandswitch/patchwork-providers"
+import {subscribe} from "@inkandswitch/patchwork-providers-solid"
+import {createEffect, createMemo, createSignal, onCleanup} from "solid-js"
 
-// How a file differs. Compared with another draft: both drafts have it and
-// it `differs`, or only `ours` (the checked-out draft) or `theirs` has it.
-// Merged into another draft, what the merge does to that draft's version:
-// `added`, `removed`, `changed`, or changed where `both` drafts edited it.
-export type Mark =
-  | "differs"
-  | "ours"
-  | "theirs"
-  | "added"
-  | "removed"
-  | "changed"
-  | "both";
+// How a member differs between the two versions compared: both have it and
+// it `differs`, or only `ours` (A, the checked-out version) or `theirs` (B)
+// has it. A folder takes the marks of what's beneath it.
+export type Mark = "differs" | "ours" | "theirs"
 
-// A file or folder the checked-out draft doesn't have, linked from `parent`.
+// A file or folder only B has, linked from `parent`.
 export type Ghost = {
-  url: AutomergeUrl;
-  name: string;
-  type: string | undefined;
-  folder: boolean;
-  parent: AutomergeUrl;
-};
+	url: AutomergeUrl
+	name: string
+	type: string | undefined
+	folder: boolean
+	parent: AutomergeUrl
+}
 
 /**
- * The checked-out draft compared with another, or merged into one, as the
- * rows read it: a file that differs is marked with how, a folder with what's
- * beneath it, what only the other draft has shows as ghosts, and everything
- * else is quieter, or, `collapsed`, folded away.
+ * The checked-out version compared with another, as the rows read it: a
+ * file that differs is marked with how, a folder with what's beneath it,
+ * what only the other version has shows as ghosts, and everything else is
+ * quieter, or, `collapsed`, folded away.
  */
 export type ChangeMarks = {
-  mark(url: AutomergeUrl): Mark | undefined;
-  comparing(): boolean;
-  ghostsIn(folder: AutomergeUrl): Ghost[];
-  /** while comparing, whether what's unchanged is folded away */
-  collapsed(): boolean;
-  toggleCollapsed(): void;
-};
+	mark(url: AutomergeUrl): Mark | undefined
+	comparing(): boolean
+	ghostsIn(folder: AutomergeUrl): Ghost[]
+	/** while comparing, whether what's unchanged is folded away */
+	collapsed(): boolean
+	toggleCollapsed(): void
+}
 
-// The compare provider's `compare:changes`. Without one above (outside a
-// draft) nothing is marked.
-type CompareChanges = {
-  status: "off" | "loading" | "ready";
-  files: Record<AutomergeUrl, Mark>;
-  folders: Record<AutomergeUrl, Mark>;
-  ghosts?: Ghost[];
-};
+type Overlay = AutomergeUrl | null
+type Comparison = {a: Overlay; b: Overlay} | null
+type Member = {url: AutomergeUrl; heads: string[]; parent: AutomergeUrl | null}
+type Link = {url?: unknown; name?: unknown; type?: unknown}
+// Where a version of a document lives, as the overlay provider answers
+// `repo:handle-descriptor`.
+type Descriptor = {url: AutomergeUrl; cloneUrl?: AutomergeUrl}
+// The repo a view is handed: Patchwork's, over the page's base repo.
+type ViewRepo = {
+	baseRepo?: ViewRepo
+	find(url: AutomergeUrl): Promise<{doc(): unknown}>
+}
 
-const NONE: CompareChanges = { status: "off", files: {}, folders: {}, ghosts: [] };
+/**
+ * What differs between the two versions compared, from each one's members:
+ * a member with other heads differs, one only a version has is only there.
+ */
+export function useChangeMarks(
+	element: HTMLElement & {repo?: unknown}
+): ChangeMarks {
+	const comparison = subscribe(
+		element,
+		{type: "compare"},
+		null
+	) as unknown as () => Comparison
+	const [names, setNames] = createSignal(
+		new Map<string, {name: string; type?: string}>()
+	)
+	const [collapsed, setCollapsed] = createSignal(false)
 
-export function useChangeMarks(element: HTMLElement): ChangeMarks {
-  const changes = subscribe<CompareChanges>(element, { type: "compare:changes" }, NONE);
-  const marks = createMemo(() => ({ ...changes().folders, ...changes().files }));
-  const ghosts = createMemo(() => {
-    const byParent = new Map<string, Ghost[]>();
-    for (const ghost of changes().ghosts ?? []) {
-      const key = documentOf(ghost.parent);
-      byParent.set(key, [...(byParent.get(key) ?? []), ghost]);
-    }
-    return byParent;
-  });
-  const [collapsed, setCollapsed] = createSignal(false);
-  const comparing = () => changes().status === "ready";
-  return {
-    mark: (url) => marks()[url],
-    comparing,
-    ghostsIn: (folder) => ghosts().get(documentOf(folder)) ?? [],
-    collapsed: () => comparing() && collapsed(),
-    toggleCollapsed: () => setCollapsed((yn) => !yn),
-  };
+	// Each version's members, while two are compared.
+	const members = createMemo(() => {
+		const current = comparison()
+		if (!current) return undefined
+		const of = (overlay: Overlay) =>
+			subscribe(element, {
+				type: "overlay:members",
+				overlay,
+			} as never) as unknown as () => Member[] | undefined
+		return {ours: of(current.a), theirs: of(current.b)}
+	})
+
+	const changes = createMemo(() => {
+		const a = members()?.ours()
+		const b = members()?.theirs()
+		if (!a || !b) return undefined
+		return compare(a, b)
+	})
+
+	// A ghost is named as its entry in the folder it's in, in B.
+	createEffect(() => {
+		const current = changes()
+		const other = comparison()
+		const repo = element.repo as ViewRepo | undefined
+		if (!current || !other || !repo) return
+		const base = repo.baseRepo ?? repo
+		let live = true
+		for (const ghost of current.onlyTheirs) {
+			if (!ghost.parent || names().has(documentOf(ghost.url))) continue
+			const parent = ghost.parent
+			// B's version of the folder, from the overlay provider.
+			request<Descriptor>(element, {
+				type: "repo:handle-descriptor",
+				url: `automerge:${documentOf(parent)}`,
+				overlay: other.b,
+			} as never)
+				.then(answer => base.find(answer.cloneUrl ?? answer.url))
+				.then(
+					handle => {
+						if (!live) return
+						const docs =
+							(handle.doc() as {docs?: Link[]} | undefined)?.docs ?? []
+						const link = docs.find(
+							each =>
+								typeof each.url === "string" &&
+								documentOf(each.url as AutomergeUrl) === documentOf(ghost.url)
+						)
+						if (!link) return
+						setNames(previous =>
+							new Map(previous).set(documentOf(ghost.url), {
+								name: String(link.name ?? ""),
+								type: typeof link.type === "string" ? link.type : undefined,
+							})
+						)
+					},
+					() => {}
+				)
+		}
+		onCleanup(() => {
+			live = false
+		})
+	})
+
+	const ghosts = createMemo(() => {
+		const byParent = new Map<string, Ghost[]>()
+		const current = changes()
+		if (!current) return byParent
+		for (const member of current.onlyTheirs) {
+			if (!member.parent) continue
+			const named = names().get(documentOf(member.url))
+			const ghost: Ghost = {
+				url: member.url,
+				name: named?.name ?? "",
+				type: named?.type,
+				folder: current.folders.has(documentOf(member.url)),
+				parent: member.parent,
+			}
+			const key = documentOf(member.parent)
+			byParent.set(key, [...(byParent.get(key) ?? []), ghost])
+		}
+		return byParent
+	})
+
+	const comparing = () => !!changes()
+	return {
+		mark: url => changes()?.marks.get(documentOf(url)),
+		comparing,
+		ghostsIn: folder => ghosts().get(documentOf(folder)) ?? [],
+		collapsed: () => comparing() && collapsed(),
+		toggleCollapsed: () => setCollapsed(yn => !yn),
+	}
+}
+
+/**
+ * How `ours` and `theirs` differ, member by member, by document. A folder
+ * (anything another member was reached from) is marked for what's beneath
+ * it rather than for itself: one mark where everything beneath agrees,
+ * `differs` where it doesn't.
+ */
+export function compare(ours: Member[], theirs: Member[]) {
+	const byOurs = new Map(ours.map(member => [documentOf(member.url), member]))
+	const byTheirs = new Map(
+		theirs.map(member => [documentOf(member.url), member])
+	)
+	const folders = new Set<string>()
+	for (const member of [...ours, ...theirs])
+		if (member.parent) folders.add(documentOf(member.parent))
+
+	const marks = new Map<string, Mark>()
+	const beneath = new Map<string, Set<Mark>>()
+	const markUp = (
+		member: Member | undefined,
+		mark: Mark,
+		side: Map<string, Member>
+	) => {
+		const seen = new Set<string>()
+		let parent = member?.parent
+		while (parent && !seen.has(documentOf(parent))) {
+			const id = documentOf(parent)
+			seen.add(id)
+			beneath.set(id, (beneath.get(id) ?? new Set()).add(mark))
+			parent = side.get(id)?.parent ?? null
+		}
+	}
+	for (const member of ours) {
+		const id = documentOf(member.url)
+		const other = byTheirs.get(id)
+		const mark: Mark | undefined = !other
+			? "ours"
+			: sameHeads(member.heads, other.heads)
+				? undefined
+				: "differs"
+		if (!mark) continue
+		if (!folders.has(id)) marks.set(id, mark)
+		markUp(member, mark, byOurs)
+	}
+	const onlyTheirs: Member[] = []
+	for (const member of theirs) {
+		const id = documentOf(member.url)
+		if (byOurs.has(id)) continue
+		onlyTheirs.push(member)
+		if (!folders.has(id)) marks.set(id, "theirs")
+		markUp(member, "theirs", byTheirs)
+	}
+	for (const [id, below] of beneath)
+		marks.set(id, below.size === 1 ? [...below][0] : "differs")
+	return {marks, folders, onlyTheirs}
+}
+
+function sameHeads(a: readonly string[], b: readonly string[]) {
+	if (a.length !== b.length) return false
+	const set = new Set(b)
+	return a.every(head => set.has(head))
 }
 
 function documentOf(url: AutomergeUrl): string {
-  return parseAutomergeUrl(url).documentId;
+	return parseAutomergeUrl(url).documentId
 }

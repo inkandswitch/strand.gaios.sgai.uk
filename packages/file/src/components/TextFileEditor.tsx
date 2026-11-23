@@ -134,8 +134,6 @@ function Editor(
 		doc: props.doc.content?.toString() || "",
 		compare: props.compare,
 		beside: !!props.beside,
-		// The other draft's version is edited like this one, while it can be.
-		editsFrom: props.handle ? props.element : undefined,
 		besideExtensions: [
 			lineNumbers(),
 			highlightSpecialChars(),

@@ -49,6 +49,14 @@
 	--projects-review-fill: #faeeda;
 	--projects-danger: #a32d2d;
 	--projects-lane-current: var(--projects-ours);
+	/* The two versions compared, A checked out and B the other, and what
+	   tells them apart: added, removed, and changed on both sides. Views and
+	   compare modes take these by name. */
+	--compare-a: var(--projects-ours);
+	--compare-b: var(--projects-theirs);
+	--compare-added: var(--projects-added);
+	--compare-removed: var(--projects-removed);
+	--compare-conflict: var(--projects-modified);
 }
 
 [theme="dark"] {
@@ -691,34 +699,12 @@ button.projects__token:hover {
 	overflow: auto;
 }
 
-/* diffs beside the other version mark what's only in the checked-out draft
-   as added, what's only in the other as removed, and lines changed on both
-   sides as modified, each side headed by its draft's colour and name;
-   inline, they're in the drafts' own colours */
+/* the colours a comparison is drawn in are the root's (`--compare-a` and
+   the rest); these are what compared views draw with besides */
 .projects__compare {
 	--compare-neutral: var(--projects-changed);
-	--compare-inserted: var(--projects-added);
-	--compare-deleted: var(--projects-removed);
-	--compare-modified: var(--projects-modified);
 	--compare-edge: var(--projects-surface-edge);
 	--compare-heading: var(--projects-secondary);
-	/* views that mark it their own way, or label which draft is which,
-	   take the colours by name */
-	--compare-ours: var(--projects-ours);
-	--compare-theirs: var(--projects-theirs);
-	--compare-added: var(--projects-added);
-	--compare-removed: var(--projects-removed);
-}
-
-/* merging: what happens to the target, before and after, in no draft's colour */
-.projects__compare--merge {
-	--compare-inserted: var(--projects-added);
-	--compare-deleted: var(--projects-removed);
-	--compare-neutral: var(--projects-changed);
-}
-
-.projects__read-only {
-	display: contents;
 }
 
 .projects__other-draft {

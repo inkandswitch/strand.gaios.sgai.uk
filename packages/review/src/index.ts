@@ -1,7 +1,7 @@
 import type { Plugin } from "@inkandswitch/patchwork-plugins";
 
 export const plugins: Plugin<any>[] = [
-  // Mounts inside the draft provider: the checked-out draft compared with another.
+  // Mounts inside the overlay provider: the checked-out overlay compared with another.
   {
     type: "patchwork:component",
     id: "patchwork-compare-provider",
@@ -13,5 +13,4 @@ export const plugins: Plugin<any>[] = [
   },
 ];
 
-export type { CompareAgainst, CompareChanges, ComparedVersion, TextSplice } from "./provider.js";
-export type { CompareMark, Ghost, Mark, MergeMark } from "./compare.js";
+export type { Comparison, Overlay } from "./provider.js";
