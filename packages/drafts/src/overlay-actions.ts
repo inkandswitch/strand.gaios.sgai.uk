@@ -12,23 +12,23 @@ import { cloneAt } from "./draft-clones.js";
 import type {
   CloneEntry,
   DraftDoc,
-  HasOverlays,
+  HasWorkspace,
   MergeDoc,
-  OverlayIndex,
+  Workspace,
 } from "./overlay-types.js";
 
 // What the overlay provider's commands change. Each takes the base repo: the
 // overlays' own bookkeeping never resolves through an overlay.
 
-// The root's index, made the first time it's needed.
-export async function ensureIndex(
+// The root's workspace, made the first time it's needed.
+export async function ensureWorkspace(
   repo: Repo,
-  root: DocHandle<HasOverlays>
-): Promise<DocHandle<OverlayIndex>> {
-  const existing = await findIndex(repo, root);
+  root: DocHandle<HasWorkspace>
+): Promise<DocHandle<Workspace>> {
+  const existing = await findWorkspace(repo, root);
   if (existing) return existing;
-  const index = repo.create<OverlayIndex>({
-    "@patchwork": { type: "overlay-index" },
+  const workspace = repo.create<Workspace>({
+    "@patchwork": { type: "workspace" },
     drafts: [],
     merges: [],
   });
@@ -36,17 +36,17 @@ export async function ensureIndex(
     // Mutate `@patchwork` in place. Reassigning a spread would carry
     // references to existing Automerge objects into a new object.
     if (!d["@patchwork"]) d["@patchwork"] = {};
-    d["@patchwork"]!.overlaysUrl = index.url;
+    d["@patchwork"]!.workspaceUrl = workspace.url;
   });
-  return index;
+  return workspace;
 }
 
-export async function findIndex(
+export async function findWorkspace(
   repo: Repo,
-  root: DocHandle<HasOverlays>
-): Promise<DocHandle<OverlayIndex> | null> {
-  const url = root.doc()?.["@patchwork"]?.overlaysUrl;
-  return url && isValidAutomergeUrl(url) ? repo.find<OverlayIndex>(url) : null;
+  root: DocHandle<HasWorkspace>
+): Promise<DocHandle<Workspace> | null> {
+  const url = root.doc()?.["@patchwork"]?.workspaceUrl;
+  return url && isValidAutomergeUrl(url) ? repo.find<Workspace>(url) : null;
 }
 
 // A draft forked off `parent` (null for main) as it is now. Forking clones
@@ -54,10 +54,10 @@ export async function findIndex(
 // reads that until the member's first write clones it.
 export async function createDraft(
   repo: Repo,
-  root: DocHandle<HasOverlays>,
+  root: DocHandle<HasWorkspace>,
   parent: AutomergeUrl | null
 ): Promise<AutomergeUrl> {
-  const index = await ensureIndex(repo, root);
+  const workspace = await ensureWorkspace(repo, root);
   const parentDoc = parent ? (await repo.find<DraftDoc>(parent)).doc() : null;
   const clones = await forkPoints(repo, root.url, parentDoc);
   const draft = repo.create<DraftDoc>({
@@ -65,7 +65,7 @@ export async function createDraft(
     parent,
     clones,
   });
-  index.change((d) => {
+  workspace.change((d) => {
     d.drafts.push(draft.url);
   });
   return draft.url;
@@ -84,16 +84,16 @@ export async function renameDraft(
   });
 }
 
-// `source` merged into `target`, as a merge to look over first. There's one
-// per source and target: asking again answers the one there is.
+// `source` merged into `target`, to look over first: the pull request for
+// the pair if there is one, or else a new preview, which nothing lists.
 export async function createMerge(
   repo: Repo,
-  root: DocHandle<HasOverlays>,
+  root: DocHandle<HasWorkspace>,
   source: AutomergeUrl | null,
   target: AutomergeUrl | null
 ): Promise<AutomergeUrl> {
-  const index = await ensureIndex(repo, root);
-  for (const url of index.doc()?.merges ?? []) {
+  const workspace = await findWorkspace(repo, root);
+  for (const url of workspace?.doc()?.merges ?? []) {
     const doc = (await repo.find<MergeDoc>(url)).doc();
     if (doc?.source === source && doc?.target === target) return url;
   }
@@ -103,10 +103,20 @@ export async function createMerge(
     target,
     clones: {},
   });
-  index.change((d) => {
-    d.merges.push(merge.url);
-  });
   return merge.url;
+}
+
+// Lists a preview in the workspace, which makes it a pull request.
+export async function publishMerge(
+  repo: Repo,
+  root: DocHandle<HasWorkspace>,
+  merge: AutomergeUrl
+): Promise<void> {
+  const workspace = await ensureWorkspace(repo, root);
+  if (workspace.doc()?.merges.includes(merge)) return;
+  workspace.change((d) => {
+    d.merges.push(merge);
+  });
 }
 
 // Takes a draft or a merge off the list. A draft goes with every merge it's
@@ -114,11 +124,11 @@ export async function createMerge(
 // they are.
 export async function deleteOverlay(
   repo: Repo,
-  index: DocHandle<OverlayIndex>,
+  workspace: DocHandle<Workspace>,
   url: AutomergeUrl
 ): Promise<void> {
-  const inputs = await mergesOf(repo, index, url);
-  index.change((d) => {
+  const inputs = await mergesOf(repo, workspace, url);
+  workspace.change((d) => {
     remove(d.drafts, url);
     remove(d.merges, url);
     for (const merge of inputs) remove(d.merges, merge);
@@ -137,7 +147,7 @@ export type MergeReading = {
 // draft, come off the list.
 export async function acceptMerge(
   repo: Repo,
-  index: DocHandle<OverlayIndex>,
+  workspace: DocHandle<Workspace>,
   merge: DocHandle<MergeDoc>,
   reading: MergeReading
 ): Promise<void> {
@@ -151,8 +161,8 @@ export async function acceptMerge(
       continue;
     copy.update((current) => Automerge.merge(current as Automerge.Doc<unknown>, merged));
   }
-  const gone = doc.source ? [...(await mergesOf(repo, index, doc.source))] : [];
-  index.change((d) => {
+  const gone = doc.source ? [...(await mergesOf(repo, workspace, doc.source))] : [];
+  workspace.change((d) => {
     remove(d.merges, merge.url);
     if (!doc.source) return;
     remove(d.drafts, doc.source);
@@ -230,11 +240,11 @@ async function writableCopy(
 // The merges `draft` is the source or target of.
 async function mergesOf(
   repo: Repo,
-  index: DocHandle<OverlayIndex>,
+  workspace: DocHandle<Workspace>,
   draft: AutomergeUrl
 ): Promise<Set<AutomergeUrl>> {
   const found = new Set<AutomergeUrl>();
-  for (const url of index.doc()?.merges ?? []) {
+  for (const url of workspace.doc()?.merges ?? []) {
     if (url === draft) continue;
     const doc = (await repo.find<MergeDoc>(url)).doc();
     if (doc?.source === draft || doc?.target === draft) found.add(url);

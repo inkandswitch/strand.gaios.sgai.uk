@@ -656,7 +656,7 @@ function scratchRepo(): Repo {
 
 /**
  * The repo beneath any overlay. The overlays' own bookkeeping (drafts,
- * merges, the index) reads documents as they are, so it must never resolve
+ * merges, the workspace) reads documents as they are, so it must never resolve
  * through an `OverlayRepo`, even from inside one.
  */
 export function baseRepo(repo: Repo): Repo {

@@ -5,9 +5,16 @@ import { CompareProvider, type Comparison } from "./provider.js";
 
 const A = "automerge:2y3c9FQ2RBQTqgrEW4yW7uEDdtQ6" as const;
 const B = "automerge:3U4FuN9HU7s4mxg9qRkbFsvpW19m" as const;
+const M = "automerge:4NMNnkaBhtDxSNQvmFNh1BMAUBhC" as const;
 
 // An overlay provider that answers `overlays` with whatever it's given.
-function overlays(initial: { checkedOut: string | null; drafts: string[] }) {
+type Shape = {
+  checkedOut: string | null;
+  drafts: string[];
+  merges?: { url: string; source: string | null; target: string | null }[];
+};
+
+function overlays(initial: Shape) {
   const parent = document.createElement("div");
   let state = initial;
   const listeners = new Set<(value: unknown) => void>();
@@ -15,7 +22,7 @@ function overlays(initial: { checkedOut: string | null; drafts: string[] }) {
     checkedOut: state.checkedOut,
     status: "ready",
     drafts: state.drafts.map((url) => ({ url, name: "Draft", parent: null })),
-    merges: [],
+    merges: (state.merges ?? []).map((merge) => ({ ...merge, published: false })),
   });
   parent.addEventListener("patchwork:subscribe", ((event: SubscribeEvent) => {
     if (event.detail.selector.type !== "overlays") return;
@@ -26,7 +33,7 @@ function overlays(initial: { checkedOut: string | null; drafts: string[] }) {
       return () => listeners.delete(send);
     });
   }) as EventListener);
-  const set = (next: typeof initial) => {
+  const set = (next: Shape) => {
     state = next;
     for (const respond of listeners) respond(shape());
   };
@@ -53,7 +60,7 @@ describe("the compare provider", () => {
   it("starts from the `against` attribute, main included", async () => {
     const { latest, tick, done } = mount("main");
     await tick();
-    expect(latest()).toEqual({ a: A, b: null });
+    expect(latest()).toEqual({ kind: "compare", a: A, b: null });
     done();
   });
 
@@ -62,7 +69,7 @@ describe("the compare provider", () => {
     await tick();
     expect(latest()).toBeNull();
     expect(await request(child, { type: "compare:set", overlay: B } as never)).toBe(true);
-    expect(latest()).toEqual({ a: A, b: B });
+    expect(latest()).toEqual({ kind: "compare", a: A, b: B });
     expect(await request(child, { type: "compare:clear" } as never)).toBe(true);
     expect(latest()).toBeNull();
     done();
@@ -80,6 +87,30 @@ describe("the compare provider", () => {
     host.set({ checkedOut: B, drafts: [B] });
     await tick();
     expect(latest()).toBeNull();
+    done();
+  });
+
+  it("shows a checked-out merge against its target, as a merge, whatever was set", async () => {
+    const { child, host, latest, tick, done } = mount();
+    await tick();
+    await request(child, { type: "compare:set", overlay: B } as never);
+    host.set({ checkedOut: M, drafts: [A, B], merges: [{ url: M, source: A, target: null }] });
+    await tick();
+    expect(latest()).toEqual({
+      kind: "merge",
+      a: M,
+      b: null,
+      source: A,
+      target: null,
+      published: false,
+    });
+    expect(await request(child, { type: "compare:set", overlay: A } as never)).toBeNull();
+    expect(await request(child, { type: "compare:clear" } as never)).toBeNull();
+
+    // What was set comes back once the merge isn't checked out.
+    host.set({ checkedOut: A, drafts: [A, B] });
+    await tick();
+    expect(latest()).toEqual({ kind: "compare", a: A, b: B });
     done();
   });
 });

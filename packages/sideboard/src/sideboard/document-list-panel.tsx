@@ -177,6 +177,13 @@ export function DocumentListPanel(props: {
     <aside class="document-list" on:contextmenu={openNewMenu}>
       <Show when={changes.comparing()}>
         <div class="document-list__compare-bar">
+          <Show when={changes.merge()}>
+            {(merge) => (
+              <span class="document-list__compare-kind">
+                {merge().published ? "Pull request" : "Merge preview"}
+              </span>
+            )}
+          </Show>
           <button
             type="button"
             class="document-list__collapse"

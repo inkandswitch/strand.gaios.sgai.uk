@@ -13,8 +13,10 @@ import type { OverlayRepo } from "./overlay-repo.js";
 import type {
   DraftDoc,
   Member,
+  MergeConflicts,
   MergeDoc,
   OverlaysState,
+  Workspace,
 } from "./overlay-types.js";
 
 type Note = { "@patchwork": { type: "note" }; text: string };
@@ -29,6 +31,20 @@ beforeAll(() => {
       name: "Folder children",
       datatypes: ["folder"],
       load: async () => (doc: Folder) => doc.docs,
+    } as never,
+    "test"
+  );
+  getRegistry("patchwork:merge-conflicts").register(
+    {
+      type: "patchwork:merge-conflicts",
+      id: "test-note-conflicts",
+      name: "Note conflicts",
+      datatypes: ["note"],
+      // A rating both sides set differently.
+      load: async () => ({ source, target }: { source: any; target: any }) =>
+        source.rating !== undefined && target.rating !== undefined && source.rating !== target.rating
+          ? [{ at: { path: ["rating"] }, source: source.rating, target: target.rating }]
+          : [],
     } as never,
     "test"
   );
@@ -178,8 +194,7 @@ describe("the overlay provider", () => {
 
     const merge = await send<AutomergeUrl>({ type: "merge:create", source: draft, target: null });
     const state = await overlays.until((s) => s.checkedOut === merge);
-    expect(state.merges).toEqual([{ url: merge, source: draft, target: null }]);
-    expect(await send({ type: "merge:create", source: draft, target: null })).toBe(merge);
+    expect(state.merges).toEqual([{ url: merge, source: draft, target: null, published: false }]);
 
     const merged = await onCheckout();
     expect(merged.doc().text).toBe("draft");
@@ -257,6 +272,87 @@ describe("the overlay provider", () => {
       checkedOut: null,
       merges: [],
     });
+    dispose();
+  });
+
+  it("starts a merge as a preview nobody else sees, and publishes it as a pull request", async () => {
+    const { repo, root, overlays, send, dispose } = project();
+    await overlays.until((s) => s.status === "ready");
+    const draft = await send<AutomergeUrl>({ type: "draft:create", parent: null });
+    const preview = await send<AutomergeUrl>({ type: "merge:create", source: draft, target: null });
+    await overlays.until((s) => s.checkedOut === preview);
+    const workspace = async () => {
+      const url = (await repo.find<any>(root.url)).doc()["@patchwork"].workspaceUrl;
+      return (await repo.find<Workspace>(url)).doc();
+    };
+    expect((await workspace()).merges).toEqual([]);
+
+    // Each one is a new preview, until one is published.
+    const another = await send<AutomergeUrl>({ type: "merge:create", source: draft, target: null });
+    expect(another).not.toBe(preview);
+
+    expect(await send({ type: "overlay:checkout", overlay: preview })).toBe(true);
+    expect(await send({ type: "merge:publish", merge: preview })).toBe(true);
+    expect((await workspace()).merges).toEqual([preview]);
+    const state = await overlays.until((s) => s.merges.some((m) => m.url === preview && m.published));
+    expect(state.merges).toEqual([{ url: preview, source: draft, target: null, published: true }]);
+    expect(await send({ type: "merge:create", source: draft, target: null })).toBe(preview);
+    dispose();
+  });
+
+  it("cancels a preview, checking its source out again", async () => {
+    const { overlays, send, dispose } = project();
+    await overlays.until((s) => s.status === "ready");
+    const draft = await send<AutomergeUrl>({ type: "draft:create", parent: null });
+    const preview = await send<AutomergeUrl>({ type: "merge:create", source: draft, target: null });
+    await overlays.until((s) => s.checkedOut === preview);
+    expect(await send({ type: "overlay:delete", overlay: preview })).toBe(true);
+    const state = await overlays.until((s) => s.checkedOut === draft);
+    expect(state.merges).toEqual([]);
+    expect(state.drafts.map((entry) => entry.url)).toEqual([draft]);
+    dispose();
+  });
+
+  it("checks a preview out by its url, as a link would", async () => {
+    const { overlays, send, dispose } = project();
+    await overlays.until((s) => s.status === "ready");
+    const draft = await send<AutomergeUrl>({ type: "draft:create", parent: null });
+    const preview = await send<AutomergeUrl>({ type: "merge:create", source: draft, target: null });
+    await send({ type: "overlay:checkout", overlay: null });
+    await overlays.until((s) => s.checkedOut === null && s.merges.length === 0);
+    expect(await send({ type: "overlay:checkout", overlay: preview })).toBe(true);
+    const state = await overlays.until((s) => s.checkedOut === preview);
+    expect(state.merges).toEqual([{ url: preview, source: draft, target: null, published: false }]);
+    dispose();
+  });
+
+  it("tells a merge's conflicts, and won't accept it while any is open", async () => {
+    const { note, overlays, send, onCheckout, child, dispose } = project();
+    await overlays.until((s) => s.status === "ready");
+    const draft = await send<AutomergeUrl>({ type: "draft:create", parent: null });
+    (await onCheckout()).change((d: any) => {
+      d.rating = 2;
+    });
+    note.change((d: any) => {
+      d.rating = 3;
+    });
+    const merge = await send<AutomergeUrl>({ type: "merge:create", source: draft, target: null });
+    await overlays.until((s) => s.checkedOut === merge);
+
+    const conflicts = watch<MergeConflicts>(child, { type: "merge:conflicts", merge });
+    const open = await conflicts.until((c) => (c[note.url]?.length ?? 0) > 0);
+    expect(open[note.url]).toEqual([{ at: { path: ["rating"] }, source: 2, target: 3, state: "open" }]);
+    expect(await send({ type: "merge:accept", merge })).toBeNull();
+
+    (await onCheckout()).change((d: any) => {
+      d.rating = 2;
+    });
+    const taken = await conflicts.until((c) => c[note.url]?.[0]?.state !== "open");
+    expect(taken[note.url][0].state).toBe("source");
+    expect(await send({ type: "merge:accept", merge })).toBe(true);
+    await overlays.until((s) => s.checkedOut === null);
+    expect((note.doc() as any).rating).toBe(2);
+    conflicts.stop();
     dispose();
   });
 

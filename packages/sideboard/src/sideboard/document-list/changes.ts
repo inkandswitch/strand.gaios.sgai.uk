@@ -9,7 +9,24 @@ import {createEffect, createMemo, createSignal, onCleanup} from "solid-js"
 // How a member differs between the two versions compared: both have it and
 // it `differs`, or only `ours` (A, the checked-out version) or `theirs` (B)
 // has it. A folder takes the marks of what's beneath it.
-export type Mark = "differs" | "ours" | "theirs"
+//
+// A merge compared with its target reads as what merging does to the
+// target instead: `changed`, `added` or `removed`, and `conflict` for a
+// member with conflicts no one has resolved, and the folders above it.
+export type Mark =
+	| "differs"
+	| "ours"
+	| "theirs"
+	| "changed"
+	| "added"
+	| "removed"
+	| "conflict"
+
+const AS_MERGED: Record<"differs" | "ours" | "theirs", Mark> = {
+	differs: "changed",
+	ours: "added",
+	theirs: "removed",
+}
 
 // A file or folder only B has, linked from `parent`.
 export type Ghost = {
@@ -29,6 +46,8 @@ export type Ghost = {
 export type ChangeMarks = {
 	mark(url: AutomergeUrl): Mark | undefined
 	comparing(): boolean
+	/** the merge shown against its target, if it's one: a preview, or a pull request */
+	merge(): {published: boolean} | undefined
 	ghostsIn(folder: AutomergeUrl): Ghost[]
 	/** while comparing, whether what's unchanged is folded away */
 	collapsed(): boolean
@@ -36,9 +55,14 @@ export type ChangeMarks = {
 }
 
 type Overlay = AutomergeUrl | null
-type Comparison = {a: Overlay; b: Overlay} | null
+type Comparison =
+	| {kind: "compare"; a: Overlay; b: Overlay}
+	| {kind: "merge"; a: AutomergeUrl; b: Overlay; published: boolean}
+	| null
 type Member = {url: AutomergeUrl; heads: string[]; parent: AutomergeUrl | null}
 type Link = {url?: unknown; name?: unknown; type?: unknown}
+// The overlay provider's `merge:conflicts`, as this reads it.
+type MergeConflicts = Record<AutomergeUrl, {state: string}[]>
 // Where a version of a document lives, as the overlay provider answers
 // `repo:handle-descriptor`.
 type Descriptor = {url: AutomergeUrl; cloneUrl?: AutomergeUrl}
@@ -148,9 +172,44 @@ export function useChangeMarks(
 		return byParent
 	})
 
+	// A merge (A) shown against its target (B), as the comparison says.
+	const merge = createMemo(() => {
+		const current = comparison()
+		return current?.kind === "merge" ? {url: current.a, published: current.published} : undefined
+	})
+	const conflicts = createMemo(() => {
+		const current = merge()
+		return current
+			? (subscribe(element, {type: "merge:conflicts", merge: current.url} as never) as unknown as () =>
+					| MergeConflicts
+					| undefined)
+			: undefined
+	})
+	// The members with open conflicts, and the folders above them.
+	const conflicted = createMemo(() => {
+		const open = new Set<string>()
+		const parents = new Map(
+			(members()?.ours() ?? []).map(member => [documentOf(member.url), member.parent])
+		)
+		for (const [url, each] of Object.entries(conflicts()?.() ?? {})) {
+			if (!each.some(conflict => conflict.state === "open")) continue
+			let cursor: AutomergeUrl | null | undefined = url as AutomergeUrl
+			while (cursor && !open.has(documentOf(cursor))) {
+				open.add(documentOf(cursor))
+				cursor = parents.get(documentOf(cursor))
+			}
+		}
+		return open
+	})
+
 	const comparing = () => !!changes()
 	return {
-		mark: url => changes()?.marks.get(documentOf(url)),
+		mark: url => {
+			if (conflicted().has(documentOf(url))) return "conflict"
+			const mark = changes()?.marks.get(documentOf(url))
+			return mark && merge() ? AS_MERGED[mark as keyof typeof AS_MERGED] : mark
+		},
+		merge: () => (merge() ? {published: merge()!.published} : undefined),
 		comparing,
 		ghostsIn: folder => ghosts().get(documentOf(folder)) ?? [],
 		collapsed: () => comparing() && collapsed(),

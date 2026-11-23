@@ -1,3 +1,4 @@
+import { Automerge } from "@automerge/automerge-repo/slim";
 import {
   isValidAutomergeUrl,
   type AutomergeUrl,
@@ -10,14 +11,18 @@ import {
   createDraft,
   createMerge,
   deleteOverlay,
-  ensureIndex,
+  ensureWorkspace,
+  publishMerge,
   renameDraft,
 } from "../overlay-actions.js";
+import { autoOf, conflictState, findConflicts, hasConflictPlugin } from "../conflicts.js";
 import { OverlayRepo, baseRepo, openOverlay } from "../overlay-repo.js";
 import type {
   HandleDescriptor,
   Member,
+  MergeConflicts,
   MergeDoc,
+  MergeEntry,
   Overlay,
   OverlaysState,
   OverlayStatus,
@@ -27,6 +32,10 @@ import { createOverlayList } from "./overlay-list.js";
 // How long the starting overlay gets to show up among the root's overlays
 // before it's reported unavailable. It's still taken if it shows up later.
 const LOAD_TIMEOUT_MS = 5000;
+
+// Conflicts are worked out again this long after an input or the merge last
+// changed.
+const CONFLICTS_DEBOUNCE_MS = 150;
 
 // Mounts on a root (`doc-url`) and hands everything beneath it an
 // `OverlayRepo`, so members resolve onto the checked-out overlay and edits
@@ -40,10 +49,15 @@ const LOAD_TIMEOUT_MS = 5000;
 //   - `overlay:delete { overlay }` → true
 //   - `draft:create { parent }` → the new draft's url, checked out
 //   - `draft:rename { draft, name }` → true
-//   - `merge:create { source, target }` → the merge's url, checked out
-//   - `merge:accept { merge }` → true, with the target checked out
-// Main is null wherever an overlay is named. A command that couldn't be done
-// answers null.
+//   - `merge:create { source, target }` → the pair's pull request, or a new
+//     preview, checked out
+//   - `merge:publish { merge }` → true, the preview now a pull request
+//   - `merge:accept { merge }` → true, with the target checked out; null
+//     while the merge has open conflicts
+//   - `merge:conflicts { merge }` → MergeConflicts, pushed on every change
+// Main is null wherever an overlay is named. A merge is named by its url
+// whether it's listed (a pull request) or not (a preview). A command that
+// couldn't be done answers null.
 //
 // The checkout starts from the `overlay` attribute and is otherwise only
 // changed by the commands above. Until that overlay is listed, documents
@@ -154,8 +168,9 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
 
       case "overlay:checkout": {
         const overlay = overlayIn(selector.overlay);
-        if (overlay === undefined || !list.has(overlay)) return refuse(event);
+        if (overlay === undefined) return refuse(event);
         command(event, async () => {
+          if (!list.has(overlay) && !(await list.preview(overlay!))) return null;
           await select(overlay);
           return true;
         });
@@ -164,10 +179,13 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
 
       case "overlay:delete": {
         const overlay = overlayIn(selector.overlay);
-        if (!overlay || !list.has(overlay)) return refuse(event);
+        if (!overlay) return refuse(event);
         command(event, async () => {
-          if (selection === overlay) await select(null);
-          await deleteOverlay(repo, await ensureIndex(repo, await list.root()), overlay);
+          const merge = list.merge(overlay) ?? (await list.preview(overlay));
+          if (!list.has(overlay) && !merge) return null;
+          // Leaving a merge goes back to the draft it would have merged.
+          if (selection === overlay) await select(merge ? merge.source : null);
+          await deleteOverlay(repo, await ensureWorkspace(repo, await list.root()), overlay);
           return true;
         });
         return;
@@ -203,26 +221,90 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
         if (!isInput(source) || !isInput(target) || source === target) return refuse(event);
         command(event, async () => {
           const merge = await createMerge(repo, await list.root(), source!, target!);
+          if (!list.merge(merge)) await list.preview(merge);
           await select(merge);
           return merge;
         });
         return;
       }
 
+      case "merge:publish": {
+        const url = overlayIn(selector.merge);
+        if (!url) return refuse(event);
+        command(event, async () => {
+          if (!(list.merge(url) ?? (await list.preview(url)))) return null;
+          await publishMerge(repo, await list.root(), url);
+          return true;
+        });
+        return;
+      }
+
+      case "merge:conflicts": {
+        const url = overlayIn(selector.merge);
+        if (!url) return refuse(event);
+        accept<MergeConflicts>(event, (respond) => {
+          let live = true;
+          let stops: (() => void)[] = [];
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          let last = "";
+          const answer = async () => {
+            const merge = list.merge(url) ?? (await list.preview(url));
+            if (!live || !merge) return;
+            const conflicts = await conflictsOf(merge);
+            const key = JSON.stringify(conflicts);
+            if (!live || key === last) return;
+            last = key;
+            respond(conflicts);
+          };
+          const soon = () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => void answer(), CONFLICTS_DEBOUNCE_MS);
+          };
+          void (async () => {
+            const merge = list.merge(url) ?? (await list.preview(url));
+            if (!live || !merge) return;
+            stops = [merge.source, merge.target, merge.url].map((overlay) =>
+              readerFor(overlay).onMembers(soon)
+            );
+            await answer();
+          })();
+          return () => {
+            live = false;
+            clearTimeout(timer);
+            for (const stop of stops) stop();
+          };
+        });
+        return;
+      }
+
       case "merge:accept": {
         const url = overlayIn(selector.merge);
-        const merge = url ? list.merge(url) : undefined;
-        if (!url || !merge) return refuse(event);
+        if (!url) return refuse(event);
         command(event, async () => {
+          const merge = list.merge(url) ?? (await list.preview(url));
+          if (!merge) return null;
+          const conflicts = await conflictsOf(merge);
+          const open = Object.values(conflicts).some((each) =>
+            each.some((conflict) => conflict.state === "open")
+          );
+          if (open) return null;
+          // Read first: checking the target out takes a preview off the
+          // list, and its reader with it.
           const reader = readerFor(url);
+          const members = (await reader.members()).map((member) => member.url);
+          const docs = new Map(
+            await Promise.all(
+              members.map(async (member) => [member, (await reader.find(member)).doc()] as const)
+            )
+          );
           await select(merge.target);
           await acceptMerge(
             repo,
-            await ensureIndex(repo, await list.root()),
+            await ensureWorkspace(repo, await list.root()),
             await repo.find<MergeDoc>(url),
             {
-              members: async () => (await reader.members()).map((member) => member.url),
-              doc: async (member) => (await reader.find(member)).doc() as never,
+              members: async () => members,
+              doc: async (member) => docs.get(member) as never,
             }
           );
           return true;
@@ -272,6 +354,35 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
       .finally(opened);
     readers.set(key, reader);
     return reader;
+  }
+
+  // Every conflict of `merge`, by member, and how each went. Only members
+  // whose versions differ between source and target can have any.
+  async function conflictsOf(merge: MergeEntry): Promise<MergeConflicts> {
+    const [source, target, merged] = [merge.source, merge.target, merge.url].map(readerFor);
+    const [sourceMembers, targetMembers] = await Promise.all([source.members(), target.members()]);
+    const targetHeads = new Map(targetMembers.map((member) => [member.url, member.heads]));
+    const out: MergeConflicts = {};
+    for (const member of sourceMembers) {
+      const heads = targetHeads.get(member.url);
+      if (!heads || sameHeads(heads, member.heads)) continue;
+      try {
+        const sourceDoc = (await source.find<unknown>(member.url)).doc() as Automerge.Doc<unknown>;
+        if (!hasConflictPlugin(sourceDoc)) continue;
+        const targetDoc = (await target.find<unknown>(member.url)).doc() as Automerge.Doc<unknown>;
+        const mergedDoc = (await merged.find<unknown>(member.url)).doc() as Automerge.Doc<unknown>;
+        const versions = { source: sourceDoc, target: targetDoc };
+        const found = await findConflicts({ ...versions, auto: autoOf(sourceDoc, targetDoc) });
+        if (!found.length) continue;
+        out[member.url] = found.map((conflict) => ({
+          ...conflict,
+          state: conflictState(conflict, { ...versions, merged: mergedDoc }),
+        }));
+      } catch (err) {
+        console.warn(`[drafts] couldn't look for conflicts in ${member.url}:`, err);
+      }
+    }
+    return out;
   }
 
   // Readers of overlays that went away.
@@ -365,4 +476,8 @@ function urlAttribute(element: HTMLElement, name: string): AutomergeUrl | null {
       `has an invalid ${name} attribute (got ${JSON.stringify(raw)})`
   );
   return null;
+}
+
+function sameHeads(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((head) => b.includes(head));
 }

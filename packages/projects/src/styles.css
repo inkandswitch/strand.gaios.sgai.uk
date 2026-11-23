@@ -433,6 +433,33 @@ button.projects__token:hover {
 	opacity: 0.5;
 }
 
+/* "Preview" or "Pull request", before the merge's two sides */
+.projects__merge-kind {
+	flex: none;
+	color: var(--projects-secondary);
+	font-size: 0.85rem;
+}
+
+/* cancel or close, publish, and merge, at the header's end */
+.projects__merge-actions {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: var(--projects-space-sm);
+}
+
+.projects__merge-actions .projects__button {
+	padding: 0.3rem var(--projects-space);
+	font-size: 0.9rem;
+}
+
+.projects__merge-conflicts {
+	color: var(--compare-conflict);
+	font-size: 0.85rem;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
 .projects__token-rename {
 	width: 10rem;
 	height: 1.8rem;
@@ -848,6 +875,11 @@ button.projects__token:hover {
 
 .projects__compare-slot[hidden] {
 	display: none;
+}
+
+/* a merge reads before (the target, B) to after (the merge, A) */
+.projects__compare--merge > .projects__compare-slot[data-version="b"] {
+	order: -1;
 }
 
 .projects__dock-theme {

@@ -1,7 +1,17 @@
 import {describe, expect, it} from "vitest"
 import {EditorState, Text} from "@codemirror/state"
 import {EditorView} from "@codemirror/view"
-import {combinedRanges, diffEditor, follow, modifiedLines, splicesOf, versionRanges, type DraftCompare} from "./draft-diff"
+import {
+	combinedRanges,
+	afterMarks,
+	diffEditor,
+	follow,
+	modifiedLines,
+	splicesOf,
+	versionRanges,
+	type DraftCompare,
+	type TextConflict,
+} from "./draft-diff"
 
 // Makes the splices, one after another, to `text`.
 const apply = (text: string, splices: ReturnType<typeof splicesOf>) =>
@@ -65,6 +75,8 @@ const comparing = (mode: DraftCompare["mode"], base: string, original: string): 
 	base,
 	collapsed: false,
 	names: null,
+	merging: false,
+	conflicts: [],
 })
 
 const ghosts = (view: EditorView, kind: string) =>
@@ -163,3 +175,92 @@ describe("combined", () => {
 		expect(ranges.map(each => [each.from, each.value.spec.side])).toEqual([[ours.length, 1]])
 	})
 })
+
+describe("a merge's conflicts, in after", () => {
+	const doc = Text.of(["one", "2", "TWO", "four"])
+	const conflict = (state: TextConflict["state"]) => ({
+		from: doc.line(2).from,
+		to: doc.line(3).to,
+		source: "TWO",
+		target: "2",
+		both: "2\nTWO",
+		state,
+	})
+	const found = (marks: ReturnType<typeof afterMarks>) => {
+		const out: string[] = []
+		marks.between(0, doc.length, (at, to, mark) => {
+			const kind = mark.spec.widget?.constructor.name ?? mark.spec.class
+			out.push(`${doc.lineAt(at).number}${to > at ? `-${doc.lineAt(to).number}` : ""} ${kind}`)
+		})
+		return out
+	}
+
+	it("hides an open conflict's lines under a hatch, beneath its options", () => {
+		expect(found(afterMarks(doc, {conflicts: [conflict("open")]}, null))).toEqual([
+			"2 ConflictChips",
+			"2-3 Hatch",
+		])
+	})
+
+	it("shows the option hovered in place of the lines", () => {
+		const marks = afterMarks(doc, {conflicts: [conflict("open")]}, {index: 0, option: "both"})
+		expect(found(marks)).toEqual(["2 ConflictChips", "2-3 PreviewLines"])
+	})
+
+	it("colours each taken line by the side it came from", () => {
+		expect(found(afterMarks(doc, {conflicts: [conflict("both")]}, null))).toEqual([
+			"2 ConflictChips",
+			"2 cm-conflictTarget",
+			"3 cm-conflictSource",
+		])
+	})
+
+	it("drops the colour of a line that was edited", () => {
+		const edited = Text.of(["one", "2", "WINTER", "four"])
+		const marks = afterMarks(edited, {conflicts: [{...conflict("edited"), to: edited.line(3).to}]}, null)
+		const out: string[] = []
+		marks.between(0, edited.length, (at, _to, mark) => {
+			out.push(`${edited.lineAt(at).number} ${mark.spec.widget?.constructor.name ?? mark.spec.class}`)
+		})
+		expect(out).toEqual(["2 ConflictChips", "2 cm-conflictTarget"])
+	})
+})
+
+describe("a merge's conflicts, folding", () => {
+	it("keep a conflict open when it's resolved to what before has", () => {
+		const lines = Array.from({length: 30}, (_, i) => `line-${String(i + 1).padStart(2, "0")}`)
+		const text = lines.join("\n")
+		const doc = Text.of(lines)
+		const conflict: TextConflict = {
+			from: doc.line(15).from,
+			to: doc.line(15).to,
+			source: "SOURCE",
+			target: "line-15",
+			both: "line-15\nSOURCE",
+			state: "target",
+		}
+		const editor = diffEditor({
+			doc: text,
+			extensions: [],
+			besideExtensions: [],
+			beside: false,
+			compare: () => ({...comparing("stacked", text, text), collapsed: true, merging: true, conflicts: [conflict]}),
+		})
+		const shown = editor.view.contentDOM.textContent ?? ""
+		expect(shown).toContain("line-15")
+		expect(shown).not.toContain("line-05")
+		editor.destroy()
+
+		// Without it, that line reads as unchanged and folds away.
+		const plain = diffEditor({
+			doc: text,
+			extensions: [],
+			besideExtensions: [],
+			beside: false,
+			compare: () => ({...comparing("stacked", text, text), collapsed: true, merging: true, conflicts: []}),
+		})
+		expect(plain.view.contentDOM.textContent ?? "").not.toContain("line-15")
+		plain.destroy()
+	})
+})
+

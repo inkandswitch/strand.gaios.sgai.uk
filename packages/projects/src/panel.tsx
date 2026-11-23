@@ -28,12 +28,14 @@ import type {Member, Overlay} from "./types.ts"
 /**
  * The version the checked-out one is compared with, B: views of it are
  * checked out of the root by an overlay provider of their own. `names` are
- * what A and B are called.
+ * what A and B are called. `merging` while A is a merge and B its target:
+ * then B is before and A after, and before comes first.
  */
 export type Comparing = {
 	root: AutomergeUrl
 	b: Overlay
 	names: {a: string; b: string}
+	merging: boolean
 }
 
 /**
@@ -240,9 +242,9 @@ export function Compared(props: {
 		const current = laidOut()
 		const b = slotB()
 		if (!current || !b) return
-		onCleanup(
-			current.module.compose!({a: slotA, b}, props.compare.options(current), props.compare.versions())
-		)
+		// A merge reads before (the target) to after: B, then A.
+		const slots = comparing()?.merging ? {a: b, b: slotA} : {a: slotA, b}
+		onCleanup(current.module.compose!(slots, props.compare.options(current), props.compare.versions()))
 	})
 
 	// Both versions' views are told the same: the mode, and its options.
@@ -297,7 +299,10 @@ export function Compared(props: {
 	}
 
 	return (
-		<div ref={host} class="projects__compare">
+		<div
+			ref={host}
+			class="projects__compare"
+			classList={{"projects__compare--merge": !!comparing()?.merging}}>
 			<div ref={slotA} class="projects__compare-slot" data-version="a">
 				<patchwork-view
 					ref={reportTool}

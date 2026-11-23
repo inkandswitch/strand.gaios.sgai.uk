@@ -41,6 +41,7 @@ export function useOverlayState(
 				root: root(),
 				b: current.b,
 				names: {a: overlayName(state, current.a), b: overlayName(state, current.b)},
+				merging: current.kind === "merge",
 			}
 		},
 		undefined,
@@ -49,19 +50,27 @@ export function useOverlayState(
 				a?.root === b?.root &&
 				a?.b === b?.b &&
 				a?.names.a === b?.names.a &&
-				a?.names.b === b?.names.b,
+				a?.names.b === b?.names.b &&
+				a?.merging === b?.merging,
 		}
 	)
 
-	/** What the two versions are called, each in its own colour. */
+	/**
+	 * What the two versions are called, each in its own colour. A merge reads
+	 * before to after, in no version's colour: then `a` is before, the target.
+	 */
 	const versions = createMemo<Versions | undefined>(() => {
 		const current = comparing()
-		return (
-			current && {
-				a: {name: current.names.a, color: "var(--compare-a)"},
-				b: {name: current.names.b, color: "var(--compare-b)"},
+		if (!current) return undefined
+		if (current.merging)
+			return {
+				a: {name: `Before · ${current.names.b}`, color: "var(--compare-neutral)"},
+				b: {name: "After", color: "var(--compare-neutral)"},
 			}
-		)
+		return {
+			a: {name: current.names.a, color: "var(--compare-a)"},
+			b: {name: current.names.b, color: "var(--compare-b)"},
+		}
 	})
 
 	return {overlays, comparison, heard, comparing, versions}

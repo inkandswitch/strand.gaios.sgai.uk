@@ -35,10 +35,57 @@ export type MergeEntry = {
 	url: AutomergeUrl
 	source: AutomergeUrl | null
 	target: AutomergeUrl | null
+	/** a pull request, listed for everyone; false for a preview */
+	published: boolean
 }
 
-/** The compare provider's `compare`: A checked out, B compared with. */
-export type Comparison = {a: Overlay; b: Overlay} | null
+/** The overlay provider's `merge:conflicts`: each member's conflicts, and how each went. */
+export type MergeConflicts = Record<
+	AutomergeUrl,
+	{
+		at: unknown
+		source: unknown
+		target: unknown
+		both?: unknown
+		state: "open" | "source" | "target" | "both" | "edited"
+	}[]
+>
+
+/** How many conflicts no one has resolved yet. */
+export function openConflicts(conflicts: MergeConflicts | undefined): number {
+	let open = 0
+	for (const each of Object.values(conflicts ?? {}))
+		for (const conflict of each) if (conflict.state === "open") open++
+	return open
+}
+
+/**
+ * The compare provider's `compare`: two versions, A checked out and B
+ * compared with; or a merge (A, after) against its target (B, before).
+ */
+export type Comparison =
+	| {kind: "compare"; a: Overlay; b: Overlay}
+	| {
+			kind: "merge"
+			a: AutomergeUrl
+			b: Overlay
+			source: Overlay
+			target: Overlay
+			published: boolean
+	  }
+	| null
+
+/** The merge shown, if the comparison is one, as the header reads it. */
+export function mergeShown(comparison: Comparison): MergeEntry | undefined {
+	return comparison?.kind === "merge"
+		? {
+				url: comparison.a,
+				source: comparison.source,
+				target: comparison.target,
+				published: comparison.published,
+			}
+		: undefined
+}
 
 /** One member of the root, as an overlay has it: the overlay provider's `overlay:members`. */
 export type Member = {
@@ -55,9 +102,4 @@ export function overlayName(state: OverlaysState | undefined, overlay: Overlay):
 	const merge = state?.merges.find(entry => entry.url === overlay)
 	if (merge) return `${overlayName(state, merge.source)} → ${overlayName(state, merge.target)}`
 	return ""
-}
-
-/** The listed merge `overlay` is, if it's one. */
-export function mergeOf(state: OverlaysState | undefined, overlay: Overlay) {
-	return overlay === null ? undefined : state?.merges.find(entry => entry.url === overlay)
 }

@@ -385,6 +385,13 @@ button {
   background: var(--document-list-changed);
 }
 
+/* a merge's member with conflicts no one has resolved yet */
+.document-list-item__changed--conflict {
+  width: 8px;
+  height: 8px;
+  background: var(--compare-conflict, #dba617);
+}
+
 .document-list-item--unchanged {
   opacity: 0.55;
 }
@@ -398,8 +405,17 @@ button {
 .document-list__compare-bar {
   display: flex;
   flex: none;
+  align-items: center;
   justify-content: flex-end;
   margin-bottom: -0.5rem;
+}
+
+/* while a merge is shown: what the marks are about */
+.document-list__compare-kind {
+  margin-right: auto;
+  padding-inline-start: var(--document-list-padding-x);
+  color: var(--document-list-muted, var(--placeholder-line));
+  font-size: 0.8rem;
 }
 
 .document-list .document-list__collapse {

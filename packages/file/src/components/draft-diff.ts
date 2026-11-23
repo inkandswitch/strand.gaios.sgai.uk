@@ -6,6 +6,11 @@
 // (combined). Unchanged stretches fold away while the mode's options say to.
 // Only shows inside something answering `compare-mode:view` and `compare`,
 // like the GAIOS dock while the checked-out overlay is compared.
+//
+// A merge compared with its target reads before (the target) to after (the
+// merge): the target first and read-only, what the merge does to it marked
+// as added and removed, and the merge's conflicts in this file marked where
+// they are, with each side's lines to take.
 
 import {createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor} from "solid-js"
 import {Automerge} from "@automerge/automerge-repo/slim"
@@ -31,7 +36,7 @@ import {
 	gutter,
 	type DecorationSet,
 } from "@codemirror/view"
-import {Chunk, MergeView, diff, type Change} from "@codemirror/merge"
+import {Chunk, MergeView, diff, getChunks, type Change} from "@codemirror/merge"
 import {subscribe} from "@inkandswitch/patchwork-providers-solid"
 import {fileText} from "../datatype"
 import type {FileDoc} from "../types"
@@ -47,11 +52,46 @@ type OverlaysState = {
 	drafts: {url: string; name: string}[]
 	merges: {url: string; source: Overlay; target: Overlay}[]
 }
-type Comparison = {a: Overlay; b: Overlay} | null
+type Comparison =
+	| {kind: "compare"; a: Overlay; b: Overlay}
+	| {kind: "merge"; a: string; b: Overlay; source: Overlay; target: Overlay; published: boolean}
+	| null
 type Member = {url: string}
 
 /** What the two versions are called: this view's, and the other's. */
 type Names = {ours: string; theirs: string}
+
+// The overlay provider's `merge:conflicts`, as this reads it.
+type ConflictState = "open" | "source" | "target" | "both" | "edited"
+type MergeConflicts = Record<
+	string,
+	{
+		at: {path: string[]; from?: string; to?: string}
+		source: unknown
+		target: unknown
+		both?: unknown
+		state: ConflictState
+	}[]
+>
+
+/** What a conflict can be resolved to: one side's lines, or both. */
+export type ConflictOption = "target" | "source" | "both"
+
+/**
+ * A conflict of the merge in this file: where it is in the text now, each
+ * side's lines there, and which way it went.
+ */
+export type TextConflict = {
+	from: number
+	to: number
+	source: string
+	target: string
+	/** the target's lines, then the source's */
+	both: string
+	state: ConflictState
+	/** where it is in before's text, the target's */
+	before?: {from: number; to: number}
+}
 
 /**
  * The other version's text, the text both came from, how to show them,
@@ -68,6 +108,12 @@ export type DraftCompare = {
 	edit?: (splices: TextSplice[]) => void
 	/** to head each side with, side by side */
 	names: Names | null
+	/** a merge, compared with its target: before is the other version, after this one */
+	merging: boolean
+	/** a merge's conflicts in this file, what its sides are called, and taking one */
+	conflicts: TextConflict[]
+	sides?: {source: string; target: string}
+	take?: (conflict: TextConflict, option: ConflictOption) => void
 }
 
 const MODES = ["inline", "side-by-side", "stacked"] as const
@@ -180,6 +226,27 @@ export function useDraftCompare(
 		})
 	})
 
+	// A merge shown against its target: this view is after, the other before.
+	// The comparison says so; this view is after when it's the merge's own.
+	const merge = createMemo(
+		() => {
+			const current = comparison()
+			return current?.kind === "merge" && overlays()?.checkedOut === current.a
+				? {url: current.a, source: current.source, target: current.target}
+				: undefined
+		},
+		undefined,
+		{equals: (x, y) => x?.url === y?.url && x?.source === y?.source && x?.target === y?.target},
+	)
+	const mergeConflicts = createMemo(() => {
+		const current = merge()
+		return current
+			? (subscribe(element, {type: "merge:conflicts", merge: current.url} as never) as unknown as Accessor<
+					MergeConflicts | undefined
+				>)
+			: undefined
+	})
+
 	// Bumped a moment after this version last changed.
 	const [changed, setChanged] = createSignal(0)
 	if (handle) {
@@ -202,22 +269,68 @@ export function useDraftCompare(
 		() => {
 			const state = overlays()
 			const current = other()
-			return state && current
-				? {ours: overlayName(state, state.checkedOut), theirs: overlayName(state, current.overlay)}
-				: null
+			if (!state || !current) return null
+			const merging = merge()
+			if (merging) return {ours: "After", theirs: "Before"}
+			return {ours: overlayName(state, state.checkedOut), theirs: overlayName(state, current.overlay)}
 		},
 		null,
 		{equals: (x, y) => x?.ours === y?.ours && x?.theirs === y?.theirs},
 	)
+	// This file's conflicts, placed in the text as it is now.
+	const conflicts = createMemo<TextConflict[]>(
+		() => {
+			const listed = mergeConflicts()?.()
+			const doc = ours()
+			if (!listed || !doc) return []
+			const before = theirs()
+			const id = documentId(url)
+			const mine = Object.entries(listed).find(([member]) => documentId(member) === id)?.[1] ?? []
+			return mine.flatMap(conflict => {
+				const range = placeIn(doc, conflict.at)
+				const {source, target} = conflict
+				if (!range || typeof source !== "string" || typeof target !== "string") return []
+				const both = typeof conflict.both === "string" ? conflict.both : `${target}\n${source}`
+				const where = before ? placeIn(before, conflict.at) : undefined
+				return [{...range, source, target, both, state: conflict.state, before: where}]
+			})
+		},
+		[],
+		{equals: (x, y) => JSON.stringify(x) === JSON.stringify(y)},
+	)
+	const sides = createMemo(
+		() => {
+			const state = overlays()
+			const merging = merge()
+			return state && merging
+				? {source: overlayName(state, merging.source), target: overlayName(state, merging.target)}
+				: undefined
+		},
+		undefined,
+		{equals: (x, y) => x?.source === y?.source && x?.target === y?.target},
+	)
+	// Taking a side, or both, writes its lines over the conflict, even where
+	// they're there already: that's what says it was taken.
+	const take = (conflict: TextConflict, option: ConflictOption) => {
+		if (!handle?.change) return
+		handle.change(doc => {
+			const text = fileText(doc as Automerge.Doc<FileDoc>)
+			const to = Math.min(conflict.to, text.length)
+			Automerge.splice(doc as Automerge.Doc<unknown>, ["content"], conflict.from, to - conflict.from, conflict[option])
+		})
+	}
+
 	return createMemo<DraftCompare | undefined>(
 		() => {
 			const current = view()
 			const mode = MODES.find(each => each === current?.mode)
 			if (!current || !mode || !other()) return undefined
 			const collapsed = !!current.options?.collapsed
+			const merging = !!merge()
+			const mergeParts = merging ? {conflicts: conflicts(), sides: sides(), take} : {conflicts: []}
 			if (missing()) {
 				// Nothing to have parted from: all of it is new here.
-				return {mode, original: "", base: "", collapsed, names: names()}
+				return {mode, original: "", base: "", collapsed, names: names(), merging, ...mergeParts}
 			}
 			const text = theirs()
 			const writable = theirHandle()
@@ -226,10 +339,17 @@ export function useDraftCompare(
 			return {
 				mode,
 				original,
-				base: ancestorText(ours(), text) ?? original,
+				// A merge is marked against before: what it does to the target.
+				base: merging ? original : (ancestorText(ours(), text) ?? original),
 				collapsed,
-				edit: writable.change && !writable.isReadOnly?.() ? splices => spliceInto(writable, splices) : undefined,
+				// Before is the target, which a merge leaves alone until it's accepted.
+				edit:
+					!merging && writable.change && !writable.isReadOnly?.()
+						? splices => spliceInto(writable, splices)
+						: undefined,
 				names: names(),
+				merging,
+				...mergeParts,
 			}
 		},
 		undefined,
@@ -241,7 +361,11 @@ export function useDraftCompare(
 				a?.collapsed === b?.collapsed &&
 				!a?.edit === !b?.edit &&
 				a?.names?.ours === b?.names?.ours &&
-				a?.names?.theirs === b?.names?.theirs,
+				a?.names?.theirs === b?.names?.theirs &&
+				a?.merging === b?.merging &&
+				a?.sides?.source === b?.sides?.source &&
+				a?.sides?.target === b?.sides?.target &&
+				JSON.stringify(a?.conflicts) === JSON.stringify(b?.conflicts),
 		},
 	)
 }
@@ -253,6 +377,26 @@ function overlayName(state: OverlaysState, overlay: Overlay): string {
 	if (draft) return draft.name
 	const merge = state.merges.find(entry => entry.url === overlay)
 	return merge ? `${overlayName(state, merge.source)} → ${overlayName(state, merge.target)}` : ""
+}
+
+// Where a conflict's place is in `doc`'s text: strictly between the
+// characters its cursors name, "start" and "end" being the text's ends.
+function placeIn(
+	doc: Automerge.Doc<FileDoc>,
+	at: {path: string[]; from?: string; to?: string},
+): {from: number; to: number} | undefined {
+	const length = fileText(doc).length
+	try {
+		const from =
+			at.from === undefined || at.from === "start"
+				? 0
+				: Automerge.getCursorPosition(doc, at.path, at.from) + 1
+		const to =
+			at.to === undefined || at.to === "end" ? length : Automerge.getCursorPosition(doc, at.path, at.to)
+		return {from: Math.min(from, length), to: Math.max(Math.min(to, length), Math.min(from, length))}
+	} catch {
+		return undefined
+	}
 }
 
 function documentId(url: string) {
@@ -301,16 +445,17 @@ export function diffEditor(config: {
 	const marks = new Compartment()
 	const view = new EditorView({
 		doc: config.doc,
-		extensions: [config.extensions, marks.of([])],
+		extensions: [config.extensions, marks.of([]), conflictMarks],
 	})
 	followAlone(view, marks, config.compare)
+	followConflicts(view, config.compare)
 	return {view, dom: view.dom, views: [view], destroy: () => view.destroy()}
 }
 
 // How the editor on its own is marked: the shape of it, which reconfigures
 // it, apart from the texts, which it's sent as they change.
 const shapeOf = (current: DraftCompare | undefined) =>
-	current && current.mode !== "side-by-side" ? `${current.mode} ${current.collapsed}` : ""
+	current && current.mode !== "side-by-side" ? `${current.mode} ${current.collapsed} ${current.merging}` : ""
 
 function followAlone(
 	view: EditorView,
@@ -325,7 +470,7 @@ function followAlone(
 			if (reshaped) {
 				const marking =
 					current?.mode === "inline"
-						? [combined(current.base, current.original), LOCKED]
+						? [combined(current.base, current.original), LOCKED, merged(current.merging)]
 						: current?.mode === "stacked"
 							? [ownChanges(current.base)]
 							: []
@@ -360,14 +505,22 @@ function besideDiff(config: {
 	const initial = untrack(config.compare)
 	const writable = (current: DraftCompare | undefined) => !!current?.edit
 	const lock = new Compartment()
+	// Folding what's unchanged: the merge view's own, or, showing a merge,
+	// ours, which keeps its conflicts open.
+	const foldsItself = (current: DraftCompare | undefined) => !!current?.collapsed && !current.merging
+	const foldsOurs = (current: DraftCompare | undefined) => !!current?.collapsed && !!current.merging
+	const foldA = new Compartment()
+	const foldB = new Compartment()
 	const theirs = sendEdits(() => config.compare()?.edit)
 	const base = initial?.base ?? initial?.original ?? ""
 	const merge = new MergeView({
 		a: {
 			doc: initial?.original ?? "",
 			extensions: [
+				foldA.of(foldsOurs(initial) ? foldBeside() : []),
 				lock.of(writable(initial) ? [] : LOCKED),
 				config.besideExtensions,
+				beforeMarks,
 				UNMARKED,
 				versionMarks(base),
 				theirs?.extension ?? [],
@@ -382,15 +535,18 @@ function besideDiff(config: {
 				config.extensions,
 				UNMARKED,
 				versionMarks(base),
+				conflictMarks,
+				foldB.of(foldsOurs(initial) ? foldBeside() : []),
 				EditorView.updateListener.of(update => {
 					if (update.docChanged) otherChanged(merge.a, update.state.doc)
 				}),
 			],
 		},
-		orientation: "b-a",
+		// This version first, unless it's a merge's after: before comes first.
+		orientation: initial?.merging ? "a-b" : "b-a",
 		highlightChanges: false,
 		gutter: false,
-		collapseUnchanged: initial?.collapsed ? COLLAPSE : undefined,
+		collapseUnchanged: foldsItself(initial) ? COLLAPSE : undefined,
 	})
 	Object.assign(merge.dom.style, {flex: "1", minHeight: "0", overflow: "auto"})
 	// Each side is marked against the other's text, told again once typing
@@ -413,17 +569,39 @@ function besideDiff(config: {
 	Object.assign(headings.style, {display: "flex", flex: "none"})
 	const ours = heading()
 	const other = heading()
-	other.element.style.borderLeft = EDGE
-	headings.append(ours.element, other.element)
 	frame.append(headings, merge.dom)
 	createEffect(() => {
 		const current = config.compare()
 		const names = current?.names
 		headings.hidden = !names
 		if (!names) return
-		ours.show(names.ours, OURS)
-		other.show(names.theirs, THEIRS)
+		if (current.merging) {
+			// Before shows both sides' lines where they conflict; after counts
+			// the conflicts still open.
+			const conflicted = current.conflicts.length > 0
+			other.show(names.theirs, conflicted ? [TARGET, SOURCE] : [], true)
+			ours.show(names.ours, [], true)
+			ours.count(current.conflicts.filter(conflict => conflict.state === "open").length)
+		} else {
+			ours.show(names.ours, [OURS])
+			other.show(names.theirs, [THEIRS])
+			ours.count(0)
+		}
 	})
+	createEffect(
+		on(
+			() => !!config.compare()?.merging,
+			merging => {
+				merge.reconfigure({orientation: merging ? "a-b" : "b-a"})
+				const [first, second] = merging ? [other, ours] : [ours, other]
+				first.element.style.borderLeft = ""
+				second.element.style.borderLeft = EDGE
+				headings.replaceChildren(first.element, second.element)
+			},
+		),
+	)
+	followConflicts(merge.b, config.compare)
+	followConflicts(merge.a, config.compare)
 
 	createEffect(
 		on(
@@ -454,9 +632,13 @@ function besideDiff(config: {
 	)
 	createEffect(
 		on(
-			() => !!config.compare()?.collapsed,
-			collapsed => {
-				merge.reconfigure({collapseUnchanged: collapsed ? COLLAPSE : undefined})
+			() => `${foldsItself(config.compare())} ${foldsOurs(config.compare())}`,
+			() => {
+				const current = untrack(config.compare)
+				merge.reconfigure({collapseUnchanged: foldsItself(current) ? COLLAPSE : undefined})
+				const ours = foldsOurs(current) ? foldBeside() : []
+				merge.a.dispatch({effects: foldA.reconfigure(ours)})
+				merge.b.dispatch({effects: foldB.reconfigure(foldsOurs(current) ? foldBeside() : [])})
 				merge.dom.scrollTop = 0
 			},
 			{defer: true},
@@ -478,7 +660,9 @@ const OTHER_DEBOUNCE_MS = 150
 
 const EDGE = "1px solid var(--compare-edge, rgb(0 0 0 / 0.08))"
 
-// A side's heading: its draft's colour dot and name.
+// A side's heading: its version's colour dot and name, or, a merge's, the
+// name with the colours of the sides shown after it, and the conflicts still
+// open at its end.
 function heading() {
 	const element = document.createElement("div")
 	Object.assign(element.style, {
@@ -495,17 +679,40 @@ function heading() {
 		overflow: "hidden",
 		textOverflow: "ellipsis",
 	})
-	const dot = document.createElement("span")
-	dot.setAttribute("aria-hidden", "true")
-	Object.assign(dot.style, {flex: "none", width: "7px", height: "7px", borderRadius: "50%"})
+	const dotsBefore = document.createElement("span")
 	const name = document.createElement("span")
 	Object.assign(name.style, {overflow: "hidden", textOverflow: "ellipsis"})
-	element.append(dot, name)
+	const dotsAfter = document.createElement("span")
+	for (const dots of [dotsBefore, dotsAfter]) {
+		dots.setAttribute("aria-hidden", "true")
+		Object.assign(dots.style, {display: "inline-flex", gap: "2px", flex: "none"})
+	}
+	const badge = document.createElement("span")
+	Object.assign(badge.style, {
+		marginLeft: "auto",
+		display: "inline-flex",
+		alignItems: "center",
+		gap: "0.3em",
+		fontWeight: "600",
+	})
+	badge.append(stateIcon("open"), document.createTextNode(""))
+	element.append(dotsBefore, name, dotsAfter, badge)
+	const dot = (colour: string) => {
+		const each = document.createElement("span")
+		Object.assign(each.style, {width: "7px", height: "7px", borderRadius: "50%", background: colour})
+		return each
+	}
 	return {
 		element,
-		show(text: string, colour: string) {
+		show(text: string, colours: string[], after = false) {
 			name.textContent = text
-			dot.style.background = colour
+			;(after ? dotsAfter : dotsBefore).replaceChildren(...colours.map(dot))
+			;(after ? dotsBefore : dotsAfter).replaceChildren()
+		},
+		count(open: number) {
+			badge.hidden = open === 0
+			badge.lastChild!.textContent = String(open)
+			badge.title = open === 1 ? "1 conflict to resolve" : `${open} conflicts to resolve`
 		},
 	}
 }
@@ -591,6 +798,13 @@ const DELETED = "var(--compare-removed, #ee4433)"
 const MODIFIED = "var(--compare-conflict, #dba617)"
 const OURS = "var(--compare-a, #3b7dd8)"
 const THEIRS = "var(--compare-b, #9b5de5)"
+const NEUTRAL = "var(--compare-neutral, #8a8883)"
+const CONFLICT = MODIFIED
+
+// A merge, combined: what it leaves added, what it replaces removed, rather
+// than in the versions' colours (see COMBINED_THEME).
+const merged = (merging: boolean): Extension =>
+	merging ? EditorView.editorAttributes.of({class: "cm-diff-merge"}) : []
 const tint = (colour: string, amount: number) =>
 	`color-mix(in srgb, ${colour} ${amount}%, transparent)`
 const underline = (colour: string) =>
@@ -639,11 +853,23 @@ type Marks = {deco: DecorationSet; touched: readonly number[]}
 
 const NONE: readonly number[] = []
 
-// The lines marked, which don't fold away, nor do those around them.
+// The lines marked, which don't fold away, nor do those around them: every
+// source's together (what changed, and a merge's conflicts).
 const touchedBy = Facet.define<
 	(state: EditorState) => readonly number[],
 	(state: EditorState) => readonly number[]
->({combine: values => values[0] ?? (() => NONE)})
+>({
+	combine: values =>
+		values.length === 0
+			? () => NONE
+			: values.length === 1
+				? values[0]
+				: state => {
+						const lines = new Set<number>()
+						for (const of of values) for (const line of of(state)) lines.add(line)
+						return [...lines].sort((x, y) => x - y)
+					},
+})
 
 function touchedLines(doc: Text, ranges: readonly Range<Decoration>[]) {
 	const lines = new Set<number>()
@@ -967,6 +1193,7 @@ function combined(base: string, theirs: string): Extension {
 
 const COMBINED_THEME = EditorView.theme({
 	"&": {"--combined-ours": OURS, "--combined-theirs": THEIRS},
+	"&.cm-diff-merge": {"--combined-ours": INSERTED, "--combined-theirs": DELETED},
 	[`${LINE}.cm-oursLine`]: {
 		backgroundColor: `${tint("var(--combined-ours)", 12)} !important`,
 		boxShadow: "inset 3px 0 var(--combined-ours)",
@@ -978,6 +1205,505 @@ const COMBINED_THEME = EditorView.theme({
 		boxShadow: "inset 3px 0 var(--combined-theirs)",
 	},
 })
+
+// --- A merge's conflicts ---
+//
+// After (the merge) shows each conflict headed by a row offering the target's
+// lines, the source's, or both, with a mark in the gutter saying how it went.
+// Open, its lines are hidden under a hatch: what Automerge made of them
+// isn't anything to read. Hovering an option shows its lines in their place,
+// writing nothing; taking it writes them, each line in its side's colour
+// until it's edited. Before (the target) shows the target's lines there,
+// then the source's after them.
+
+// The two sides, in their colours: the target is what a merge changes, the
+// source what it brings.
+const TARGET = OURS
+const SOURCE = THEIRS
+
+type ConflictsShown = {
+	conflicts: TextConflict[]
+	sides?: DraftCompare["sides"]
+	take?: DraftCompare["take"]
+}
+
+type Preview = {index: number; option: ConflictOption} | null
+
+const setConflicts = StateEffect.define<ConflictsShown>()
+const setPreview = StateEffect.define<Preview>()
+
+type AfterState = {shown: ConflictsShown; preview: Preview; marks: DecorationSet}
+
+const afterField = StateField.define<AfterState>({
+	create: () => ({shown: {conflicts: []}, preview: null, marks: Decoration.none}),
+	update(value, transaction) {
+		let {shown, preview} = value
+		let changed = transaction.docChanged
+		// Typing moves the conflicts until they're worked out again: what's
+		// typed at either end of one is inside it.
+		if (transaction.docChanged)
+			shown = {
+				...shown,
+				conflicts: shown.conflicts.map(conflict => ({
+					...conflict,
+					from: transaction.changes.mapPos(conflict.from, -1),
+					to: transaction.changes.mapPos(conflict.to, 1),
+				})),
+			}
+		for (const effect of transaction.effects) {
+			if (effect.is(setConflicts)) {
+				shown = effect.value
+				if (preview && preview.index >= shown.conflicts.length) preview = null
+				changed = true
+			}
+			if (effect.is(setPreview)) {
+				preview = effect.value
+				changed = true
+			}
+		}
+		return changed ? {shown, preview, marks: afterMarks(transaction.state.doc, shown, preview)} : value
+	},
+	provide: field => EditorView.decorations.from(field, value => value.marks),
+})
+
+const CONFLICT_THEME = EditorView.theme({
+	".cm-conflictGutter .cm-gutterElement": {display: "flex", alignItems: "center", justifyContent: "center"},
+	".cm-conflictChips": {
+		display: "flex",
+		alignItems: "center",
+		gap: "0.4rem",
+		padding: "0.3rem 0.5rem",
+		fontFamily: "system-ui, sans-serif",
+		fontSize: "0.8rem",
+	},
+	".cm-conflictHatch, .cm-conflictChips.cm-conflictOpen": {
+		backgroundImage: `repeating-linear-gradient(135deg, ${tint(CONFLICT, 22)} 0 6px, ${tint(CONFLICT, 8)} 6px 12px)`,
+		boxShadow: `inset 3px 0 ${CONFLICT}`,
+	},
+	".cm-conflictHatch": {minHeight: "1.4em"},
+	".cm-conflictChip": {
+		display: "inline-flex",
+		alignItems: "center",
+		gap: "0.35em",
+		padding: "0.15rem 0.6rem",
+		border: "1px solid var(--compare-edge, rgb(0 0 0 / 0.15))",
+		borderRadius: "999px",
+		background: "var(--compare-chip, rgb(255 255 255 / 0.85))",
+		color: "inherit",
+		font: "inherit",
+		cursor: "pointer",
+	},
+	".cm-conflictChip[data-previewed]": {borderColor: "var(--chip-colour)"},
+	".cm-conflictChip[aria-pressed=true]": {
+		borderColor: "var(--chip-colour)",
+		background: tint("var(--chip-colour)", 14),
+		fontWeight: "600",
+	},
+	".cm-conflictRing": {
+		width: "7px",
+		height: "7px",
+		borderRadius: "50%",
+		border: "1.5px solid var(--ring-colour)",
+		boxSizing: "border-box",
+	},
+	".cm-conflictChip[data-previewed] .cm-conflictRing, .cm-conflictChip[aria-pressed=true] .cm-conflictRing": {
+		background: "var(--ring-colour)",
+	},
+	[`${LINE}.cm-conflictTarget`]: {
+		backgroundColor: `${tint(TARGET, 10)} !important`,
+		boxShadow: `inset 3px 0 ${TARGET}`,
+	},
+	[`${LINE}.cm-conflictSource`]: {
+		backgroundColor: `${tint(SOURCE, 10)} !important`,
+		boxShadow: `inset 3px 0 ${SOURCE}`,
+	},
+	".cm-conflictPreviewLine": {
+		padding: "0 2px 0 6px",
+		whiteSpace: "pre-wrap",
+		opacity: "0.6",
+		borderLeft: "3px dotted var(--line-colour)",
+		backgroundColor: tint("var(--line-colour)", 6),
+	},
+	".cm-conflictBefore": {
+		padding: "0 2px 0 6px",
+		whiteSpace: "pre-wrap",
+		backgroundColor: tint(SOURCE, 10),
+		boxShadow: `inset 3px 0 ${SOURCE}`,
+	},
+	".cm-conflictLabel": {
+		float: "right",
+		paddingLeft: "1em",
+		fontFamily: "system-ui, sans-serif",
+		fontSize: "0.75rem",
+		color: "var(--label-colour)",
+	},
+	".cm-conflictIcon": {
+		display: "inline-flex",
+		alignItems: "center",
+		justifyContent: "center",
+		width: "16px",
+		height: "16px",
+		borderRadius: "50%",
+		fontSize: "10px",
+		lineHeight: "1",
+		fontFamily: "system-ui, sans-serif",
+		boxSizing: "border-box",
+	},
+	".cm-conflictIcon-open": {background: CONFLICT, color: "white"},
+	".cm-conflictIcon-taken": {border: `1.5px solid ${INSERTED}`, color: INSERTED},
+	".cm-conflictIcon-edited": {border: `1.5px solid ${NEUTRAL}`, color: NEUTRAL},
+})
+
+// A conflict's lines, open or resolved, never fold away: resolved to what
+// before has, they'd read as unchanged.
+const afterTouched = (state: EditorState): readonly number[] => {
+	const shown = state.field(afterField, false)?.shown
+	if (!shown?.conflicts.length) return NONE
+	return rangeLines(state.doc, shown.conflicts)
+}
+
+function rangeLines(doc: Text, ranges: readonly {from: number; to: number}[]): readonly number[] {
+	const lines = new Set<number>()
+	for (const range of ranges) {
+		const {first, last} = conflictLines(doc, range)
+		for (let line = first.number; line <= last.number; line++) lines.add(line)
+	}
+	return [...lines].sort((x, y) => x - y)
+}
+
+/** After's conflicts: the rows, hatches, previews and line colours, and the gutter marks. */
+const conflictMarks: Extension = [
+	afterField,
+	touchedBy.of(afterTouched),
+	gutter({
+		class: "cm-conflictGutter",
+		widgetMarker: (_view, widget) => (widget instanceof ConflictChips ? new StateMarker(widget.conflict.state) : null),
+		lineMarkerChange: update =>
+			update.transactions.some(transaction =>
+				transaction.effects.some(effect => effect.is(setConflicts) || effect.is(setPreview)),
+			),
+	}),
+	CONFLICT_THEME,
+]
+
+// The lines a conflict covers, from its first to its last, in `doc`.
+function conflictLines(doc: Text, range: {from: number; to: number}) {
+	const from = Math.min(range.from, doc.length)
+	const to = Math.min(Math.max(range.to, from), doc.length)
+	return {first: doc.lineAt(from), last: doc.lineAt(to)}
+}
+
+// Each option's lines, in its side's colour.
+function optionLines(conflict: TextConflict, option: ConflictOption): {text: string; colour: string}[] {
+	const lines = (text: string, colour: string) => (text ? text.split("\n").map(line => ({text: line, colour})) : [])
+	if (option === "target") return lines(conflict.target, TARGET)
+	if (option === "source") return lines(conflict.source, SOURCE)
+	return [...lines(conflict.target, TARGET), ...lines(conflict.source, SOURCE)]
+}
+
+export function afterMarks(doc: Text, shown: ConflictsShown, preview: Preview): DecorationSet {
+	const ranges: Range<Decoration>[] = []
+	shown.conflicts.forEach((conflict, index) => {
+		const {first, last} = conflictLines(doc, conflict)
+		const previewed = preview?.index === index ? preview.option : null
+		ranges.push(
+			Decoration.widget({
+				widget: new ConflictChips(index, conflict, shown, previewed),
+				block: true,
+				side: -1,
+			}).range(first.from),
+		)
+		// What shows where its lines are: an option being previewed, the
+		// hatch while it's open, or its lines, each in the colour of the side
+		// it came from until it's edited.
+		const cover = previewed
+			? new PreviewLines(optionLines(conflict, previewed))
+			: conflict.state === "open"
+				? new Hatch()
+				: null
+		if (cover) {
+			ranges.push(
+				first.from === last.to
+					? Decoration.widget({widget: cover, block: true, side: 1}).range(first.from)
+					: Decoration.replace({widget: cover, block: true}).range(first.from, last.to),
+			)
+			return
+		}
+		const target = conflict.target ? conflict.target.split("\n") : []
+		const source = conflict.source ? conflict.source.split("\n") : []
+		const prefer = conflict.state === "source" ? [source, target] : [target, source]
+		for (let number = first.number; number <= last.number; number++) {
+			const line = doc.line(number)
+			const side = prefer.find(lines => takeLine(lines, line.text))
+			if (!side) continue
+			const className = side === target ? "cm-conflictTarget" : "cm-conflictSource"
+			ranges.push(Decoration.line({class: className}).range(line.from))
+		}
+	})
+	return Decoration.set(ranges, true)
+}
+
+// Whether `lines` has `text`, using that copy up so it's matched once.
+function takeLine(lines: string[], text: string): boolean {
+	const at = lines.indexOf(text)
+	if (at < 0) return false
+	lines.splice(at, 1)
+	return true
+}
+
+// The row heading a conflict: each option, to preview by hovering and take
+// by clicking.
+class ConflictChips extends WidgetType {
+	constructor(
+		readonly index: number,
+		readonly conflict: TextConflict,
+		readonly shown: ConflictsShown,
+		readonly previewed: ConflictOption | null,
+	) {
+		super()
+	}
+	eq(other: ConflictChips) {
+		return (
+			other.index === this.index &&
+			other.previewed === this.previewed &&
+			JSON.stringify(other.conflict) === JSON.stringify(this.conflict) &&
+			other.shown.sides?.source === this.shown.sides?.source &&
+			other.shown.sides?.target === this.shown.sides?.target &&
+			other.shown.take === this.shown.take
+		)
+	}
+	toDOM(view: EditorView) {
+		const {conflict, shown, index} = this
+		const row = document.createElement("div")
+		row.className = "cm-conflictChips"
+		if (conflict.state === "open" && !this.previewed) row.classList.add("cm-conflictOpen")
+		const options: {option: ConflictOption; name: string; colours: string[]}[] = [
+			{option: "target", name: shown.sides?.target ?? "target", colours: [TARGET]},
+			{option: "source", name: shown.sides?.source ?? "source", colours: [SOURCE]},
+			{option: "both", name: "both", colours: [TARGET, SOURCE]},
+		]
+		for (const {option, name, colours} of options) {
+			const chip = document.createElement("button")
+			chip.type = "button"
+			chip.className = "cm-conflictChip"
+			chip.style.setProperty("--chip-colour", colours[0])
+			chip.setAttribute("aria-pressed", String(conflict.state === option))
+			if (this.previewed === option) chip.dataset.previewed = ""
+			for (const colour of colours) {
+				const ring = document.createElement("span")
+				ring.className = "cm-conflictRing"
+				ring.style.setProperty("--ring-colour", colour)
+				chip.append(ring)
+			}
+			chip.append(name)
+			chip.title = conflict[option] || "(nothing)"
+			// Keep the editor's selection where it is.
+			chip.addEventListener("mousedown", event => event.preventDefault())
+			chip.addEventListener("mouseenter", () => view.dispatch({effects: setPreview.of({index, option})}))
+			chip.addEventListener("mouseleave", () => view.dispatch({effects: setPreview.of(null)}))
+			chip.addEventListener("click", () => {
+				view.dispatch({effects: setPreview.of(null)})
+				shown.take?.(conflict, option)
+			})
+			row.append(chip)
+		}
+		return row
+	}
+	ignoreEvent() {
+		return true
+	}
+}
+
+// Where an open conflict's lines are: a hatch, nothing to read.
+class Hatch extends WidgetType {
+	eq() {
+		return true
+	}
+	toDOM() {
+		const element = document.createElement("div")
+		element.className = "cm-conflictHatch"
+		return element
+	}
+}
+
+// An option's lines, shown in place while it's hovered.
+class PreviewLines extends WidgetType {
+	constructor(readonly lines: {text: string; colour: string}[]) {
+		super()
+	}
+	eq(other: PreviewLines) {
+		return JSON.stringify(other.lines) === JSON.stringify(this.lines)
+	}
+	toDOM() {
+		const element = document.createElement("div")
+		for (const line of this.lines.length ? this.lines : [{text: "", colour: NEUTRAL}]) {
+			const each = document.createElement("div")
+			each.className = "cm-conflictPreviewLine"
+			each.style.setProperty("--line-colour", line.colour)
+			each.textContent = line.text || "​"
+			element.append(each)
+		}
+		return element
+	}
+}
+
+// How a conflict went, beside its row: open, a side taken, or edited.
+class StateMarker extends GutterMarker {
+	constructor(readonly state: ConflictState) {
+		super()
+	}
+	eq(other: StateMarker) {
+		return other.state === this.state
+	}
+	toDOM() {
+		return stateIcon(this.state)
+	}
+}
+
+function stateIcon(state: ConflictState): HTMLElement {
+	const icon = document.createElement("span")
+	const kind = state === "open" ? "open" : state === "edited" ? "edited" : "taken"
+	icon.className = `cm-conflictIcon cm-conflictIcon-${kind}`
+	icon.textContent = kind === "open" ? "⇄" : kind === "edited" ? "✎" : "✓"
+	icon.title =
+		kind === "open" ? "Both changed this" : kind === "edited" ? "Edited" : "Resolved"
+	// Shown outside the editor too (the heading), where the theme doesn't reach.
+	Object.assign(icon.style, {
+		display: "inline-flex",
+		alignItems: "center",
+		justifyContent: "center",
+		width: "16px",
+		height: "16px",
+		borderRadius: "50%",
+		fontSize: "10px",
+		lineHeight: "1",
+		boxSizing: "border-box",
+		...(kind === "open"
+			? {background: CONFLICT, color: "white"}
+			: {border: `1.5px solid ${kind === "edited" ? NEUTRAL : INSERTED}`, color: kind === "edited" ? NEUTRAL : INSERTED}),
+	})
+	return icon
+}
+
+// --- Before's side of them: the target's lines, then the source's ---
+
+const beforeField = StateField.define<{marks: DecorationSet; ranges: {from: number; to: number}[]}>({
+	create: () => ({marks: Decoration.none, ranges: []}),
+	update(value, transaction) {
+		let next = transaction.docChanged
+			? {
+					marks: value.marks.map(transaction.changes),
+					ranges: value.ranges.map(range => ({
+						from: transaction.changes.mapPos(range.from, -1),
+						to: transaction.changes.mapPos(range.to, 1),
+					})),
+				}
+			: value
+		for (const effect of transaction.effects)
+			if (effect.is(setConflicts))
+				next = {
+					marks: beforeMarksFor(transaction.state.doc, effect.value),
+					ranges: effect.value.conflicts.flatMap(conflict => (conflict.before ? [conflict.before] : [])),
+				}
+		return next
+	},
+	provide: field => EditorView.decorations.from(field, value => value.marks),
+})
+
+/** Before's conflicts: the target's lines labelled, the source's after them. */
+const beforeMarks: Extension = [
+	beforeField,
+	touchedBy.of(state => {
+		const ranges = state.field(beforeField, false)?.ranges ?? []
+		return ranges.length ? rangeLines(state.doc, ranges) : NONE
+	}),
+	CONFLICT_THEME,
+]
+
+function beforeMarksFor(doc: Text, shown: ConflictsShown): DecorationSet {
+	const ranges: Range<Decoration>[] = []
+	for (const conflict of shown.conflicts) {
+		if (!conflict.before) continue
+		const {first, last} = conflictLines(doc, conflict.before)
+		const hasTarget = !!conflict.target
+		if (hasTarget) {
+			for (let number = first.number; number <= last.number; number++)
+				ranges.push(Decoration.line({class: "cm-conflictTarget"}).range(doc.line(number).from))
+			ranges.push(
+				Decoration.widget({widget: new SideLabel(shown.sides?.target ?? "target", TARGET), side: -1}).range(
+					first.from,
+				),
+			)
+		}
+		const source = conflict.source ? conflict.source.split("\n") : []
+		if (!source.length) continue
+		ranges.push(
+			Decoration.widget({
+				widget: new SourceLines(source, shown.sides?.source ?? "source"),
+				block: true,
+				side: hasTarget ? 1 : -1,
+			}).range(hasTarget ? last.to : first.from),
+		)
+	}
+	return Decoration.set(ranges, true)
+}
+
+// A side's name, at the end of the line it heads.
+class SideLabel extends WidgetType {
+	constructor(
+		readonly name: string,
+		readonly colour: string,
+	) {
+		super()
+	}
+	eq(other: SideLabel) {
+		return other.name === this.name && other.colour === this.colour
+	}
+	toDOM() {
+		const label = document.createElement("span")
+		label.className = "cm-conflictLabel"
+		label.style.setProperty("--label-colour", this.colour)
+		label.textContent = this.name
+		return label
+	}
+}
+
+// The source's lines, in before, after the target's.
+class SourceLines extends WidgetType {
+	constructor(
+		readonly lines: string[],
+		readonly name: string,
+	) {
+		super()
+	}
+	eq(other: SourceLines) {
+		return other.name === this.name && other.lines.join("\n") === this.lines.join("\n")
+	}
+	toDOM() {
+		const element = document.createElement("div")
+		this.lines.forEach((text, i) => {
+			const line = document.createElement("div")
+			line.className = "cm-conflictBefore"
+			if (i === 0) line.append(new SideLabel(this.name, SOURCE).toDOM())
+			line.append(text || "​")
+			element.append(line)
+		})
+		return element
+	}
+}
+
+// The view's conflicts, kept to what the compare says.
+function followConflicts(view: EditorView, compare: Accessor<DraftCompare | undefined>) {
+	createEffect(
+		on(
+			() => {
+				const current = compare()
+				return {conflicts: current?.conflicts ?? [], sides: current?.sides, take: current?.take}
+			},
+			shown => view.dispatch({effects: setConflicts.of(shown)}),
+		),
+	)
+}
 
 // --- Folding away what's unchanged, on its own ---
 
@@ -1026,6 +1752,27 @@ function foldedIn(state: EditorState, touched: readonly number[], unfolded: read
 
 type Folding = {deco: DecorationSet; touched: readonly number[]; unfolded: readonly number[]}
 
+const sameLines = (a: readonly number[], b: readonly number[]) =>
+	a === b || (a.length === b.length && a.every((line, i) => line === b[i]))
+
+// Side by side, a merge folds with this rather than the merge view's own
+// folding, which knows only what differs: each side keeps what changed open,
+// from the merge view's chunks, and its conflicts.
+function chunkLines(state: EditorState): readonly number[] {
+	const found = getChunks(state)
+	if (!found) return NONE
+	const lines = new Set<number>()
+	for (const chunk of found.chunks) {
+		const [from, to] = found.side === "a" ? [chunk.fromA, chunk.toA] : [chunk.fromB, chunk.toB]
+		const first = state.doc.lineAt(Math.min(from, state.doc.length)).number
+		const last = state.doc.lineAt(Math.min(Math.max(from, to - 1), state.doc.length)).number
+		for (let line = first; line <= last; line++) lines.add(line)
+	}
+	return [...lines].sort((x, y) => x - y)
+}
+
+const foldBeside = (): Extension => [collapseUnchanged, touchedBy.of(chunkLines)]
+
 const collapseUnchanged = [
 	StateField.define<Folding>({
 		create(state) {
@@ -1038,7 +1785,7 @@ const collapseUnchanged = [
 				: value.unfolded
 			for (const effect of transaction.effects) if (effect.is(unfold)) unfolded = [...unfolded, effect.value]
 			const touched = transaction.state.facet(touchedBy)(transaction.state)
-			if (touched === value.touched && unfolded === value.unfolded) return value
+			if (sameLines(touched, value.touched) && unfolded === value.unfolded) return value
 			return {deco: foldedIn(transaction.state, touched, unfolded), touched, unfolded}
 		},
 		provide: field => EditorView.decorations.from(field, value => value.deco),

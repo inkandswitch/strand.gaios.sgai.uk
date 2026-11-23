@@ -1,14 +1,16 @@
 import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
-import {request, type Selector} from "@inkandswitch/patchwork-providers"
-import {createSignal, createUniqueId, For, Show, type JSX} from "solid-js"
+import {request, subscribe, type Selector} from "@inkandswitch/patchwork-providers"
+import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type JSX} from "solid-js"
 import type {WorkspaceCompare} from "./compare.ts"
 import {ComparePicker, ModeControls} from "./compare-ui.tsx"
 import {CommentsButton, type CommentsToggle} from "./comments.tsx"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 import {
-	mergeOf,
+	mergeShown,
+	openConflicts,
 	overlayName,
 	type Comparison,
+	type MergeConflicts,
 	type DraftEntry,
 	type MergeEntry,
 	type Overlay,
@@ -18,9 +20,9 @@ import {NameInput, SidebarButton, type SidebarToggle} from "./workspaces.tsx"
 
 /**
  * The workspace card's header: its name, then the checked-out overlay as a
- * token opening everything to do with drafts and merges, and what it's
- * compared with beside it. A merge checked out shows as the merge, to accept
- * or drop.
+ * token opening everything to do with drafts and pull requests, and what
+ * it's compared with beside it. A merge checked out, a preview or a pull
+ * request, shows as the merge: to merge, publish, or cancel.
  */
 export function WorkspaceHeader(props: {
 	name: string
@@ -42,7 +44,7 @@ export function WorkspaceHeader(props: {
 	const [renaming, setRenaming] = createSignal(false)
 	const send = (selector: Selector) => request(props.element, selector)
 	const ours = () => props.overlays.checkedOut
-	const merge = () => mergeOf(props.overlays, ours())
+	const merge = () => mergeShown(props.comparison)
 	const draft = () => props.overlays.drafts.find(entry => entry.url === ours())
 	const name = (overlay: Overlay) => overlayName(props.overlays, overlay)
 
@@ -112,7 +114,7 @@ export function WorkspaceHeader(props: {
 			<div class="projects__header-end">
 				<div ref={element => props.actions?.(element)} class="projects__header-actions" />
 				<Show when={merge()}>
-					{current => <AcceptButton merge={current()} send={send} />}
+					{current => <MergeActions merge={current()} element={props.element} send={send} />}
 				</Show>
 				<CommentsButton comments={props.comments} />
 			</div>
@@ -187,10 +189,9 @@ function OverlayMenu(props: {
 	// What a draft would merge into first: the one it was copied from.
 	const parent = (): Overlay | undefined => draft()?.parent
 	const versions = (): Overlay[] => [null, ...drafts().map(entry => entry.url)]
+	const pullRequests = () => props.overlays.merges.filter(entry => entry.published)
 	const compareWith = () =>
-		[...versions(), ...props.overlays.merges.map(entry => entry.url)].filter(
-			overlay => overlay !== ours()
-		)
+		[...versions(), ...pullRequests().map(entry => entry.url)].filter(overlay => overlay !== ours())
 	const mergeInto = () => {
 		const others = versions().filter(overlay => overlay !== ours())
 		const first = parent()
@@ -210,11 +211,8 @@ function OverlayMenu(props: {
 		checkout(overlay: Overlay) {
 			close()
 			if (overlay === ours()) return
-			void props.send({type: "overlay:checkout", overlay}).then(done => {
-				// A merge is looked over against its target.
-				const merge = mergeOf(props.overlays, overlay)
-				if (done && merge) void props.send({type: "compare:set", overlay: merge.target})
-			})
+			// A merge is compared with its target by the compare provider.
+			void props.send({type: "overlay:checkout", overlay})
 		},
 		compare(overlay: Overlay) {
 			close()
@@ -222,9 +220,8 @@ function OverlayMenu(props: {
 		},
 		merge(target: Overlay) {
 			close()
-			void props.send({type: "merge:create", source: ours(), target}).then(merge => {
-				if (merge) void props.send({type: "compare:set", overlay: target})
-			})
+			// Opens a preview, or the pull request there is for the pair.
+			void props.send({type: "merge:create", source: ours(), target})
 		},
 		copy() {
 			close()
@@ -294,10 +291,10 @@ function OverlayMenu(props: {
 					{item(null)}
 					<For each={drafts()}>{entry => item(entry.url, copiedFrom(entry))}</For>
 				</div>
-				<Show when={props.overlays.merges.length > 0}>
-					<p class="projects__menu-heading">Merges</p>
+				<Show when={pullRequests().length > 0}>
+					<p class="projects__menu-heading">Pull requests</p>
 					<div onMouseEnter={closeSubmenus}>
-						<For each={props.overlays.merges}>{entry => item(entry.url)}</For>
+						<For each={pullRequests()}>{entry => item(entry.url)}</For>
 					</div>
 				</Show>
 				<hr />
@@ -364,61 +361,95 @@ function OverlayMenu(props: {
 }
 
 /**
- * While a merge is checked out: its source and its target, closing to drop
- * the merge. Accepting it is at the header's end.
+ * While a merge is checked out: whether it's a preview or a pull request,
+ * and its source and target. What to do with it is at the header's end.
  */
 function MergeBar(props: {
 	merge: MergeEntry
 	name(overlay: Overlay): string
 	send(selector: Selector): Promise<unknown>
 }) {
-	const drop = () => void props.send({type: "overlay:delete", overlay: props.merge.url})
 	return (
 		<div class="projects__merge" role="group" aria-label="Merge">
+			<span class="projects__merge-kind">{props.merge.published ? "Pull request" : "Preview"}</span>
 			<span class="projects__tokens">
 				<span class="projects__token" title="Merging">
-					<span class="projects__token-dot" aria-hidden="true" />
 					<span class="projects__token-name">{props.name(props.merge.source)}</span>
 				</span>
 				<span class="projects__tokens-between" aria-label="into">
 					→
 				</span>
-				<span class="projects__token projects__token--theirs" title="Merging into">
-					<span class="projects__token-dot" aria-hidden="true" />
+				<span class="projects__token" title="Merging into">
 					<span class="projects__token-name">{props.name(props.merge.target)}</span>
-					<button
-						type="button"
-						class="projects__token-clear"
-						title="Drop the merge"
-						aria-label="Drop the merge"
-						onClick={drop}>
-						×
-					</button>
 				</span>
 			</span>
 		</div>
 	)
 }
 
-/** Accepts the checked-out merge, which checks its target out. */
-function AcceptButton(props: {merge: MergeEntry; send(selector: Selector): Promise<unknown>}) {
-	const [merging, setMerging] = createSignal(false)
-	const accept = async () => {
-		setMerging(true)
+/**
+ * What to do with the checked-out merge: merge it (once no conflict is
+ * open), publish a preview as a pull request, or cancel it (close, for a
+ * pull request). Merging and cancelling check another overlay out.
+ */
+function MergeActions(props: {
+	merge: MergeEntry
+	/** where `merge:conflicts` is asked from */
+	element: HTMLElement
+	send(selector: Selector): Promise<unknown>
+}) {
+	const [busy, setBusy] = createSignal(false)
+	const [conflicts, setConflicts] = createSignal<MergeConflicts>()
+	createEffect(() => {
+		const url = props.merge.url
+		setConflicts(undefined)
+		onCleanup(
+			subscribe(props.element, {type: "merge:conflicts", merge: url}, value =>
+				setConflicts(value as unknown as MergeConflicts)
+			)
+		)
+	})
+	const open = () => openConflicts(conflicts())
+	const run = async (selector: Selector) => {
+		setBusy(true)
 		try {
-			await props.send({type: "merge:accept", merge: props.merge.url})
+			await props.send(selector)
 		} finally {
-			setMerging(false)
+			setBusy(false)
 		}
 	}
+	const cancel = () => {
+		if (props.merge.published && !window.confirm("Close this pull request? This can't be undone.")) return
+		void run({type: "overlay:delete", overlay: props.merge.url})
+	}
 	return (
-		<button
-			type="button"
-			class="projects__button projects__merge-button"
-			disabled={merging()}
-			onClick={accept}>
-			Merge
-		</button>
+		<div class="projects__merge-actions">
+			<Show when={open() > 0}>
+				<span class="projects__merge-conflicts" role="status">
+					{open() === 1 ? "1 conflict" : `${open()} conflicts`}
+				</span>
+			</Show>
+			<button type="button" class="projects__button" disabled={busy()} onClick={cancel}>
+				{props.merge.published ? "Close" : "Cancel"}
+			</button>
+			<Show when={!props.merge.published}>
+				<button
+					type="button"
+					class="projects__button"
+					disabled={busy()}
+					onClick={() => void run({type: "merge:publish", merge: props.merge.url})}>
+					Create pull request
+				</button>
+			</Show>
+			<button
+				type="button"
+				class="projects__button projects__merge-button"
+				disabled={busy() || conflicts() === undefined || open() > 0}
+				title={open() > 0 ? "Resolve the conflicts first" : undefined}
+				onClick={() => void run({type: "merge:accept", merge: props.merge.url})}>
+				Merge
+			</button>
+		</div>
 	)
 }
 

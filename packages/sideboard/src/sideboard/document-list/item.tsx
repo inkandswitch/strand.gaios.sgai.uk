@@ -323,11 +323,19 @@ const MARK_TITLES: Record<Mark, string> = {
   differs: "Different in the two versions",
   ours: "Only in this version",
   theirs: "Only in the compared version",
+  changed: "Changed by the merge",
+  added: "Added by the merge",
+  removed: "Removed by the merge",
+  conflict: "Has conflicts to resolve",
 };
 
-// A dot per version it's in.
+// Compared, a dot per version it's in; merging, one for what the merge does.
 const MARK_DOTS: Record<Mark, string[]> = {
   differs: ["ours", "theirs"],
   ours: ["ours"],
   theirs: ["theirs"],
+  changed: ["changed"],
+  added: ["added"],
+  removed: ["removed"],
+  conflict: ["conflict"],
 };

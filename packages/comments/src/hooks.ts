@@ -65,7 +65,8 @@ export function useThreadsOf(
 }
 
 type Overlay = AutomergeUrl | null;
-type Comparison = { a: Overlay; b: Overlay } | null;
+// Only which two versions are read here, whichever kind of comparison it is.
+type Comparison = { kind: "compare" | "merge"; a: Overlay; b: Overlay } | null;
 type OverlaysState = { checkedOut: Overlay };
 // The repo views read through: an overlay's, which reads other overlays too.
 type OverlayRepo = { findIn?(overlay: Overlay, url: AutomergeUrl): Promise<DocHandle<DocWithComments>> };

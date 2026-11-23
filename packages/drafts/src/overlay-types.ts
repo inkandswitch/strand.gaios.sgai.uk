@@ -15,18 +15,18 @@ export type CloneEntry = {
 
 type Clones = Record<AutomergeUrl, CloneEntry>;
 
-// On the root: the one pointer to its overlays, written when the first one is
-// made.
-export type HasOverlays = {
+// On the root: the one pointer to its workspace, written when the first
+// overlay is made.
+export type HasWorkspace = {
   "@patchwork"?: {
     type?: string;
-    overlaysUrl?: AutomergeUrl;
+    workspaceUrl?: AutomergeUrl;
   };
 };
 
-// Every overlay of a root.
-export type OverlayIndex = {
-  "@patchwork": { type: "overlay-index" };
+// A root's drafts and pull requests. A merge that isn't listed is a preview.
+export type Workspace = {
+  "@patchwork": { type: "workspace" };
   drafts: AutomergeUrl[];
   merges: AutomergeUrl[];
 };
@@ -75,6 +75,8 @@ export type MergeEntry = {
   url: AutomergeUrl;
   source: AutomergeUrl | null;
   target: AutomergeUrl | null;
+  // A pull request, listed in the workspace; false for a preview.
+  published: boolean;
 };
 
 // One member, as an overlay has it.
@@ -86,6 +88,32 @@ export type Member = {
   // The member it was reached from; null for the root.
   parent: AutomergeUrl | null;
 };
+
+// --- Conflicts ---------------------------------------------------------------
+
+// Where a conflict is, in auto and in merged alike: a path into the document,
+// and inside a text, the stretch strictly between two characters, named by
+// Automerge cursors ("start" and "end" for the text's ends).
+export type Place = {
+  path: (string | number)[];
+  from?: string;
+  to?: string;
+};
+
+// A place where a plugin says the source's and the target's changes don't
+// go together, what each side has there, and, where keeping both makes
+// sense, what that reads as.
+export type Conflict = {
+  at: Place;
+  source: unknown;
+  target: unknown;
+  both?: unknown;
+};
+
+export type ConflictState = "open" | "source" | "target" | "both" | "edited";
+
+// Every conflict of a merge, by member.
+export type MergeConflicts = Record<AutomergeUrl, (Conflict & { state: ConflictState })[]>;
 
 // The answer to `repo:handle-descriptor`: read `cloneUrl` when there is one.
 export type HandleDescriptor = { url: AutomergeUrl; cloneUrl?: AutomergeUrl };
