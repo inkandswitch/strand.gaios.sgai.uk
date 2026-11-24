@@ -51,9 +51,9 @@
     "@codemirror/search": "^6.6.0",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.40.0",
-    "@inkandswitch/patchwork-elements": "^6.0.2",
-    "@inkandswitch/patchwork-filesystem": "^0.2.9",
-    "@inkandswitch/patchwork-providers": "^0.5.2",
+    "@inkandswitch/patchwork-elements": "^6.2.3",
+    "@inkandswitch/patchwork-filesystem": "^0.2.23",
+    "@inkandswitch/patchwork-providers": "^0.5.5",
     "@inkandswitch/patchwork-providers-solid": "^0.2.8",
     "@lezer/highlight": "^1.2.3",
     "codemirror": "^6.0.0",
@@ -62,7 +62,7 @@
     "tsgo-wasm": "7.0.2"
   },
   "devDependencies": {
-    "@inkandswitch/patchwork-bootloader": "^0.7.2",
+    "@inkandswitch/patchwork-bootloader": "^0.9.9",
     "happy-dom": "^15.11.7",
     "typescript": "^5.8.3",
     "vite": "^5.4.19",
