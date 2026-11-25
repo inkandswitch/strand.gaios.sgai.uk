@@ -94,8 +94,11 @@ function entryOf(rows: Row[], overlay: Overlay): HistoryEntry {
   };
 }
 
-/** A point in history: its newest change, and when that was made. */
-export type Point = { hash: string; time: number };
+/**
+ * A point in history: its newest change, and when that was made. A point the
+ * journal recorded also says each member's heads there, exactly.
+ */
+export type Point = { hash: string; time: number; members?: Record<AutomergeUrl, string[]> };
 
 /**
  * `doc` as it was at `point`, as heads: every change made no later than the
@@ -126,6 +129,19 @@ export function headsAt(
     for (const dep of meta.deps) covered.add(dep);
   }
   return encodeHeads([...picked].filter((hash) => !covered.has(hash)));
+}
+
+// Every change hash a document has, worked out once per version.
+const hashCache = new WeakMap<object, Set<string>>();
+
+/** Whether `doc` has every one of `hashes`. */
+export function hasAll(doc: Automerge.Doc<unknown>, hashes: readonly string[]): boolean {
+  let known = hashCache.get(doc as object);
+  if (!known) {
+    known = new Set(metasOf(doc).map((meta) => meta.hash));
+    hashCache.set(doc as object, known);
+  }
+  return hashes.every((hash) => known!.has(hash));
 }
 
 /** When the change `hash` was made, if `doc` has it. */

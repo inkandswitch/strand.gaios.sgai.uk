@@ -25,10 +25,13 @@ export type HasWorkspace = {
 };
 
 // A root's drafts and pull requests. A merge that isn't listed is a preview.
+// `history` is main's journal and history groups, made with main's first
+// recorded edit (or its first draft).
 export type Workspace = {
   "@patchwork": { type: "workspace" };
   drafts: AutomergeUrl[];
   merges: AutomergeUrl[];
+  history?: HistoryRefs;
 };
 
 export type DraftDoc = {
@@ -38,6 +41,8 @@ export type DraftDoc = {
   // The draft it was forked off; null is main.
   parent: AutomergeUrl | null;
   clones: Clones;
+  // Its journal and history groups: forks of its parent's, made with it.
+  history?: HistoryRefs;
 };
 
 // `source` merged into `target`, either of them main (null).
@@ -112,6 +117,55 @@ export type HistoryEntry = {
   actors: string[];
   // The members they changed.
   members: AutomergeUrl[];
+};
+
+// --- Journals ----------------------------------------------------------------
+
+// Main's, and each draft's, record of its own edits.
+export type HistoryRefs = { journal: AutomergeUrl; groups: AutomergeUrl };
+
+// One record per edit made here: every change to the journal is a version of
+// the whole root, each member at the heads it records (members it doesn't
+// list read as they did before any record). Heads are sets, so records made
+// at the same time merge into both. A draft's journal is a fork of its
+// parent's, and merging a draft merges its journal in too. Each record's
+// change message is `JournalMessage` as JSON.
+export type JournalDoc = {
+  "@patchwork": { type: "journal" };
+  members: Record<AutomergeUrl, { heads: Record<string, true> }>;
+  // Who's behind each actor that wrote a record: a contact.
+  authors: Record<string, AutomergeUrl>;
+};
+
+export type JournalMessage = {
+  // The draft the edit was made in; null for main.
+  draft: AutomergeUrl | null;
+  // The merge, for the record a merge left when it was accepted.
+  merge?: AutomergeUrl;
+};
+
+// A journal's records in bursts, kept as they're made. Each actor only ever
+// writes its own groups, so groups are never written at the same time.
+export type HistoryGroupsDoc = {
+  "@patchwork": { type: "history-groups" };
+  // Keyed `${actor}:${first record's hash}`.
+  groups: Record<string, HistoryGroup>;
+};
+
+export type HistoryGroup = {
+  // The journal's actor that wrote it, and who that is, if known.
+  actor: string;
+  author?: AutomergeUrl;
+  // Where its edits were made; null for main.
+  draft: AutomergeUrl | null;
+  // When its first and last records were made, in Unix seconds.
+  start: number;
+  end: number;
+  // Its first and latest records, by hash: `last` is the point it reaches.
+  first: string;
+  last: string;
+  members: Record<AutomergeUrl, true>;
+  changes: number;
 };
 
 // --- Conflicts ---------------------------------------------------------------

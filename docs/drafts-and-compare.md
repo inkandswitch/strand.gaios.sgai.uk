@@ -484,6 +484,62 @@ type ConflictState = "open" | "source" | "target" | "both" | "edited"
 - Open conflicts are what block accepting. The header counts them; the
   sidebar marks the members with any; a view draws its own member's.
 
+### The journal
+
+What the history is made of, from when an overlay's journal begins. Main and
+each draft have one (`Workspace.history`, `DraftDoc.history`): a journal of
+records, and a history groups document of the bursts they make.
+
+```ts
+type HistoryRefs = { journal: AutomergeUrl; groups: AutomergeUrl }
+
+type JournalDoc = {
+  "@patchwork": { type: "journal" }
+  members: Record<AutomergeUrl, { heads: Record<string, true> }>
+  authors: Record<string, AutomergeUrl>         // actor id → contact
+}
+
+type HistoryGroupsDoc = {
+  "@patchwork": { type: "history-groups" }
+  groups: Record<string, HistoryGroup>          // keyed `${actor}:${first}`
+}
+
+type HistoryGroup = {
+  actor: string
+  author?: AutomergeUrl
+  draft: AutomergeUrl | null                    // where its edits were made
+  start: number
+  end: number
+  first: string                                 // its first record
+  last: string                                  // its latest: the point it reaches
+  members: Record<AutomergeUrl, true>
+  changes: number
+}
+```
+
+- **A record per edit made here.** The overlay provider watches what the
+  checked-out draft (or main) writes to, and each change this client made
+  there (its own actor's, and touching more than `@patchwork`) becomes one
+  journal change: the member's heads now, stamped with the edit's time, its
+  message `{ draft }` as JSON. Edits that sync in from elsewhere, and just
+  looking, write nothing. Nothing is recorded at a point in history, or on a
+  merge.
+- **Every record is a version of the whole root:** the journal at that
+  change holds every member it has recorded at its heads. A point in history
+  is a record's hash, and checking it out reads each recorded member exactly
+  there. Heads are sets, so records made at the same time merge into both.
+- **Groups are kept as records are made:** each record extends its actor's
+  latest group, or starts one after a ten-minute pause. An actor only writes
+  its own groups. History reads the groups, joining different actors'
+  overlapping groups into one entry, named by its latest record.
+- **Drafts fork their parent's journal and groups** when they're made
+  (making main's first if need be), so they share its records up to there.
+- **Accepting a merge merges the source's journal and groups into the
+  target's,** and writes one record of every member as merged, its message
+  naming the merge: merging makes no edit of its own.
+- **Before a journal begins,** history is worked out from the members'
+  changes as above, and a point is pinned by time.
+
 ## Compare provider
 
 | Selector | Kind | Answer |
@@ -640,6 +696,7 @@ copy when absent).
 | Reading through an overlay, merges in memory | `packages/drafts/src/overlay-repo.ts` |
 | Making, publishing, deleting, accepting | `packages/drafts/src/overlay-actions.ts` |
 | History entries, a member at a point | `packages/drafts/src/history.ts`, `providers/overlay-history.ts` |
+| Journals: making, forking, merging, records, groups | `packages/drafts/src/journal.ts`, `providers/history-recorder.ts` |
 | The History panel | `packages/projects/src/history.tsx` |
 | The overlay provider | `packages/drafts/src/providers/OverlayProvider.ts`, `overlay-list.ts` |
 | The compare provider | `packages/review/src/provider.ts` |

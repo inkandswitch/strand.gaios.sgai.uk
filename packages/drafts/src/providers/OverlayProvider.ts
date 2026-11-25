@@ -4,7 +4,7 @@ import {
   type AutomergeUrl,
   type Repo,
 } from "@automerge/automerge-repo/slim";
-import { accept, type SubscribeEvent } from "@inkandswitch/patchwork-providers";
+import { accept, subscribe, type SubscribeEvent } from "@inkandswitch/patchwork-providers";
 
 import {
   acceptMerge,
@@ -12,6 +12,7 @@ import {
   createMerge,
   deleteOverlay,
   ensureWorkspace,
+  findWorkspace,
   publishMerge,
   renameDraft,
 } from "../overlay-actions.js";
@@ -30,6 +31,7 @@ import type {
   OverlaysState,
   OverlayStatus,
 } from "../overlay-types.js";
+import { createHistoryRecorder } from "./history-recorder.js";
 import { createOverlayHistory } from "./overlay-history.js";
 import { createOverlayList } from "./overlay-list.js";
 
@@ -115,6 +117,18 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
     repo,
     rootUrl,
     readerFor: (overlay) => readerFor(overlay, null),
+    workspace: async () => findWorkspace(repo, await list.root()),
+  });
+  // Who's signed in, for the journal's records.
+  let contact: AutomergeUrl | undefined;
+  const stopContact = subscribe<AutomergeUrl>(element, { type: "patchwork:contact" }, (url) => {
+    if (typeof url === "string" && isValidAutomergeUrl(url)) contact = url;
+  });
+  const recorder = createHistoryRecorder({
+    repo,
+    overlayRepo,
+    workspace: async () => ensureWorkspace(repo, await list.root()),
+    author: () => contact,
   });
   const stopList = list.subscribe(() => {
     forgetReaders();
@@ -366,7 +380,8 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
             {
               members: async () => members,
               doc: async (member) => docs.get(member) as never,
-            }
+            },
+            contact
           );
           return true;
         });
@@ -382,6 +397,8 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
     element.removeEventListener("patchwork:subscribe", onSubscribe);
     subscribers.clear();
     stopList();
+    stopContact();
+    recorder.dispose();
     list.dispose();
     overlayRepo.dispose();
     for (const reader of readers.values()) reader.dispose();

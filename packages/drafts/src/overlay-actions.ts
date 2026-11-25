@@ -9,10 +9,13 @@ import {
 
 import { canonicalUrl, walkDocTree } from "./children.js";
 import { cloneAt } from "./draft-clones.js";
+import { ensureHistory, forkHistory, historyRefsOf, mergeHistory, writeRecord } from "./journal.js";
 import type {
   CloneEntry,
   DraftDoc,
   HasWorkspace,
+  HistoryGroupsDoc,
+  JournalDoc,
   MergeDoc,
   Workspace,
 } from "./overlay-types.js";
@@ -51,7 +54,8 @@ export async function findWorkspace(
 
 // A draft forked off `parent` (null for main) as it is now. Forking clones
 // nothing: the draft records, per member, the version it branches off, and
-// reads that until the member's first write clones it.
+// reads that until the member's first write clones it. Its journal is a
+// fork of its parent's (made now if the parent has none yet).
 export async function createDraft(
   repo: Repo,
   root: DocHandle<HasWorkspace>,
@@ -60,10 +64,12 @@ export async function createDraft(
   const workspace = await ensureWorkspace(repo, root);
   const parentDoc = parent ? (await repo.find<DraftDoc>(parent)).doc() : null;
   const clones = await forkPoints(repo, root.url, parentDoc);
+  const history = await forkHistory(repo, await ensureHistory(repo, workspace, parent));
   const draft = repo.create<DraftDoc>({
     "@patchwork": { type: "draft" },
     parent,
     clones,
+    history,
   });
   workspace.change((d) => {
     d.drafts.push(draft.url);
@@ -144,23 +150,40 @@ export type MergeReading = {
 };
 
 // The target takes the merge's content, and the merge, and a source that's a
-// draft, come off the list.
+// draft, come off the list. The source's journal is merged into the
+// target's, and the target's records what it now reads: merging makes no
+// edit of its own for the journal to pick up.
 export async function acceptMerge(
   repo: Repo,
   workspace: DocHandle<Workspace>,
   merge: DocHandle<MergeDoc>,
-  reading: MergeReading
+  reading: MergeReading,
+  author?: AutomergeUrl
 ): Promise<void> {
   const doc = merge.doc();
   if (!doc) throw new Error(`[drafts] merge ${merge.url} has no document`);
   const target = doc.target ? await repo.find<DraftDoc>(doc.target) : null;
+  const heads: Record<AutomergeUrl, string[]> = {};
   for (const url of await reading.members()) {
     const merged = await reading.doc(url);
     const copy = await writableCopy(repo, target, url);
-    if (Automerge.hasHeads(copy.doc() as Automerge.Doc<unknown>, Automerge.getHeads(merged)))
-      continue;
-    copy.update((current) => Automerge.merge(current as Automerge.Doc<unknown>, merged));
+    if (!Automerge.hasHeads(copy.doc() as Automerge.Doc<unknown>, Automerge.getHeads(merged)))
+      copy.update((current) => Automerge.merge(current as Automerge.Doc<unknown>, merged));
+    heads[url] = [...Automerge.getHeads(copy.doc() as Automerge.Doc<unknown>)];
   }
+  const into = await ensureHistory(repo, workspace, doc.target);
+  const from = await historyRefsOf(repo, workspace, doc.source);
+  if (from) await mergeHistory(repo, into, from);
+  const [journal, groups] = await Promise.all([
+    repo.find<JournalDoc>(into.journal),
+    repo.find<HistoryGroupsDoc>(into.groups),
+  ]);
+  writeRecord(journal, groups, {
+    members: heads,
+    time: Math.floor(Date.now() / 1000),
+    message: { draft: doc.target, merge: merge.url },
+    author,
+  });
   const gone = doc.source ? [...(await mergesOf(repo, workspace, doc.source))] : [];
   workspace.change((d) => {
     remove(d.merges, merge.url);

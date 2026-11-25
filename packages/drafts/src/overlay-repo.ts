@@ -17,7 +17,7 @@ import {
 
 import { canonicalUrl, watchDocTree, type DocTree } from "./children.js";
 import { cloneAt, docAt, draftVersion, install, type Version } from "./draft-clones.js";
-import { headsAt, metasOf, type Point } from "./history.js";
+import { hasAll, headsAt, metasOf, type Point } from "./history.js";
 import { OverlayHandle, forwardingProxy } from "./overlay-handle.js";
 import type {
   CloneEntry,
@@ -70,6 +70,7 @@ const OWNED: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
   "setRoot",
   "members",
   "onMembers",
+  "versionOf",
   "descriptorFor",
   "onRemap",
   "dispose",
@@ -381,7 +382,7 @@ export class OverlayRepo {
     if (at && !heads) {
       const version = this.#draftVersionOf(root);
       const source = await this.base.find<unknown>(version.url);
-      const pinned = pinnedHeads(source.doc() as Automerge.Doc<unknown>, at, version.heads);
+      const pinned = pinnedHeads(source.doc() as Automerge.Doc<unknown>, at, version.heads, at.members?.[root]);
       const url = this.#draftBackingUrl(root, segments, pinned);
       // A view of the handle already loaded, not a find of `url`: the heads
       // come from this very document, and a find with heads checks them with
@@ -393,6 +394,15 @@ export class OverlayRepo {
     }
     const url = this.#draftBackingUrl(root, segments, heads);
     return { key: url, handle: await this.base.find<unknown>(url) };
+  }
+
+  /**
+   * Where the checked-out draft (or main) reads `member` now: its own copy,
+   * or the version it forked off (`heads` set). Null on a merge.
+   */
+  versionOf(member: AutomergeUrl): Version | null {
+    if (this.#checkout?.kind === "merge") return null;
+    return this.#draftVersionOf(canonicalUrl(member));
   }
 
   #draftVersionOf(root: AutomergeUrl): Version {
@@ -706,8 +716,16 @@ function watch(handles: (DocHandle<unknown> | null | undefined)[], listener: () 
 }
 
 // Where a point in history leaves a document an overlay reads at `within`
-// (or as it is): as it was then, or, made later than that, as it was made.
-function pinnedHeads(doc: Automerge.Doc<unknown>, at: Point, within: UrlHeads | undefined): UrlHeads {
+// (or as it is): exactly where the journal recorded it, if it did and the
+// document has those changes; else as it was by then, or, made later than
+// that, as it was made.
+function pinnedHeads(
+  doc: Automerge.Doc<unknown>,
+  at: Point,
+  within: UrlHeads | undefined,
+  recorded: string[] | undefined
+): UrlHeads {
+  if (recorded?.length && hasAll(doc, recorded)) return encodeHeads(recorded);
   const heads = headsAt(doc, at, within);
   if (heads) return heads;
   const first = metasOf(doc)[0];
