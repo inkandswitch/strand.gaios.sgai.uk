@@ -56,7 +56,14 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
   const repo = element.repo;
 
   const context = subscribe<CommentsContext | null>(element, { type: CONTEXT } as never, null);
-  const [scope, setScopeSignal] = createSignal<Scope>(storedScope());
+  const [chosen, setScopeSignal] = createSignal<Scope>(storedScope());
+  // The frame may say which threads to list (its column's scope); then it
+  // also titles the sidebar, and the sidebar shows neither.
+  const framed = () => !!context()?.scope;
+  const scope = (): Scope => {
+    const given = context()?.scope;
+    return given ? (given === "open" ? "view" : "project") : chosen();
+  };
   const setScope = (next: Scope) => {
     setScopeSignal(next);
     try {
@@ -307,8 +314,8 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
   const names = () => ({ ours: context()?.ours ?? "", theirs: context()?.theirs ?? "" });
 
   return (
-    <div class="gc-sidebar">
-      <div class="gc-head">
+    <div class="gc-sidebar" classList={{ "gc-sidebar--framed": framed() }}>
+      <div class="gc-head" hidden={framed()}>
         <span class="gc-title">Comments</span>
         <label class="gc-filter">
           <span class="gc-visually-hidden">Show comments on</span>

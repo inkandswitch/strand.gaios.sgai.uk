@@ -39,6 +39,11 @@
   font-family: var(--studio-family-sans, system-ui, sans-serif);
   font-size: 13px;
 }
+/* in a frame's column, flat on its page, under the frame's own title */
+.gc-sidebar--framed {
+  padding: 0;
+  background: transparent;
+}
 .gc-sidebar *,
 .gc-sidebar *::before,
 .gc-sidebar *::after {

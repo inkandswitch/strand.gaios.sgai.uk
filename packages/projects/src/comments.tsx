@@ -1,18 +1,19 @@
 import type {AutomergeUrl, DocHandle, Repo} from "@automerge/automerge-repo/slim"
 import {accept, subscribe, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
-import {createEffect, createMemo, createSignal, onCleanup, type Accessor, type JSX} from "solid-js"
+import {createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX} from "solid-js"
 import type {ProjectRoute} from "./navigation.ts"
 import {Provider} from "./provider.tsx"
+import type {PanelScope, SidePanels} from "./side-panels.ts"
 
 /** The comments sidebar's component (packages/comments). */
 const SIDEBAR = "gaios-comments"
-const OPEN_KEY = "gaios-projects:comments"
 
 /*
  * The frame and the comments sidebar talk with plain data:
  *
- *   - `comments:context` → the project, the documents open in it and the
- *     drafts' names, pushed on every change (see packages/comments/context.ts)
+ *   - `comments:context` → the project, the documents open in it, the
+ *     drafts' names and which threads to list (the side column's scope),
+ *     pushed on every change (see packages/comments/context.ts)
  *   - `comments:create { refs }` → from any tool: start a thread about
  *     `refs` in the project's root document, where every thread is kept,
  *     with a draft comment by whoever's signed in, and show it in the
@@ -20,33 +21,6 @@ const OPEN_KEY = "gaios-projects:comments"
  *   - a `patchwork:show-comments { threadUrl }` event, bubbling from a tool,
  *     opens the sidebar on that thread
  */
-
-export type CommentsToggle = {
-	open: Accessor<boolean>
-	toggle(): void
-	show(): void
-}
-
-export function createCommentsToggle(): CommentsToggle {
-	const [open, setOpen] = createSignal(stored())
-	const set = (next: boolean) => {
-		setOpen(next)
-		try {
-			localStorage.setItem(OPEN_KEY, next ? "1" : "0")
-		} catch {
-			/* private mode */
-		}
-	}
-	return {open, toggle: () => set(!open()), show: () => set(true)}
-}
-
-function stored() {
-	try {
-		return localStorage.getItem(OPEN_KEY) === "1"
-	} catch {
-		return false
-	}
-}
 
 type Context = {
 	projectUrl: AutomergeUrl
@@ -56,6 +30,8 @@ type Context = {
 	openDocs: AutomergeUrl[]
 	ours: string | null
 	theirs: string | null
+	/** the threads to list: on the open documents, or all of them */
+	scope: PanelScope
 	/** the thread a tool last asked to show, with a count so asking again is told apart */
 	active: {threadUrl: AutomergeUrl; count: number} | null
 }
@@ -73,9 +49,10 @@ type ThreadsDoc = {
 }
 
 /**
- * The root and the comments sidebar beside it, under one comments provider
- * and one focus provider, so the sidebar and every open document's tool
- * share what's selected and highlighted.
+ * The card with the root on it, and the column beside it with the history
+ * and the comments, under one comments provider and one focus provider, so
+ * the comments and every open document's tool share what's selected and
+ * highlighted. The column is folded away while neither is shown.
  */
 export function CommentsScope(props: {
 	route: ProjectRoute
@@ -83,7 +60,9 @@ export function CommentsScope(props: {
 	repo: Repo
 	ours: string | undefined
 	theirs: string | undefined
-	comments: CommentsToggle
+	panels: SidePanels
+	/** the history, told which documents are open */
+	history(openDocs: Accessor<AutomergeUrl[]>): JSX.Element
 	children: JSX.Element
 }) {
 	const [scope, setScope] = createSignal<HTMLElement>()
@@ -91,7 +70,7 @@ export function CommentsScope(props: {
 	const [active, setActive] = createSignal<Context["active"]>(null)
 	let shown = 0
 	const showThread = (threadUrl: AutomergeUrl | undefined) => {
-		props.comments.show()
+		props.panels.showComments()
 		if (threadUrl) setActive({threadUrl, count: ++shown})
 	}
 	const [contact, setContact] = createSignal<AutomergeUrl>()
@@ -136,6 +115,7 @@ export function CommentsScope(props: {
 		openDocs: openDocs(),
 		ours: props.ours ?? null,
 		theirs: props.theirs ?? null,
+		scope: props.panels.scope(),
 		active: active(),
 	}))
 
@@ -181,15 +161,26 @@ export function CommentsScope(props: {
 	return (
 		<Provider component="patchwork-comments-provider" class="projects__provider">
 			<Provider component="patchwork-focus-provider" class="projects__provider">
-				<div ref={setScope} class="projects__with-comments">
-					{props.children}
-					{/* kept mounted while hidden, so it's ready when shown */}
-					<aside
-						class="projects__comments"
-						aria-label="Comments"
-						hidden={!props.comments.open()}>
-						<patchwork-view class="projects__comments-view" component={SIDEBAR} />
-					</aside>
+				<div ref={setScope} class="projects__stage">
+					<section class="projects__card">{props.children}</section>
+					<div
+						class="projects__side"
+						hidden={!props.panels.history() && !props.panels.comments()}>
+						<Show when={props.panels.history()}>
+							<section class="projects__side-section projects__side-section--history" aria-label="History">
+								<h2 class="projects__side-title">History</h2>
+								{props.history(openDocs)}
+							</section>
+						</Show>
+						{/* kept mounted while hidden, so it's ready when shown */}
+						<section
+							class="projects__side-section projects__side-section--comments"
+							aria-label="Comments"
+							hidden={!props.panels.comments()}>
+							<h2 class="projects__side-title">Comments</h2>
+							<patchwork-view class="projects__comments-view" component={SIDEBAR} />
+						</section>
+					</div>
 				</div>
 			</Provider>
 		</Provider>
@@ -250,27 +241,4 @@ function openDocOf(event: Event): AutomergeUrl | undefined {
 	const outer = view.parentElement?.closest("patchwork-view[doc-url]")
 	if (outer && main.contains(outer)) return undefined
 	return url
-}
-
-/** The header's button: shows and hides the sidebar. */
-export function CommentsButton(props: {comments: CommentsToggle}) {
-	return (
-		<button
-			type="button"
-			class="projects__comments-button"
-			aria-pressed={props.comments.open()}
-			title={props.comments.open() ? "Hide comments" : "Show comments"}
-			onClick={() => props.comments.toggle()}>
-			<svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-				<path
-					d="M2.5 3h11a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H7l-3 2.5v-2.5H2.5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="1.4"
-					stroke-linejoin="round"
-				/>
-			</svg>
-			<span>Comments</span>
-		</button>
-	)
 }

@@ -2,7 +2,7 @@ import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
 import {request} from "@inkandswitch/patchwork-providers"
 import {createEffect, createSignal, on, Show, untrack} from "solid-js"
 import {Portal} from "solid-js/web"
-import {CommentsScope, createCommentsToggle} from "./comments.tsx"
+import {CommentsScope} from "./comments.tsx"
 import {createWorkspaceCompare, useCompareModes, type Mode, type WorkspaceCompare} from "./compare.ts"
 import {WorkspaceHeader} from "./header.tsx"
 import {useDocTitle, useMounted} from "./hooks.ts"
@@ -20,15 +20,18 @@ import {FOLDER_TOOL} from "./tool-ids.ts"
 import {provideWorkspace} from "./workspace.ts"
 import type {SidebarToggle} from "./workspaces.tsx"
 import {useOverlayState} from "./overlay-state.ts"
-import {HistoryPanel} from "./history.tsx"
+import {HistoryPanel, useMemberNames} from "./history.tsx"
+import {createSidePanels} from "./side-panels.ts"
 import {overlayName, versionKey, type At, type Overlay} from "./types.ts"
 
 const COMPARE_PROVIDER = "patchwork-compare-provider"
 
 /**
- * A root as a card: its header, then the root itself, all seen through the
- * overlay the provider around it has checked out (`repo` is that
- * provider's), and compared with another version when one's picked. A folder
+ * A root on a card, under a bar flat on the page with what's checked out,
+ * and beside the card a column, also flat, with the history and the
+ * comments. All of it seen through the overlay the provider around it has
+ * checked out (`repo` is that provider's), and compared with another
+ * version when one's picked. A folder
  * lays out what's open in it with its own tool, its tree beside its
  * documents; any other document is shown on its own.
  */
@@ -48,13 +51,18 @@ export function ProjectView(props: {
 	// calls it.
 	const name = () => (folder() ? props.route.resolved.projectName : title()) ?? props.route.resolved.projectName
 	const [provider, setProvider] = createSignal<HTMLElement>()
-	const [card, setCard] = createSignal<HTMLElement>()
+	const [desk, setDesk] = createSignal<HTMLElement>()
 	const [actions, setActions] = createSignal<HTMLElement>()
 	const [compareControls, setCompareControls] = createSignal<HTMLElement>()
 	const mounted = useMounted(COMPARE_PROVIDER, provider)
-	const state = useOverlayState(card, mounted, () => props.route.resolved.projectUrl)
+	const state = useOverlayState(desk, mounted, () => props.route.resolved.projectUrl)
 	const workspaceCompare = createWorkspaceCompare()
-	const comments = createCommentsToggle()
+	const panels = createSidePanels()
+	const names = useMemberNames(
+		() => (mounted() ? desk() : undefined),
+		props.repo,
+		() => state.overlays()?.checkedOut
+	)
 	const modes = useCompareModes()
 	// What it's compared with: an overlay, main (null), or nothing, and the
 	// point in its history.
@@ -83,7 +91,7 @@ export function ProjectView(props: {
 		on(
 			() => [props.route.location.compare, props.route.location.compareAt ?? null] as const,
 			([wanted, wantedAt]) => {
-				const at = card()
+				const at = desk()
 				if (!untrack(state.heard) || !at) return
 				if (wanted === untrack(compared) && wantedAt === untrack(comparedAt)) return
 				void request(
@@ -111,19 +119,8 @@ export function ProjectView(props: {
 				attr:against={against()}
 				attr:against-at={againstAt()}
 				class="projects__compare-scope">
-				<div class="projects__desk">
-				{/* the history, a sheet tucked under the card's left edge */}
-				<Show when={mounted() && state.overlays()?.status === "ready" && card()}>
-					{at => (
-						<HistoryPanel
-							element={at()}
-							overlays={state.overlays()!}
-							comparison={state.comparison()}
-						/>
-					)}
-				</Show>
-				<section ref={setCard} class="projects__card">
-					<Show when={mounted() && state.overlays() && card()}>
+				<div ref={setDesk} class="projects__desk">
+					<Show when={mounted() && state.overlays() && desk()}>
 						{at => (
 							<>
 								<WorkspaceHeader
@@ -132,7 +129,8 @@ export function ProjectView(props: {
 									comparison={state.comparison()}
 									element={at()}
 									sidebar={props.sidebar}
-									comments={comments}
+									panels={panels}
+									names={names}
 									compare={workspaceCompare}
 									actions={setActions}
 									compareControls={setCompareControls}
@@ -142,7 +140,19 @@ export function ProjectView(props: {
 									repo={props.repo}
 									ours={overlayName(state.overlays(), state.overlays()!.checkedOut)}
 									theirs={state.comparing()?.names.b}
-									comments={comments}>
+									panels={panels}
+									history={openDocs => (
+										<Show when={state.overlays()?.status === "ready"}>
+											<HistoryPanel
+												element={at()}
+												overlays={state.overlays()!}
+												comparison={state.comparison()}
+												names={names()}
+												openDocs={openDocs()}
+												scope={panels.scope()}
+											/>
+										</Show>
+									)}>
 									<Show
 										when={folder()}
 										fallback={
@@ -157,7 +167,7 @@ export function ProjectView(props: {
 														workspace={workspaceCompare}
 														modes={modes}
 														actions={actions()}
-													compareControls={compareControls()}
+														compareControls={compareControls()}
 														element={at()}
 													/>
 												)}
@@ -176,7 +186,6 @@ export function ProjectView(props: {
 							</>
 						)}
 					</Show>
-				</section>
 				</div>
 			</patchwork-view>
 		</div>

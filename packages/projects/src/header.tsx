@@ -3,9 +3,9 @@ import {request, subscribe, type Selector} from "@inkandswitch/patchwork-provide
 import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type JSX} from "solid-js"
 import type {WorkspaceCompare} from "./compare.ts"
 import {ComparePicker, ModeControls} from "./compare-ui.tsx"
-import {CommentsButton, type CommentsToggle} from "./comments.tsx"
-import {ago, pointName, useHistory, useNow} from "./history.tsx"
+import {pointName, useHistory, useNow, type MemberNames} from "./history.tsx"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
+import type {SidePanels} from "./side-panels.ts"
 import {
 	historyShown,
 	mergeShown,
@@ -21,11 +21,10 @@ import {
 import {NameInput, SidebarButton, type SidebarToggle} from "./workspaces.tsx"
 
 /**
- * The workspace card's header: its name, then the checked-out overlay as a
- * token opening everything to do with drafts and pull requests, and what
- * it's compared with beside it, or the point in its history it's seen at,
- * or the two points compared. A merge checked out, a preview or a pull
- * request, shows as the merge: to merge, publish, or cancel.
+ * The bar above the card, flat on the page: the sidebar's button, the
+ * workspace's name, then the version unit (what's checked out, and the next
+ * thing to do with it), then, at its end, what the column beside the card is
+ * about and the buttons that unfold its history and comments.
  */
 export function WorkspaceHeader(props: {
 	name: string
@@ -33,19 +32,116 @@ export function WorkspaceHeader(props: {
 	comparison: Comparison
 	/** inside the compare provider, where requests go from */
 	element: HTMLElement
-	/** the sidebar, shown or hidden from the card header */
+	/** the workspace list, shown or hidden from the bar's start */
 	sidebar: SidebarToggle
-	/** the comments sidebar, shown or hidden from the header's end */
-	comments: CommentsToggle
+	/** the history and the comments, beside the card */
+	panels: SidePanels
+	/** what the members are called, for points in the history */
+	names: MemberNames
 	/** the compare modes every panel shares */
 	compare: WorkspaceCompare
 	/** where a root shown on its own puts its own controls */
 	actions?(element: HTMLElement): void
-	/** where a root shown on its own puts its compare controls, beside the drafts */
+	/** where a root shown on its own puts its compare controls, beside the unit */
 	compareControls?(element: HTMLElement): void
 }) {
-	const [renaming, setRenaming] = createSignal(false)
 	const send = (selector: Selector) => request(props.element, selector)
+	// The project's documents have loaded once its members are known (the
+	// tree has been walked). Told once; switching drafts doesn't hide it again.
+	const [loaded, setLoaded] = createSignal(false)
+	createEffect(() => {
+		if (loaded()) return
+		const selector = {type: "overlay:members", overlay: props.overlays.checkedOut, at: props.overlays.at}
+		onCleanup(subscribe(props.element, selector as Selector, () => setLoaded(true)))
+	})
+	const panelsOpen = () => props.panels.history() || props.panels.comments()
+
+	return (
+		<header class="projects__topbar">
+			<SidebarButton sidebar={props.sidebar} />
+			<h1 class="projects__workspace-title">{props.name}</h1>
+			{/* the unit once the project is in: not a lone "Main" over an empty card */}
+			<Show when={loaded()}>
+				<VersionUnit
+					overlays={props.overlays}
+					comparison={props.comparison}
+					element={props.element}
+					names={props.names}
+					send={send}
+				/>
+			</Show>
+			{/* comparing: the mode, then its controls, beside the unit */}
+			<div class="projects__header-compare">
+				<Show when={props.comparison && props.compare.offered().length > 0}>
+					<WorkspaceModes compare={props.compare} />
+				</Show>
+				<div ref={element => props.compareControls?.(element)} class="projects__header-actions" />
+			</div>
+			<div class="projects__header-end">
+				<div ref={element => props.actions?.(element)} class="projects__header-actions" />
+				<Show when={panelsOpen()}>
+					<ScopeToggle panels={props.panels} />
+				</Show>
+				<button
+					type="button"
+					class="projects__icon-button"
+					aria-pressed={props.panels.history()}
+					title={props.panels.history() ? "Hide history" : "Show history"}
+					aria-label={props.panels.history() ? "Hide history" : "Show history"}
+					onClick={() => props.panels.toggleHistory()}>
+					<ClockIcon />
+				</button>
+				<button
+					type="button"
+					class="projects__icon-button"
+					aria-pressed={props.panels.comments()}
+					title={props.panels.comments() ? "Hide comments" : "Show comments"}
+					aria-label={props.panels.comments() ? "Hide comments" : "Show comments"}
+					onClick={() => props.panels.toggleComments()}>
+					<CommentIcon />
+				</button>
+			</div>
+		</header>
+	)
+}
+
+/** What the history and the comments are about: the open documents, or all. */
+function ScopeToggle(props: {panels: SidePanels}) {
+	const option = (scope: "open" | "all", label: string) => (
+		<button
+			type="button"
+			role="radio"
+			aria-checked={props.panels.scope() === scope}
+			class="projects__segment"
+			onClick={() => props.panels.setScope(scope)}>
+			{label}
+		</button>
+	)
+	return (
+		<div class="projects__segments" role="radiogroup" aria-label="History and comments on">
+			{option("open", "Open documents")}
+			{option("all", "All documents")}
+		</div>
+	)
+}
+
+/**
+ * What's checked out and what to do next with it, read as one sentence:
+ *
+ *   - one draft: `draft ▾ │ Compare`
+ *   - a point in its history: `draft ▾ │ point · read-only ×`
+ *   - two points: `draft ▾ │ Ⓐ earlier → Ⓑ later ×`
+ *   - two versions: `● ours ▾ ↔ ● theirs ▾ ×`
+ *   - a merge: `● source ▾ → ● target ▾ │ Cancel  Merge ▾`
+ */
+function VersionUnit(props: {
+	overlays: OverlaysState
+	comparison: Comparison
+	element: HTMLElement
+	names: MemberNames
+	send(selector: Selector): Promise<unknown>
+}) {
+	const [renaming, setRenaming] = createSignal(false)
 	const ours = () => props.overlays.checkedOut
 	const merge = () => mergeShown(props.comparison)
 	const draft = () => props.overlays.drafts.find(entry => entry.url === ours())
@@ -55,33 +151,22 @@ export function WorkspaceHeader(props: {
 		() => props.element,
 		() => props.overlays.checkedOut
 	)
-	const point = (at: string | null) => pointName(history(), at, now())
-	// The project's documents have loaded once its members are known (the
-	// tree has been walked). Told once; switching drafts doesn't hide it again.
-	const [loaded, setLoaded] = createSignal(false)
-	createEffect(() => {
-		if (loaded()) return
-		const selector = {type: "overlay:members", overlay: props.overlays.checkedOut, at: props.overlays.at}
-		onCleanup(subscribe(props.element, selector as Selector, () => setLoaded(true)))
-	})
+	const point = (at: string | null) => pointName(history(), at, props.names(), now())
 	const range = () =>
 		historyShown(props.comparison) && props.comparison?.kind === "compare" ? props.comparison : undefined
+	const pair = () =>
+		props.comparison?.kind === "compare" && !historyShown(props.comparison) ? props.comparison : undefined
 	// Back to the working copy, comparing nothing.
 	const leaveHistory = async () => {
-		if (props.comparison) await send({type: "compare:clear"})
-		await send({type: "overlay:checkout", overlay: ours(), at: null})
+		if (props.comparison) await props.send({type: "compare:clear"})
+		await props.send({type: "overlay:checkout", overlay: ours(), at: null})
 	}
 
 	return (
-		<header class="projects__card-header">
-			<SidebarButton sidebar={props.sidebar} />
-			<h1 class="projects__workspace-title">{props.name}</h1>
-			<Show when={merge()}>
-				{current => <MergeBar merge={current()} name={name} element={props.element} />}
-			</Show>
-			{/* the drafts once the project is in: not a lone "Main" over an empty card */}
-			<Show when={!merge() && loaded()}>
-				<div class="projects__tokens">
+		<Show
+			when={merge()}
+			fallback={
+				<div class="projects__unit" role="group" aria-label="Version">
 					<Show
 						when={!renaming() || !draft()}
 						fallback={
@@ -91,7 +176,7 @@ export function WorkspaceHeader(props: {
 								label="Draft name"
 								commit={next => {
 									setRenaming(false)
-									void send({type: "draft:rename", draft: draft()!.url, name: next})
+									void props.send({type: "draft:rename", draft: draft()!.url, name: next})
 								}}
 								cancel={() => setRenaming(false)}
 							/>
@@ -99,93 +184,297 @@ export function WorkspaceHeader(props: {
 						<OverlayMenu
 							overlays={props.overlays}
 							comparison={props.comparison}
-							send={send}
+							send={props.send}
 							rename={() => setRenaming(true)}
 						/>
 					</Show>
+					<Show when={pair()}>
+						{compared => (
+							<>
+								<span class="projects__unit-between" aria-label="compared with">
+									<BetweenIcon />
+								</span>
+								<VersionPicker
+									label={`Compare ${name(ours())} with`}
+									title="Compared with"
+									dot="var(--compare-b)"
+									current={compared().b}
+									overlays={compareChoices(props.overlays, ours())}
+									name={name}
+									checked={overlay => overlay === compared().b}
+									pick={overlay => void props.send({type: "compare:set", overlay})}
+								/>
+								<ClearButton title="Stop comparing" onClick={() => void props.send({type: "compare:clear"})} />
+							</>
+						)}
+					</Show>
 					<Show when={range()}>
 						{current => (
-							<span class="projects__token projects__token--range" title="Two points in its history">
-								<span class="projects__point">
+							<>
+								<span class="projects__unit-divider" aria-hidden="true" />
+								<span class="projects__point" title="Two points in its history">
 									<span class="projects__point-badge">A</span>
-									{point(current().bAt)}
+									<span class="projects__point-name">{point(current().bAt)}</span>
 								</span>
-								<span class="projects__tokens-between" aria-label="to">
-									→
+								<span class="projects__unit-between" aria-label="to">
+									<ArrowIcon />
 								</span>
 								<span class="projects__point">
 									<span class="projects__point-badge">B</span>
-									{point(current().aAt)}
+									<span class="projects__point-name">{point(current().aAt)}</span>
 								</span>
-								<button
-									type="button"
-									class="projects__token-clear"
-									title="Back to the working copy"
-									aria-label="Back to the working copy"
-									onClick={() => void leaveHistory()}>
-									×
-								</button>
-							</span>
+								<ClearButton title="Back to the working copy" onClick={() => void leaveHistory()} />
+							</>
 						)}
 					</Show>
 					<Show when={!props.comparison && props.overlays.at}>
 						{at => (
-							<span class="projects__token projects__token--range" title="As it was then, read-only">
-								<span class="projects__point">{point(at())}</span>
-								<span class="projects__point-note">read-only</span>
-								<button
-									type="button"
-									class="projects__token-clear"
-									title="Back to the working copy"
-									aria-label="Back to the working copy"
-									onClick={() => void leaveHistory()}>
-									×
-								</button>
-							</span>
-						)}
-					</Show>
-					<Show when={props.comparison && !range() ? props.comparison : undefined}>
-						{compared => (
 							<>
-								<span class="projects__tokens-between" aria-hidden="true">
-									↔
+								<span class="projects__unit-divider" aria-hidden="true" />
+								<span class="projects__point" title="As it was then, read-only">
+									<span class="projects__point-name">{point(at())}</span>
+									<span class="projects__point-note">read-only</span>
 								</span>
-								<span class="projects__token projects__token--theirs" title="Compared with">
-									<span class="projects__token-dot" aria-hidden="true" />
-									<span class="projects__token-name">{name(compared().b)}</span>
-									<button
-										type="button"
-										class="projects__token-clear"
-										title="Stop comparing"
-										aria-label="Stop comparing"
-										onClick={() => void send({type: "compare:clear"})}>
-										×
-									</button>
-								</span>
+								<ClearButton title="Back to the working copy" onClick={() => void leaveHistory()} />
 							</>
 						)}
 					</Show>
+					<Show when={!props.comparison && !props.overlays.at}>
+						<span class="projects__unit-divider" aria-hidden="true" />
+						<VersionPicker
+							label={`Compare ${name(ours())} with`}
+							title="Compare with another version"
+							overlays={compareChoices(props.overlays, ours())}
+							name={name}
+							pick={overlay => void props.send({type: "compare:set", overlay})}>
+							Compare
+						</VersionPicker>
+					</Show>
 				</div>
-			</Show>
-			{/* comparing: the mode, then its controls, beside the drafts */}
-			<div class="projects__header-compare">
-				<Show when={props.comparison && props.compare.offered().length > 0}>
-					<WorkspaceModes compare={props.compare} />
-				</Show>
-				<div
-					ref={element => props.compareControls?.(element)}
-					class="projects__header-actions"
+			}>
+			{current => (
+				<MergeUnit
+					merge={current()}
+					overlays={props.overlays}
+					element={props.element}
+					send={props.send}
 				/>
-			</div>
-			<div class="projects__header-end">
-				<div ref={element => props.actions?.(element)} class="projects__header-actions" />
-				<Show when={merge()}>
-					{current => <MergeActions merge={current()} element={props.element} send={send} />}
-				</Show>
-				<CommentsButton comments={props.comments} />
-			</div>
-		</header>
+			)}
+		</Show>
 	)
+}
+
+/**
+ * A merge checked out, a preview or a saved merge draft: its source and its
+ * target, each changed from its token, then cancelling it and merging it,
+ * or saving it to merge later. Merging and cancelling check another overlay
+ * out.
+ */
+function MergeUnit(props: {
+	merge: MergeEntry
+	overlays: OverlaysState
+	/** where `merge:conflicts` is asked from */
+	element: HTMLElement
+	send(selector: Selector): Promise<unknown>
+}) {
+	const name = (overlay: Overlay) => overlayName(props.overlays, overlay)
+	const versions = () => versionChoices(props.overlays)
+	const [busy, setBusy] = createSignal(false)
+	const [conflicts, setConflicts] = createSignal<MergeConflicts>()
+	createEffect(() => {
+		const url = props.merge.url
+		setConflicts(undefined)
+		onCleanup(
+			subscribe(props.element, {type: "merge:conflicts", merge: url}, value =>
+				setConflicts(value as unknown as MergeConflicts)
+			)
+		)
+	})
+	const open = () => openConflicts(conflicts())
+	const run = async (selector: Selector) => {
+		setBusy(true)
+		try {
+			await props.send(selector)
+		} finally {
+			setBusy(false)
+		}
+	}
+	const cancel = () => {
+		if (props.merge.published && !window.confirm("Close this merge draft? This can't be undone.")) return
+		void run({type: "overlay:delete", overlay: props.merge.url})
+	}
+	// Another pair: the merge draft there is for it, or a new preview.
+	const repair = (source: Overlay, target: Overlay) => {
+		if (source === target) return
+		if (source === props.merge.source && target === props.merge.target) return
+		void run({type: "merge:create", source, target})
+	}
+	const menuId = createUniqueId()
+	let caret!: HTMLButtonElement
+	let menu!: HTMLDivElement
+
+	return (
+		<div class="projects__unit" role="group" aria-label="Merge">
+			<VersionPicker
+				label="Merge from"
+				title="Merging"
+				dot="var(--compare-b)"
+				current={props.merge.source}
+				overlays={versions().filter(overlay => overlay !== props.merge.target)}
+				name={name}
+				checked={overlay => overlay === props.merge.source}
+				pick={overlay => repair(overlay, props.merge.target)}
+			/>
+			<span class="projects__unit-between" aria-label="into">
+				<ArrowIcon />
+			</span>
+			<VersionPicker
+				label="Merge into"
+				title="Merging into"
+				dot="var(--compare-a)"
+				current={props.merge.target}
+				overlays={versions().filter(overlay => overlay !== props.merge.source)}
+				name={name}
+				checked={overlay => overlay === props.merge.target}
+				pick={overlay => repair(props.merge.source, overlay)}
+			/>
+			<span class="projects__unit-divider" aria-hidden="true" />
+			<Show when={open() > 0}>
+				<span class="projects__merge-conflicts" role="status">
+					{open() === 1 ? "1 conflict" : `${open()} conflicts`}
+				</span>
+			</Show>
+			<button type="button" class="projects__unit-action" disabled={busy()} onClick={cancel}>
+				{props.merge.published ? "Close" : "Cancel"}
+			</button>
+			<div class="projects__merge-split">
+				<button
+					type="button"
+					class="projects__merge-button"
+					disabled={busy() || conflicts() === undefined || open() > 0}
+					title={open() > 0 ? "Resolve the conflicts first" : undefined}
+					onClick={() => void run({type: "merge:accept", merge: props.merge.url})}>
+					Merge
+				</button>
+				<Show when={!props.merge.published}>
+					<button
+						ref={caret}
+						type="button"
+						class="projects__merge-caret"
+						aria-haspopup="menu"
+						aria-label="More ways to merge"
+						disabled={busy()}
+						popovertarget={menuId}>
+						<CaretIcon />
+					</button>
+					<div
+						ref={menu}
+						id={menuId}
+						popover="auto"
+						role="menu"
+						class="projects__menu"
+						onBeforeToggle={event => {
+							if (event.newState === "open") below(caret, menu, "end")
+						}}>
+						<button
+							type="button"
+							role="menuitem"
+							class="projects__menu-item"
+							onClick={() => {
+								menu.hidePopover()
+								void run({type: "merge:publish", merge: props.merge.url})
+							}}>
+							<span class="projects__menu-icon" />
+							<span class="projects__menu-name">Save merge draft</span>
+						</button>
+					</div>
+				</Show>
+			</div>
+		</div>
+	)
+}
+
+/**
+ * A token in the unit that opens a list of versions to pick one from: a
+ * version's name (with its dot, while two are on screen) or, given
+ * children, those instead.
+ */
+function VersionPicker(props: {
+	label: string
+	title: string
+	/** the version's colour, while two are on screen */
+	dot?: string
+	current?: Overlay
+	overlays: Overlay[]
+	name(overlay: Overlay): string
+	checked?(overlay: Overlay): boolean
+	pick(overlay: Overlay): void
+	children?: JSX.Element
+}) {
+	const id = createUniqueId()
+	let token!: HTMLButtonElement
+	let menu!: HTMLDivElement
+	return (
+		<>
+			<button
+				ref={token}
+				type="button"
+				class="projects__token"
+				classList={{"projects__token--action": !!props.children}}
+				aria-haspopup="menu"
+				title={props.title}
+				disabled={props.overlays.length === 0}
+				popovertarget={id}>
+				<Show when={props.dot}>
+					{color => <span class="projects__token-dot" style={{background: color()}} aria-hidden="true" />}
+				</Show>
+				<Show when={props.children} fallback={<span class="projects__token-name">{props.name(props.current ?? null)}</span>}>
+					{props.children}
+				</Show>
+				<Show when={!props.children}>
+					<CaretIcon />
+				</Show>
+			</button>
+			<OverlaySubmenu
+				ref={element => (menu = element)}
+				id={id}
+				label={props.label}
+				overlays={props.overlays}
+				name={props.name}
+				checked={props.checked}
+				anchor={() => token}
+				toggled={() => {}}
+				pick={overlay => {
+					menu.hidePopover()
+					props.pick(overlay)
+				}}
+			/>
+		</>
+	)
+}
+
+function ClearButton(props: {title: string; onClick(): void}) {
+	return (
+		<button
+			type="button"
+			class="projects__token-clear"
+			title={props.title}
+			aria-label={props.title}
+			onClick={() => props.onClick()}>
+			<CloseIcon />
+		</button>
+	)
+}
+
+/** Main and the drafts, each beneath the one it was copied from. */
+function versionChoices(overlays: OverlaysState): Overlay[] {
+	return [null, ...inTreeOrder(overlays.drafts).map(entry => entry.url)]
+}
+
+/** What `ours` can be compared with: the other versions, and the saved merge drafts. */
+function compareChoices(overlays: OverlaysState, ours: Overlay): Overlay[] {
+	const saved = overlays.merges.filter(entry => entry.published).map(entry => entry.url)
+	return [...versionChoices(overlays), ...saved].filter(overlay => overlay !== ours)
 }
 
 /**
@@ -228,8 +517,8 @@ function WorkspaceModes(props: {compare: WorkspaceCompare}) {
 }
 
 /**
- * The checked-out overlay's token, opening the drafts and merges to check
- * out another, and what to do with this one: compare it with another
+ * The checked-out overlay's token, opening the drafts and saved merge
+ * drafts to check out another, and what to do with this one: compare it with another
  * version or merge it into one, copy it, rename it, delete it.
  */
 function OverlayMenu(props: {
@@ -256,9 +545,9 @@ function OverlayMenu(props: {
 	// What a draft would merge into first: the one it was copied from.
 	const parent = (): Overlay | undefined => draft()?.parent
 	const versions = (): Overlay[] => [null, ...drafts().map(entry => entry.url)]
-	const pullRequests = () => props.overlays.merges.filter(entry => entry.published)
+	const savedMerges = () => props.overlays.merges.filter(entry => entry.published)
 	const compareWith = () =>
-		[...versions(), ...pullRequests().map(entry => entry.url)].filter(overlay => overlay !== ours())
+		[...versions(), ...savedMerges().map(entry => entry.url)].filter(overlay => overlay !== ours())
 	const mergeInto = () => {
 		const others = versions().filter(overlay => overlay !== ours())
 		const first = parent()
@@ -287,7 +576,7 @@ function OverlayMenu(props: {
 		},
 		merge(target: Overlay) {
 			close()
-			// Opens a preview, or the pull request there is for the pair.
+			// Opens a preview, or the merge draft there is for the pair.
 			void props.send({type: "merge:create", source: ours(), target})
 		},
 		copy() {
@@ -359,10 +648,10 @@ function OverlayMenu(props: {
 					{item(null)}
 					<For each={drafts()}>{entry => item(entry.url, copiedFrom(entry))}</For>
 				</div>
-				<Show when={pullRequests().length > 0}>
-					<p class="projects__menu-heading">Pull requests</p>
+				<Show when={savedMerges().length > 0}>
+					<p class="projects__menu-heading">Merge drafts</p>
 					<div onMouseEnter={closeSubmenus}>
-						<For each={pullRequests()}>{entry => item(entry.url)}</For>
+						<For each={savedMerges()}>{entry => item(entry.url)}</For>
 					</div>
 				</Show>
 				<hr />
@@ -428,131 +717,6 @@ function OverlayMenu(props: {
 	)
 }
 
-/**
- * While a merge is checked out: whether it's a preview or a pull request,
- * and its source and target: what of the source's history it merges, from
- * where the two parted to its latest, and the target's latest it lands on.
- * What to do with it is at the header's end.
- */
-function MergeBar(props: {
-	merge: MergeEntry
-	name(overlay: Overlay): string
-	/** where `overlay:history` is asked from */
-	element: HTMLElement
-}) {
-	const now = useNow()
-	const source = useHistory(
-		() => props.element,
-		() => props.merge.source
-	)
-	const target = useHistory(
-		() => props.element,
-		() => props.merge.target
-	)
-	const span = () => {
-		const ours = source()
-		const theirs = target()
-		if (!ours || !theirs) return undefined
-		const inTarget = new Set(theirs.map(entry => entry.id))
-		const inSource = new Set(ours.map(entry => entry.id))
-		const from = ours.find(entry => inTarget.has(entry.id))
-		const to = ours.find(entry => !inTarget.has(entry.id))
-		const into = theirs.find(entry => !inSource.has(entry.id)) ?? theirs[0]
-		return {
-			range: to ? `${from ? ago(from.time, now()) : "From the start"} → ${ago(to.time, now())}` : undefined,
-			into: into ? ago(into.time, now()) : undefined,
-		}
-	}
-	return (
-		<div class="projects__merge" role="group" aria-label="Merge">
-			<span class="projects__merge-kind">{props.merge.published ? "Pull request" : "Preview"}</span>
-			<span class="projects__tokens">
-				<span class="projects__token" title="Merging">
-					<span class="projects__token-name">{props.name(props.merge.source)}</span>
-					<Show when={span()?.range}>
-						{range => <span class="projects__token-meta">{range()}</span>}
-					</Show>
-				</span>
-				<span class="projects__tokens-between" aria-label="into">
-					→
-				</span>
-				<span class="projects__token" title="Merging into">
-					<span class="projects__token-name">{props.name(props.merge.target)}</span>
-					<Show when={span()?.into}>
-						{into => <span class="projects__token-meta">{into()}</span>}
-					</Show>
-				</span>
-			</span>
-		</div>
-	)
-}
-
-/**
- * What to do with the checked-out merge: merge it (once no conflict is
- * open), publish a preview as a pull request, or cancel it (close, for a
- * pull request). Merging and cancelling check another overlay out.
- */
-function MergeActions(props: {
-	merge: MergeEntry
-	/** where `merge:conflicts` is asked from */
-	element: HTMLElement
-	send(selector: Selector): Promise<unknown>
-}) {
-	const [busy, setBusy] = createSignal(false)
-	const [conflicts, setConflicts] = createSignal<MergeConflicts>()
-	createEffect(() => {
-		const url = props.merge.url
-		setConflicts(undefined)
-		onCleanup(
-			subscribe(props.element, {type: "merge:conflicts", merge: url}, value =>
-				setConflicts(value as unknown as MergeConflicts)
-			)
-		)
-	})
-	const open = () => openConflicts(conflicts())
-	const run = async (selector: Selector) => {
-		setBusy(true)
-		try {
-			await props.send(selector)
-		} finally {
-			setBusy(false)
-		}
-	}
-	const cancel = () => {
-		if (props.merge.published && !window.confirm("Close this pull request? This can't be undone.")) return
-		void run({type: "overlay:delete", overlay: props.merge.url})
-	}
-	return (
-		<div class="projects__merge-actions">
-			<Show when={open() > 0}>
-				<span class="projects__merge-conflicts" role="status">
-					{open() === 1 ? "1 conflict" : `${open()} conflicts`}
-				</span>
-			</Show>
-			<button type="button" class="projects__button" disabled={busy()} onClick={cancel}>
-				{props.merge.published ? "Close" : "Cancel"}
-			</button>
-			<Show when={!props.merge.published}>
-				<button
-					type="button"
-					class="projects__button"
-					disabled={busy()}
-					onClick={() => void run({type: "merge:publish", merge: props.merge.url})}>
-					Create pull request
-				</button>
-			</Show>
-			<button
-				type="button"
-				class="projects__button projects__merge-button"
-				disabled={busy() || conflicts() === undefined || open() > 0}
-				title={open() > 0 ? "Resolve the conflicts first" : undefined}
-				onClick={() => void run({type: "merge:accept", merge: props.merge.url})}>
-				Merge
-			</button>
-		</div>
-	)
-}
-
 /** Versions to pick one from, the suggested one first. */
 function OverlaySubmenu(props: {
 	ref(element: HTMLDivElement): void
@@ -563,16 +727,26 @@ function OverlaySubmenu(props: {
 	/** stands out as the one to pick */
 	suggested?: Overlay
 	checked?(overlay: Overlay): boolean
+	/** opened from this, under it; otherwise placed by whatever opens it */
+	anchor?(): HTMLElement
 	toggled(open: boolean): void
 	pick(overlay: Overlay): void
 }) {
+	let menu!: HTMLDivElement
 	return (
 		<div
-			ref={props.ref}
+			ref={element => {
+				menu = element
+				props.ref(element)
+			}}
 			id={props.id}
 			popover="auto"
 			role="menu"
 			class="projects__menu"
+			onBeforeToggle={event => {
+				const anchor = props.anchor?.()
+				if (event.newState === "open" && anchor) below(anchor, menu)
+			}}
 			onToggle={event => props.toggled(event.newState === "open")}>
 			<p class="projects__menu-label">{props.label}</p>
 			<For each={props.overlays}>
@@ -641,11 +815,18 @@ function SubmenuItem(props: {
 	)
 }
 
-// Under `anchor`, lined up with its left edge.
-function below(anchor: HTMLElement, menu: HTMLElement) {
+// Under `anchor`, lined up with its left edge, or its right one.
+function below(anchor: HTMLElement, menu: HTMLElement, align: "start" | "end" = "start") {
 	const box = anchor.getBoundingClientRect()
 	menu.style.top = `${box.bottom + 4}px`
-	menu.style.left = `${Math.max(8, box.left)}px`
+	// Not shown yet, so not measured: placed by the edge it lines up with.
+	if (align === "start") {
+		menu.style.left = `${Math.max(8, box.left)}px`
+		menu.style.right = "auto"
+		return
+	}
+	menu.style.left = "auto"
+	menu.style.right = `${Math.max(8, document.documentElement.clientWidth - box.right)}px`
 }
 
 // To the right of `menu`, level with `item`, or to its left where the window
@@ -677,6 +858,56 @@ function ChevronIcon() {
 			stroke-linejoin="round"
 			aria-hidden="true">
 			<path d="m9 18 6-6-6-6" />
+		</svg>
+	)
+}
+
+// lucide `clock`
+function ClockIcon() {
+	return (
+		<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<circle cx="12" cy="12" r="10" />
+			<path d="M12 6v6l4 2" />
+		</svg>
+	)
+}
+
+// lucide `message-square`
+function CommentIcon() {
+	return (
+		<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+		</svg>
+	)
+}
+
+// lucide `arrow-right`
+function ArrowIcon() {
+	return (
+		<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<path d="M5 12h14" />
+			<path d="m12 5 7 7-7 7" />
+		</svg>
+	)
+}
+
+// lucide `move-horizontal`: two versions side by side, neither before the other
+function BetweenIcon() {
+	return (
+		<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<path d="m18 8 4 4-4 4" />
+			<path d="M2 12h20" />
+			<path d="m6 8-4 4 4 4" />
+		</svg>
+	)
+}
+
+// lucide `x`
+function CloseIcon() {
+	return (
+		<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+			<path d="M18 6 6 18" />
+			<path d="m6 6 12 12" />
 		</svg>
 	)
 }

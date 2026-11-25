@@ -16,6 +16,11 @@ export type CommentsContext = {
   ours: string | null;
   /** the draft it's compared with, while comparing */
   theirs: string | null;
+  /**
+   * which threads to list, when the frame decides: on the open documents,
+   * or all of them; it then titles the sidebar too
+   */
+  scope?: "open" | "all";
   /** the thread a tool last asked to show (counted, so asking again is new) */
   active: { threadUrl: AutomergeUrl; count: number } | null;
 };

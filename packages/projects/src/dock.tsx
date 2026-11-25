@@ -46,7 +46,8 @@ const THEME: DockviewTheme = {
 	...themeLight,
 	name: "gaios",
 	className: `${themeLight.className} projects__dock-theme`,
-	gap: 8,
+	// flat on the card, split by hairlines
+	gap: 0,
 }
 
 /** One of the dock's groups of tabs, named after what it shows. */
