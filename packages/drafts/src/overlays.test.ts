@@ -109,6 +109,7 @@ describe("the overlay provider", () => {
     const { overlays, dispose } = project();
     expect(await overlays.until((s) => s.status === "ready")).toEqual({
       checkedOut: null,
+      at: null,
       status: "ready",
       drafts: [],
       merges: [],

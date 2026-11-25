@@ -47,13 +47,16 @@ type CompareView = {mode: string; options: {collapsed?: boolean} | null} | null
 
 // The overlays, and the two versions compared, as this reads them.
 type Overlay = string | null
+// A point in an overlay's history; null for its working copy.
+type At = string | null
 type OverlaysState = {
 	checkedOut: Overlay
+	at?: At
 	drafts: {url: string; name: string}[]
 	merges: {url: string; source: Overlay; target: Overlay}[]
 }
 type Comparison =
-	| {kind: "compare"; a: Overlay; b: Overlay}
+	| {kind: "compare"; a: Overlay; b: Overlay; aAt?: At; bAt?: At}
 	| {kind: "merge"; a: string; b: Overlay; source: Overlay; target: Overlay; published: boolean}
 	| null
 type Member = {url: string}
@@ -158,22 +161,40 @@ export function useDraftCompare(
 	}) as unknown as Accessor<CompareView | undefined>
 	const comparison = subscribe(element, {type: "compare"}) as unknown as Accessor<Comparison | undefined>
 	const overlays = subscribe(element, {type: "overlays"}) as unknown as Accessor<OverlaysState | undefined>
-	// The other version: B to A's view, A to B's.
-	const other = createMemo<{overlay: Overlay} | undefined>(
+	// The other version: B to A's view, A to B's. Two points in one overlay's
+	// history are told apart by the point.
+	const isA = () => {
+		const current = comparison()
+		const state = overlays()
+		if (!current || !state) return false
+		if (current.kind === "merge") return state.checkedOut === current.a
+		return state.checkedOut === current.a && (state.at ?? null) === (current.aAt ?? null)
+	}
+	const other = createMemo<{overlay: Overlay; at: At} | undefined>(
 		() => {
 			const current = comparison()
-			const state = overlays()
-			if (!current || !state) return undefined
-			return {overlay: state.checkedOut === current.a ? current.b : current.a}
+			if (!current || !overlays()) return undefined
+			if (isA()) return {overlay: current.b, at: current.kind === "compare" ? (current.bAt ?? null) : null}
+			return {overlay: current.a, at: current.kind === "compare" ? (current.aAt ?? null) : null}
 		},
 		undefined,
-		{equals: (x, y) => x?.overlay === y?.overlay},
+		{equals: (x, y) => x?.overlay === y?.overlay && x?.at === y?.at},
 	)
+	// Two points in one overlay's history, as A (the later) shows them: from
+	// B to A, like a merge from before to after.
+	const history = createMemo(() => {
+		const current = comparison()
+		return current?.kind === "compare" && current.a === current.b && isA()
+	})
 	const url = handle?.url ?? element.getAttribute("doc-url") ?? ""
 	const members = createMemo(() => {
 		const current = other()
 		return current
-			? (subscribe(element, {type: "overlay:members", overlay: current.overlay} as never) as unknown as Accessor<
+			? (subscribe(element, {
+					type: "overlay:members",
+					overlay: current.overlay,
+					at: current.at,
+				} as never) as unknown as Accessor<
 					Member[] | undefined
 				>)
 			: undefined
@@ -194,6 +215,7 @@ export function useDraftCompare(
 					type: "repo:handle-descriptor",
 					url: `automerge:${documentId(url)}`,
 					overlay: current.overlay,
+					at: current.at,
 				} as never) as unknown as Accessor<Descriptor | undefined>)
 			: undefined
 	})
@@ -270,8 +292,7 @@ export function useDraftCompare(
 			const state = overlays()
 			const current = other()
 			if (!state || !current) return null
-			const merging = merge()
-			if (merging) return {ours: "After", theirs: "Before"}
+			if (merge() || history()) return {ours: "After", theirs: "Before"}
 			return {ours: overlayName(state, state.checkedOut), theirs: overlayName(state, current.overlay)}
 		},
 		null,
@@ -326,8 +347,9 @@ export function useDraftCompare(
 			const mode = MODES.find(each => each === current?.mode)
 			if (!current || !mode || !other()) return undefined
 			const collapsed = !!current.options?.collapsed
-			const merging = !!merge()
-			const mergeParts = merging ? {conflicts: conflicts(), sides: sides(), take} : {conflicts: []}
+			// Two points in history read like a merge with nothing to resolve.
+			const merging = !!merge() || history()
+			const mergeParts = merge() ? {conflicts: conflicts(), sides: sides(), take} : {conflicts: []}
 			if (missing()) {
 				// Nothing to have parted from: all of it is new here.
 				return {mode, original: "", base: "", collapsed, names: names(), merging, ...mergeParts}

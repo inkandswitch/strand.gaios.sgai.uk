@@ -10,6 +10,7 @@ const M = "automerge:4NMNnkaBhtDxSNQvmFNh1BMAUBhC" as const;
 // An overlay provider that answers `overlays` with whatever it's given.
 type Shape = {
   checkedOut: string | null;
+  at?: string | null;
   drafts: string[];
   merges?: { url: string; source: string | null; target: string | null }[];
 };
@@ -20,6 +21,7 @@ function overlays(initial: Shape) {
   const listeners = new Set<(value: unknown) => void>();
   const shape = () => ({
     checkedOut: state.checkedOut,
+    at: state.at ?? null,
     status: "ready",
     drafts: state.drafts.map((url) => ({ url, name: "Draft", parent: null })),
     merges: (state.merges ?? []).map((merge) => ({ ...merge, published: false })),
@@ -60,7 +62,7 @@ describe("the compare provider", () => {
   it("starts from the `against` attribute, main included", async () => {
     const { latest, tick, done } = mount("main");
     await tick();
-    expect(latest()).toEqual({ kind: "compare", a: A, b: null });
+    expect(latest()).toEqual({ kind: "compare", a: A, b: null, aAt: null, bAt: null });
     done();
   });
 
@@ -69,7 +71,7 @@ describe("the compare provider", () => {
     await tick();
     expect(latest()).toBeNull();
     expect(await request(child, { type: "compare:set", overlay: B } as never)).toBe(true);
-    expect(latest()).toEqual({ kind: "compare", a: A, b: B });
+    expect(latest()).toEqual({ kind: "compare", a: A, b: B, aAt: null, bAt: null });
     expect(await request(child, { type: "compare:clear" } as never)).toBe(true);
     expect(latest()).toBeNull();
     done();
@@ -110,7 +112,21 @@ describe("the compare provider", () => {
     // What was set comes back once the merge isn't checked out.
     host.set({ checkedOut: A, drafts: [A, B] });
     await tick();
-    expect(latest()).toEqual({ kind: "compare", a: A, b: B });
+    expect(latest()).toEqual({ kind: "compare", a: A, b: B, aAt: null, bAt: null });
+    done();
+  });
+
+  it("compares two points in one overlay's history", async () => {
+    const { child, host, latest, tick, done } = mount();
+    await tick();
+    host.set({ checkedOut: B, at: "later", drafts: [A, B] });
+    expect(await request(child, { type: "compare:set", overlay: B, at: "earlier" } as never)).toBe(true);
+    expect(latest()).toEqual({ kind: "compare", a: B, b: B, aAt: "later", bAt: "earlier" });
+
+    // The same point as what's checked out is nothing to compare.
+    host.set({ checkedOut: B, at: "earlier", drafts: [A, B] });
+    await tick();
+    expect(latest()).toBeNull();
     done();
   });
 });

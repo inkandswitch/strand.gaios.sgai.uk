@@ -16,9 +16,12 @@ import {
   renameDraft,
 } from "../overlay-actions.js";
 import { autoOf, conflictState, findConflicts, hasConflictPlugin } from "../conflicts.js";
+import type { Point } from "../history.js";
 import { OverlayRepo, baseRepo, openOverlay } from "../overlay-repo.js";
 import type {
+  At,
   HandleDescriptor,
+  HistoryEntry,
   Member,
   MergeConflicts,
   MergeDoc,
@@ -27,6 +30,7 @@ import type {
   OverlaysState,
   OverlayStatus,
 } from "../overlay-types.js";
+import { createOverlayHistory } from "./overlay-history.js";
 import { createOverlayList } from "./overlay-list.js";
 
 // How long the starting overlay gets to show up among the root's overlays
@@ -41,11 +45,15 @@ const CONFLICTS_DEBOUNCE_MS = 150;
 // `OverlayRepo`, so members resolve onto the checked-out overlay and edits
 // stay inside it. Answers:
 //   - `overlays` → OverlaysState, pushed on every change
-//   - `overlay:members { overlay }` → Member[], pushed on every change
-//   - `repo:handle-descriptor { url, overlay? }` → where `url` is read and
-//     written, in `overlay` or else the checked-out one, pushed again when
-//     that moves
-//   - `overlay:checkout { overlay }` → true once every handle reads it
+//   - `overlay:members { overlay, at? }` → Member[], pushed on every change
+//   - `overlay:history { overlay }` → HistoryEntry[], the newest first,
+//     pushed on every change
+//   - `repo:handle-descriptor { url, overlay?, at? }` → where `url` is read
+//     and written, in `overlay` (at `at`) or else the checked-out one, pushed
+//     again when that moves
+//   - `overlay:checkout { overlay, at? }` → true once every handle reads it,
+//     as it was at `at` (a point in its history, read-only) if that's set;
+//     null for a merge at a point, or a point not in its history
 //   - `overlay:delete { overlay }` → true
 //   - `draft:create { parent }` → the new draft's url, checked out
 //   - `draft:rename { draft, name }` → true
@@ -59,7 +67,7 @@ const CONFLICTS_DEBOUNCE_MS = 150;
 // whether it's listed (a pull request) or not (a preview). A command that
 // couldn't be done answers null.
 //
-// The checkout starts from the `overlay` attribute and is otherwise only
+// The checkout starts from the `overlay` and `at` attributes and is otherwise only
 // changed by the commands above. Until that overlay is listed, documents
 // beneath wait and the status is `loading`; past LOAD_TIMEOUT_MS it's
 // `unavailable`, until the overlay shows up or something else is checked out.
@@ -71,13 +79,18 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
     return () => {};
   }
   const initial = urlAttribute(element, "overlay");
+  const initialAt = element.getAttribute("at") || null;
 
   let disposed = false;
   let selection: Overlay = null;
+  let selectionAt: At = initialAt;
+  // Where `selectionAt` is, once it's been found in the overlay's history.
+  let point: Point | null = null;
   let selections = 0;
   // What subscribers have been told is checked out: it only moves once every
   // handle reads the new overlay.
   let announced: Overlay = initial;
+  let announcedAt: At = null;
   let status: OverlayStatus = initial ? "loading" : "ready";
   let applySeq = 0;
   const subscribers = new Set<(state: OverlaysState) => void>();
@@ -94,7 +107,14 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
     rootUrl,
     initial,
     checkedOut: () => selection,
-    select: (overlay) => void select(overlay),
+    // The starting overlay comes with the starting point; one that went away
+    // falls back to main's working copy.
+    select: (overlay) => void select(overlay, overlay === initial ? initialAt : null),
+  });
+  const history = createOverlayHistory({
+    repo,
+    rootUrl,
+    readerFor: (overlay) => readerFor(overlay, null),
   });
   const stopList = list.subscribe(() => {
     forgetReaders();
@@ -122,9 +142,10 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
 
       case "overlay:members": {
         const overlay = overlayIn(selector.overlay);
-        if (overlay === undefined) return refuse(event);
+        const at = atIn(selector.at);
+        if (overlay === undefined || at === undefined) return refuse(event);
         accept<Member[]>(event, (respond) => {
-          const reader = readerFor(overlay);
+          const reader = readerFor(overlay, at);
           let live = true;
           const answer = () =>
             void reader.members().then((members) => live && respond(members));
@@ -138,14 +159,52 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
         return;
       }
 
+      case "overlay:history": {
+        const overlay = overlayIn(selector.overlay);
+        if (overlay === undefined) return refuse(event);
+        accept<HistoryEntry[]>(event, (respond) => {
+          let live = true;
+          let seq = 0;
+          let last = "";
+          const answer = () => {
+            const run = ++seq;
+            history.entries(overlay).then(
+              (entries) => {
+                const key = JSON.stringify(entries);
+                if (!live || run !== seq || key === last) return;
+                last = key;
+                respond(entries);
+              },
+              (err) => console.error(`[drafts] couldn't read the history of ${overlay}:`, err)
+            );
+          };
+          answer();
+          let stop = history.watch(overlay, answer);
+          // Readers of overlays that went off the list are let go, and new
+          // ones made: watch whatever reads the overlays now.
+          const stopList = list.subscribe(() => {
+            stop();
+            stop = history.watch(overlay, answer);
+            answer();
+          });
+          return () => {
+            live = false;
+            stop();
+            stopList();
+          };
+        });
+        return;
+      }
+
       case "repo:handle-descriptor": {
         const url = selector.url;
         if (!isValidAutomergeUrl(url)) return;
         const named = selector.overlay !== undefined;
         const overlay = named ? overlayIn(selector.overlay) : null;
-        if (overlay === undefined) return refuse(event);
+        const at = named ? atIn(selector.at) : null;
+        if (overlay === undefined || at === undefined) return refuse(event);
         accept<HandleDescriptor>(event, (respond) => {
-          const reader = named ? readerFor(overlay) : overlayRepo;
+          const reader = named ? readerFor(overlay, at) : overlayRepo;
           let seq = 0;
           let last: AutomergeUrl | undefined;
           const answer = () => {
@@ -168,10 +227,12 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
 
       case "overlay:checkout": {
         const overlay = overlayIn(selector.overlay);
-        if (overlay === undefined) return refuse(event);
+        const at = atIn(selector.at);
+        if (overlay === undefined || at === undefined) return refuse(event);
         command(event, async () => {
           if (!list.has(overlay) && !(await list.preview(overlay!))) return null;
-          await select(overlay);
+          if (at && (list.merge(overlay!) || !(await history.point(overlay, at)))) return null;
+          await select(overlay, at);
           return true;
         });
         return;
@@ -264,7 +325,7 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
             const merge = list.merge(url) ?? (await list.preview(url));
             if (!live || !merge) return;
             stops = [merge.source, merge.target, merge.url].map((overlay) =>
-              readerFor(overlay).onMembers(soon)
+              readerFor(overlay, null).onMembers(soon)
             );
             await answer();
           })();
@@ -290,7 +351,7 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
           if (open) return null;
           // Read first: checking the target out takes a preview off the
           // list, and its reader with it.
-          const reader = readerFor(url);
+          const reader = readerFor(url, null);
           const members = (await reader.members()).map((member) => member.url);
           const docs = new Map(
             await Promise.all(
@@ -329,7 +390,7 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
 
   function state(): OverlaysState {
     const { drafts, merges } = list.lists();
-    return { checkedOut: announced, status, drafts, merges };
+    return { checkedOut: announced, at: announcedAt, status, drafts, merges };
   }
 
   function publish(): void {
@@ -338,18 +399,22 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
     for (const respond of subscribers) respond(next);
   }
 
-  // A repo reading `overlay`, whatever is checked out: for a view of another
-  // overlay's version of a member, and for another overlay's members.
-  function readerFor(overlay: Overlay): OverlayRepo {
-    const key = overlay ?? "main";
+  // A repo reading `overlay` (as it was at `at`), whatever is checked out:
+  // for a view of another version of a member, and for another version's
+  // members.
+  function readerFor(overlay: Overlay, at: At): OverlayRepo {
+    const key = `${overlay ?? "main"}@${at ?? ""}`;
     let reader = readers.get(key);
     if (reader) return reader;
     let opened!: () => void;
     reader = new OverlayRepo(repo, { ready: new Promise<void>((resolve) => (opened = resolve)) });
     reader.setRoot(rootUrl!);
     const created = reader;
-    openOverlay(repo, overlay)
-      .then((checkout) => created.checkout(checkout))
+    (async () => {
+      const where = at ? await history.point(overlay, at) : undefined;
+      if (at && !where) console.warn(`[drafts] ${at} isn't in the history of ${overlay}`);
+      await created.checkout(await openOverlay(repo, overlay), where ?? null);
+    })()
       .catch((err) => console.error(`[drafts] couldn't open ${overlay}:`, err))
       .finally(opened);
     readers.set(key, reader);
@@ -359,7 +424,9 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
   // Every conflict of `merge`, by member, and how each went. Only members
   // whose versions differ between source and target can have any.
   async function conflictsOf(merge: MergeEntry): Promise<MergeConflicts> {
-    const [source, target, merged] = [merge.source, merge.target, merge.url].map(readerFor);
+    const [source, target, merged] = [merge.source, merge.target, merge.url].map((overlay) =>
+      readerFor(overlay, null)
+    );
     const [sourceMembers, targetMembers] = await Promise.all([source.members(), target.members()]);
     const targetHeads = new Map(targetMembers.map((member) => [member.url, member.heads]));
     const out: MergeConflicts = {};
@@ -388,7 +455,8 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
   // Readers of overlays that went away.
   function forgetReaders(): void {
     for (const [key, reader] of readers) {
-      if (key === "main" || list.has(key as AutomergeUrl)) continue;
+      const overlay = key.slice(0, key.indexOf("@"));
+      if (overlay === "main" || list.has(overlay as AutomergeUrl)) continue;
       reader.dispose();
       readers.delete(key);
     }
@@ -398,15 +466,17 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
   // and the commands end up here. Any checkout settles a pending start.
   // Subscribers hear of it once every handle reads the new overlay; the
   // promise resolves then too.
-  function select(next: Overlay): Promise<void> {
+  function select(next: Overlay, at: At = null): Promise<void> {
     if (disposed) return Promise.resolve();
     selection = next;
+    selectionAt = at;
     const mine = ++selections;
     list.selectionChanged();
     const applied = status === "ready" ? apply() : settle();
     return applied.then(() => {
       if (disposed || mine !== selections) return;
       announced = selection;
+      announcedAt = point ? selectionAt : null;
       publish();
     });
   }
@@ -417,6 +487,7 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
     await apply();
     if (disposed) return;
     announced = selection;
+    announcedAt = point ? selectionAt : null;
     setStatus("ready");
     release();
   }
@@ -425,15 +496,20 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
   async function apply(): Promise<void> {
     const seq = ++applySeq;
     const target = selection;
+    const at = selectionAt;
     let checkout;
+    let where: Point | undefined;
     try {
       checkout = await openOverlay(repo, target);
+      where = at && checkout?.kind !== "merge" ? await history.point(target, at) : undefined;
     } catch (err) {
       console.error(`[drafts] failed to load overlay ${target}:`, err);
       return;
     }
     if (disposed || seq !== applySeq) return;
-    await overlayRepo.checkout(checkout);
+    if (at && !where) console.warn(`[drafts] ${at} isn't in the history of ${target}`);
+    point = where ?? null;
+    await overlayRepo.checkout(checkout, point);
   }
 
   function setStatus(next: OverlayStatus): void {
@@ -442,6 +518,13 @@ export const OverlayProvider = (element: HTMLElement & { repo?: Repo }, inherite
     publish();
   }
 };
+
+// A point in history named in a message: null (or absent) for the working
+// copy, undefined for anything that isn't one.
+function atIn(value: unknown): At | undefined {
+  if (value === undefined || value === null) return null;
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
 
 // An overlay named in a message: null for main, undefined for anything that
 // isn't one.

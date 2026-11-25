@@ -138,9 +138,10 @@ Today's draft provider, renamed, handling both kinds. All messages are
 | Selector | Kind | Answer |
 |---|---|---|
 | `overlays` | stream | `OverlaysState` |
-| `overlay:members { overlay }` | stream | `Member[]` |
-| `repo:handle-descriptor { url, overlay? }` | stream | `HandleDescriptor` |
-| `overlay:checkout { overlay }` | command | `true` |
+| `overlay:members { overlay, at? }` | stream | `Member[]` |
+| `overlay:history { overlay }` | stream | `HistoryEntry[]` (see History) |
+| `repo:handle-descriptor { url, overlay?, at? }` | stream | `HandleDescriptor` |
+| `overlay:checkout { overlay, at? }` | command | `true` |
 | `overlay:delete { overlay }` | command | `true` |
 | `draft:create { parent }` | command | the new draft's url |
 | `draft:rename { draft, name }` | command | `true` |
@@ -153,8 +154,12 @@ Today's draft provider, renamed, handling both kinds. All messages are
 // A draft or a merge by its url, or null for main.
 type Overlay = AutomergeUrl | null
 
+// A point in an overlay's history, by its entry's id; null for the working copy.
+type At = string | null
+
 type OverlaysState = {
   checkedOut: Overlay
+  at: At                          // the point in its history it's checked out at
   status: "loading" | "ready" | "unavailable"
   drafts: DraftEntry[]
   merges: MergeEntry[]
@@ -212,6 +217,58 @@ version asks the provider itself, naming the overlay, and opens what it's
 told on the base repo (`repo.baseRepo`).
 
 Main isn't in either list, has no name to carry, and can't be renamed.
+
+## History
+
+An overlay's history is what its members went through, in bursts: a
+`HistoryEntry` is the changes to any of them, consecutive changes no more
+than ten minutes apart. Nothing is stored for it; the overlay provider works
+it out from the members' changes, as Automerge records them, and pushes
+again whenever they move.
+
+```ts
+type HistoryEntry = {
+  id: string                      // the newest change in it: what `at` names
+  overlay: Overlay                // whose changes they are
+  start: number                   // when its first and last changes were made,
+  time: number                    //   in Unix seconds
+  actors: string[]                // who made them, the latest first
+  members: AutomergeUrl[]         // what they changed
+}
+```
+
+- **Main's** history is every change to its members.
+- **A draft's** is the changes to its clones since it cloned them, then its
+  parent's entries from before the draft was made (its document's first
+  change). So two versions' histories share the entries from before they
+  parted, by id.
+- **A merge** has none of its own.
+
+A point in history, `at`, names an entry by its id. An overlay checked out
+at a point reads each member as it was then, read-only: every change made no
+later than the entry's newest change, by the time its author's clock gave it,
+within the version the overlay reads the member at. A document made later
+reads as it was made. That's approximate where people edited at the same
+time, and good enough for looking back. Nothing is cloned or written.
+
+- `overlay:checkout { overlay, at }` checks out a point; `at` left out or
+  `null` is the working copy. A merge can't be checked out at a point, nor a
+  point that isn't in the overlay's history: both answer `null`.
+- `overlay:members` and `repo:handle-descriptor` take `at` too, so a view
+  reads the other side of a comparison at its point the same way it reads
+  any other version. A descriptor at a point names the document with its
+  heads, so it opens read-only.
+- The provider starts on the `at` attribute's point, beside `overlay`'s.
+
+The History panel sits to the left of everything below the card's header: a
+rail of dots, unfolding into the entries, each titled with how long ago it
+was. The newest burst is the working copy until ten minutes pass without a
+change. Clicking an entry checks it out at that point; shift-clicking
+another compares the two, the later checked out (B) and the earlier compared
+with (A), shown from A to B like a merge from before to after. While two
+overlays are compared each has a lane down to where they parted; while a
+merge is checked out, its source's lane is marked from where it parted to
+its latest, and the target's latest is what it lands on.
 
 ### How an overlay reads a member
 
@@ -432,13 +489,13 @@ type ConflictState = "open" | "source" | "target" | "both" | "edited"
 | Selector | Kind | Answer |
 |---|---|---|
 | `compare` | stream | `Comparison \| null` |
-| `compare:set { overlay }` | command | `true` |
+| `compare:set { overlay, at? }` | command | `true` |
 | `compare:clear` | command | `true` |
 
 ```ts
 // Two versions side by side, or a merge against what it changes.
 type Comparison =
-  | { kind: "compare"; a: Overlay; b: Overlay }
+  | { kind: "compare"; a: Overlay; b: Overlay; aAt: At; bAt: At }
   | {
       kind: "merge"
       a: AutomergeUrl             // the merge: after
@@ -451,9 +508,13 @@ type Comparison =
 
 - A is the overlay checked out in the overlay provider the compare provider
   sits in.
-- **Comparing** (`kind: "compare"`): B is the overlay set with `compare:set`.
-  `compare:set { overlay: null }` compares with main, so turning comparing
-  off is its own command.
+- **Comparing** (`kind: "compare"`): B is the overlay set with `compare:set`,
+  at its `at` (the working copy when that's left out), and A is at the point
+  it's checked out at. `compare:set { overlay: null }` compares with main, so
+  turning comparing off is its own command. Comparing with exactly what's
+  checked out compares with nothing.
+- **Two points in one history** are A and B of the same overlay. Views show
+  them like a merge, from before (B) to after (A), with nothing to resolve.
 - **Merging** (`kind: "merge"`): whenever a merge is checked out, A is the
   merge and B its target, always. `compare:set` and `compare:clear` answer
   `null` then. What was set before comes back when something else is
@@ -566,7 +627,9 @@ Showing a merge (see Before and after), a view also:
 ## Links
 
 The hash names the checked-out overlay as `overlay=<url>` (main when absent)
-and what it's compared with as `compare=<url>`, or `compare=main`.
+and what it's compared with as `compare=<url>`, or `compare=main`, and the
+points in their histories as `at=<id>` and `compare-at=<id>` (the working
+copy when absent).
 
 ## Where it lives
 
@@ -576,6 +639,8 @@ and what it's compared with as `compare=<url>`, or `compare=main`.
 | Children plugins and the member walk | `packages/drafts/src/children.ts` |
 | Reading through an overlay, merges in memory | `packages/drafts/src/overlay-repo.ts` |
 | Making, publishing, deleting, accepting | `packages/drafts/src/overlay-actions.ts` |
+| History entries, a member at a point | `packages/drafts/src/history.ts`, `providers/overlay-history.ts` |
+| The History panel | `packages/projects/src/history.tsx` |
 | The overlay provider | `packages/drafts/src/providers/OverlayProvider.ts`, `overlay-list.ts` |
 | The compare provider | `packages/review/src/provider.ts` |
 | Finding conflicts, how each went | `packages/drafts/src/conflicts.ts` |

@@ -4,8 +4,10 @@ import {createEffect, createSignal, createUniqueId, For, onCleanup, Show, type J
 import type {WorkspaceCompare} from "./compare.ts"
 import {ComparePicker, ModeControls} from "./compare-ui.tsx"
 import {CommentsButton, type CommentsToggle} from "./comments.tsx"
+import {ago, pointName, useHistory, useNow} from "./history.tsx"
 import {CaretIcon, CheckIcon} from "./open-with.tsx"
 import {
+	historyShown,
 	mergeShown,
 	openConflicts,
 	overlayName,
@@ -21,7 +23,8 @@ import {NameInput, SidebarButton, type SidebarToggle} from "./workspaces.tsx"
 /**
  * The workspace card's header: its name, then the checked-out overlay as a
  * token opening everything to do with drafts and pull requests, and what
- * it's compared with beside it. A merge checked out, a preview or a pull
+ * it's compared with beside it, or the point in its history it's seen at,
+ * or the two points compared. A merge checked out, a preview or a pull
  * request, shows as the merge: to merge, publish, or cancel.
  */
 export function WorkspaceHeader(props: {
@@ -47,13 +50,26 @@ export function WorkspaceHeader(props: {
 	const merge = () => mergeShown(props.comparison)
 	const draft = () => props.overlays.drafts.find(entry => entry.url === ours())
 	const name = (overlay: Overlay) => overlayName(props.overlays, overlay)
+	const now = useNow()
+	const history = useHistory(
+		() => props.element,
+		() => props.overlays.checkedOut
+	)
+	const point = (at: string | null) => pointName(history(), at, now())
+	const range = () =>
+		historyShown(props.comparison) && props.comparison?.kind === "compare" ? props.comparison : undefined
+	// Back to the working copy, comparing nothing.
+	const leaveHistory = async () => {
+		if (props.comparison) await send({type: "compare:clear"})
+		await send({type: "overlay:checkout", overlay: ours(), at: null})
+	}
 
 	return (
 		<header class="projects__card-header">
 			<SidebarButton sidebar={props.sidebar} />
 			<h1 class="projects__workspace-title">{props.name}</h1>
 			<Show when={merge()}>
-				{current => <MergeBar merge={current()} name={name} send={send} />}
+				{current => <MergeBar merge={current()} name={name} element={props.element} />}
 			</Show>
 			<Show when={!merge()}>
 				<div class="projects__tokens">
@@ -78,7 +94,48 @@ export function WorkspaceHeader(props: {
 							rename={() => setRenaming(true)}
 						/>
 					</Show>
-					<Show when={props.comparison}>
+					<Show when={range()}>
+						{current => (
+							<span class="projects__token projects__token--range" title="Two points in its history">
+								<span class="projects__point">
+									<span class="projects__point-badge">A</span>
+									{point(current().bAt)}
+								</span>
+								<span class="projects__tokens-between" aria-label="to">
+									→
+								</span>
+								<span class="projects__point">
+									<span class="projects__point-badge">B</span>
+									{point(current().aAt)}
+								</span>
+								<button
+									type="button"
+									class="projects__token-clear"
+									title="Back to the working copy"
+									aria-label="Back to the working copy"
+									onClick={() => void leaveHistory()}>
+									×
+								</button>
+							</span>
+						)}
+					</Show>
+					<Show when={!props.comparison && props.overlays.at}>
+						{at => (
+							<span class="projects__token projects__token--range" title="As it was then, read-only">
+								<span class="projects__point">{point(at())}</span>
+								<span class="projects__point-note">read-only</span>
+								<button
+									type="button"
+									class="projects__token-clear"
+									title="Back to the working copy"
+									aria-label="Back to the working copy"
+									onClick={() => void leaveHistory()}>
+									×
+								</button>
+							</span>
+						)}
+					</Show>
+					<Show when={props.comparison && !range() ? props.comparison : undefined}>
 						{compared => (
 							<>
 								<span class="projects__tokens-between" aria-hidden="true">
@@ -362,25 +419,57 @@ function OverlayMenu(props: {
 
 /**
  * While a merge is checked out: whether it's a preview or a pull request,
- * and its source and target. What to do with it is at the header's end.
+ * and its source and target: what of the source's history it merges, from
+ * where the two parted to its latest, and the target's latest it lands on.
+ * What to do with it is at the header's end.
  */
 function MergeBar(props: {
 	merge: MergeEntry
 	name(overlay: Overlay): string
-	send(selector: Selector): Promise<unknown>
+	/** where `overlay:history` is asked from */
+	element: HTMLElement
 }) {
+	const now = useNow()
+	const source = useHistory(
+		() => props.element,
+		() => props.merge.source
+	)
+	const target = useHistory(
+		() => props.element,
+		() => props.merge.target
+	)
+	const span = () => {
+		const ours = source()
+		const theirs = target()
+		if (!ours || !theirs) return undefined
+		const inTarget = new Set(theirs.map(entry => entry.id))
+		const inSource = new Set(ours.map(entry => entry.id))
+		const from = ours.find(entry => inTarget.has(entry.id))
+		const to = ours.find(entry => !inTarget.has(entry.id))
+		const into = theirs.find(entry => !inSource.has(entry.id)) ?? theirs[0]
+		return {
+			range: to ? `${from ? ago(from.time, now()) : "From the start"} → ${ago(to.time, now())}` : undefined,
+			into: into ? ago(into.time, now()) : undefined,
+		}
+	}
 	return (
 		<div class="projects__merge" role="group" aria-label="Merge">
 			<span class="projects__merge-kind">{props.merge.published ? "Pull request" : "Preview"}</span>
 			<span class="projects__tokens">
 				<span class="projects__token" title="Merging">
 					<span class="projects__token-name">{props.name(props.merge.source)}</span>
+					<Show when={span()?.range}>
+						{range => <span class="projects__token-meta">{range()}</span>}
+					</Show>
 				</span>
 				<span class="projects__tokens-between" aria-label="into">
 					→
 				</span>
 				<span class="projects__token" title="Merging into">
 					<span class="projects__token-name">{props.name(props.merge.target)}</span>
+					<Show when={span()?.into}>
+						{into => <span class="projects__token-meta">{into()}</span>}
+					</Show>
 				</span>
 			</span>
 		</div>

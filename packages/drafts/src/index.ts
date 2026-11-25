@@ -23,9 +23,11 @@ export const plugins: Plugin<any>[] = [
 ];
 
 export type {
+  At,
   CloneEntry,
   DraftDoc,
   DraftEntry,
+  HistoryEntry,
   Member,
   MergeDoc,
   MergeEntry,

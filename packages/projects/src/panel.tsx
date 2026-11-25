@@ -23,17 +23,19 @@ import {
 } from "./compare.ts"
 import {CollapseToggle, ComparePicker, ModeControls} from "./compare-ui.tsx"
 import {OtherOverlay} from "./overlays.tsx"
-import type {Member, Overlay} from "./types.ts"
+import type {At, Member, Overlay} from "./types.ts"
 
 /**
- * The version the checked-out one is compared with, B: views of it are
- * checked out of the root by an overlay provider of their own. `names` are
- * what A and B are called. `merging` while A is a merge and B its target:
- * then B is before and A after, and before comes first.
+ * The version the checked-out one is compared with, B, at `bAt` in its
+ * history: views of it are checked out of the root by an overlay provider of
+ * their own. `names` are what A and B are called. `merging` while A is a
+ * merge and B its target, or A and B are two points in one overlay's
+ * history: then B is before and A after, and before comes first.
  */
 export type Comparing = {
 	root: AutomergeUrl
 	b: Overlay
+	bAt: At
 	names: {a: string; b: string}
 	merging: boolean
 }
@@ -231,7 +233,7 @@ export function Compared(props: {
 			if (!other) return setMissing(false)
 			const id = parseAutomergeUrl(props.url).documentId
 			onCleanup(
-				subscribe<Member[]>(host, {type: "overlay:members", overlay: other.b}, members =>
+				subscribe<Member[]>(host, {type: "overlay:members", overlay: other.b, at: other.bAt}, members =>
 					setMissing(!members.some(member => parseAutomergeUrl(member.url).documentId === id))
 				)
 			)
@@ -317,9 +319,9 @@ export function Compared(props: {
 						<Show
 							when={!missing()}
 							fallback={<p class="projects__empty">Not in {other().names.b}</p>}>
-							<Show when={other().b ?? "main"} keyed>
-								{_overlay => (
-									<OtherOverlay root={other().root} overlay={other().b}>
+							<Show when={`${other().b ?? "main"}@${other().bAt ?? ""}`} keyed>
+								{_version => (
+									<OtherOverlay root={other().root} overlay={other().b} at={other().bAt}>
 										<patchwork-view
 											ref={element => (viewB = element)}
 											class="projects__document"

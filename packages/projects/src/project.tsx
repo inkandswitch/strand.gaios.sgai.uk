@@ -20,7 +20,8 @@ import {FOLDER_TOOL} from "./tool-ids.ts"
 import {provideWorkspace} from "./workspace.ts"
 import type {SidebarToggle} from "./workspaces.tsx"
 import {useOverlayState} from "./overlay-state.ts"
-import {overlayName, type Overlay} from "./types.ts"
+import {HistoryPanel} from "./history.tsx"
+import {overlayName, versionKey, type At, type Overlay} from "./types.ts"
 
 const COMPARE_PROVIDER = "patchwork-compare-provider"
 
@@ -36,7 +37,7 @@ export function ProjectView(props: {
 	repo: Repo
 	siteTitle: string
 	focus(panel: ProjectRoute | undefined): void
-	compare(overlay: Overlay | undefined): void
+	compare(overlay: Overlay | undefined, at?: At): void
 	/** the sidebar, shown or hidden from the card header */
 	sidebar: SidebarToggle
 }) {
@@ -55,10 +56,15 @@ export function ProjectView(props: {
 	const workspaceCompare = createWorkspaceCompare()
 	const comments = createCommentsToggle()
 	const modes = useCompareModes()
-	// What it's compared with: an overlay, main (null), or nothing.
+	// What it's compared with: an overlay, main (null), or nothing, and the
+	// point in its history.
 	const compared = () => {
 		const current = state.comparison()
 		return current ? current.b : undefined
+	}
+	const comparedAt = (): At => {
+		const current = state.comparison()
+		return current?.kind === "compare" ? current.bAt : null
 	}
 
 	createEffect(() => workspaceCompare.setVersions(state.versions()))
@@ -71,17 +77,20 @@ export function ProjectView(props: {
 	// The hash and the provider follow each other, once the provider has
 	// started from the hash's.
 	createEffect(() => {
-		if (state.heard()) props.compare(compared())
+		if (state.heard()) props.compare(compared(), comparedAt())
 	})
 	createEffect(
 		on(
-			() => props.route.location.compare,
-			wanted => {
+			() => [props.route.location.compare, props.route.location.compareAt ?? null] as const,
+			([wanted, wantedAt]) => {
 				const at = card()
-				if (!untrack(state.heard) || !at || wanted === untrack(compared)) return
+				if (!untrack(state.heard) || !at) return
+				if (wanted === untrack(compared) && wantedAt === untrack(comparedAt)) return
 				void request(
 					at,
-					wanted === undefined ? {type: "compare:clear"} : {type: "compare:set", overlay: wanted}
+					wanted === undefined
+						? {type: "compare:clear"}
+						: {type: "compare:set", overlay: wanted, at: wantedAt}
 				)
 			},
 			{defer: true}
@@ -91,6 +100,8 @@ export function ProjectView(props: {
 		const wanted = props.route.location.compare
 		return wanted === undefined ? undefined : (wanted ?? "main")
 	}
+	const againstAt = () =>
+		props.route.location.compare === undefined ? undefined : props.route.location.compareAt
 
 	return (
 		<div class="projects__project">
@@ -98,6 +109,7 @@ export function ProjectView(props: {
 				ref={setProvider}
 				component={COMPARE_PROVIDER}
 				attr:against={against()}
+				attr:against-at={againstAt()}
 				class="projects__compare-scope">
 				<section ref={setCard} class="projects__card">
 					<Show when={mounted() && state.overlays() && card()}>
@@ -120,6 +132,12 @@ export function ProjectView(props: {
 									ours={overlayName(state.overlays(), state.overlays()!.checkedOut)}
 									theirs={state.comparing()?.names.b}
 									comments={comments}>
+									<div class="projects__with-history">
+									<HistoryPanel
+										element={at()}
+										overlays={state.overlays()!}
+										comparison={state.comparison()}
+									/>
 									<Show
 										when={folder()}
 										fallback={
@@ -129,7 +147,7 @@ export function ProjectView(props: {
 														url={url()}
 														toolId={props.route.location.toolId}
 														repo={props.repo}
-														overlayKey={state.overlays()!.checkedOut ?? "main"}
+														overlayKey={versionKey(state.overlays()!)}
 														comparing={state.comparing()}
 														workspace={workspaceCompare}
 														modes={modes}
@@ -149,6 +167,7 @@ export function ProjectView(props: {
 											element={at()}
 										/>
 									</Show>
+									</div>
 								</CommentsScope>
 							</>
 						)}

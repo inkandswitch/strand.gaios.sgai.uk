@@ -39,6 +39,7 @@ export function OverlayScopeView(props: {
 			component={PROVIDER}
 			doc-url={props.scope.projectUrl}
 			attr:overlay={props.scope.overlay}
+			attr:at={props.scope.at}
 			ref={setElement}>
 			<Show when={status() === "unavailable"}>
 				<div class="projects__unavailable" role="alert">
@@ -53,10 +54,14 @@ export function OverlayScopeView(props: {
 	)
 }
 
-/** The project with `overlay` checked out (main when null), for the views inside. */
+/**
+ * The project with `overlay` checked out (main when null), at `at` in its
+ * history if that's set, for the views inside.
+ */
 export function OtherOverlay(props: {
 	root: string
 	overlay: string | null
+	at?: string | null
 	children: JSX.Element
 }) {
 	const [element, setElement] = createSignal<HTMLElement>()
@@ -67,7 +72,8 @@ export function OtherOverlay(props: {
 			class="projects__other-draft"
 			component={PROVIDER}
 			doc-url={props.root}
-			attr:overlay={props.overlay ?? undefined}>
+			attr:overlay={props.overlay ?? undefined}
+			attr:at={props.at ?? undefined}>
 			<Show when={mounted()}>{props.children}</Show>
 		</patchwork-view>
 	)

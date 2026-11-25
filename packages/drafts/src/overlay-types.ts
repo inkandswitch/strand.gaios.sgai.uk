@@ -56,8 +56,14 @@ export type Overlay = AutomergeUrl | null;
 // `ready` once a checkout holds.
 export type OverlayStatus = "loading" | "ready" | "unavailable";
 
+// A point in an overlay's history, named by the newest change of a history
+// entry (`HistoryEntry.id`); null for the working copy.
+export type At = string | null;
+
 export type OverlaysState = {
   checkedOut: Overlay;
+  // The point in its history it's checked out at; null for the working copy.
+  at: At;
   status: OverlayStatus;
   drafts: DraftEntry[];
   merges: MergeEntry[];
@@ -87,6 +93,25 @@ export type Member = {
   heads: UrlHeads;
   // The member it was reached from; null for the root.
   parent: AutomergeUrl | null;
+};
+
+// --- History -----------------------------------------------------------------
+
+// A burst of changes across an overlay's members: consecutive changes no
+// more than ten minutes apart. A draft's history is its own changes since it
+// was forked, then its parent's from before that.
+export type HistoryEntry = {
+  // The newest change in it, by hash: what `at` names to view it.
+  id: string;
+  // Whose changes they are.
+  overlay: Overlay;
+  // When the first and the last of its changes were made, in Unix seconds.
+  start: number;
+  time: number;
+  // Who made them, by Automerge actor, the latest first.
+  actors: string[];
+  // The members they changed.
+  members: AutomergeUrl[];
 };
 
 // --- Conflicts ---------------------------------------------------------------

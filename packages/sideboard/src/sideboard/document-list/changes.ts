@@ -12,7 +12,9 @@ import {createEffect, createMemo, createSignal, onCleanup} from "solid-js"
 //
 // A merge compared with its target reads as what merging does to the
 // target instead: `changed`, `added` or `removed`, and `conflict` for a
-// member with conflicts no one has resolved, and the folders above it.
+// member with conflicts no one has resolved, and the folders above it. Two
+// points in one overlay's history read the same way, as what happened from
+// the earlier (B) to the later (A).
 export type Mark =
 	| "differs"
 	| "ours"
@@ -55,8 +57,10 @@ export type ChangeMarks = {
 }
 
 type Overlay = AutomergeUrl | null
+// A point in an overlay's history; null for its working copy.
+type At = string | null
 type Comparison =
-	| {kind: "compare"; a: Overlay; b: Overlay}
+	| {kind: "compare"; a: Overlay; b: Overlay; aAt?: At; bAt?: At}
 	| {kind: "merge"; a: AutomergeUrl; b: Overlay; published: boolean}
 	| null
 type Member = {url: AutomergeUrl; heads: string[]; parent: AutomergeUrl | null}
@@ -93,12 +97,14 @@ export function useChangeMarks(
 	const members = createMemo(() => {
 		const current = comparison()
 		if (!current) return undefined
-		const of = (overlay: Overlay) =>
+		const of = (overlay: Overlay, at: At | undefined) =>
 			subscribe(element, {
 				type: "overlay:members",
 				overlay,
+				at: at ?? null,
 			} as never) as unknown as () => Member[] | undefined
-		return {ours: of(current.a), theirs: of(current.b)}
+		const points = current.kind === "compare" ? current : {aAt: null, bAt: null}
+		return {ours: of(current.a, points.aAt), theirs: of(current.b, points.bAt)}
 	})
 
 	const changes = createMemo(() => {
@@ -124,6 +130,7 @@ export function useChangeMarks(
 				type: "repo:handle-descriptor",
 				url: `automerge:${documentOf(parent)}`,
 				overlay: other.b,
+				at: other.kind === "compare" ? (other.bAt ?? null) : null,
 			} as never)
 				.then(answer => base.find(answer.cloneUrl ?? answer.url))
 				.then(
@@ -202,12 +209,17 @@ export function useChangeMarks(
 		return open
 	})
 
+	// Two points in one overlay's history.
+	const history = () => {
+		const current = comparison()
+		return current?.kind === "compare" && current.a === current.b
+	}
 	const comparing = () => !!changes()
 	return {
 		mark: url => {
 			if (conflicted().has(documentOf(url))) return "conflict"
 			const mark = changes()?.marks.get(documentOf(url))
-			return mark && merge() ? AS_MERGED[mark as keyof typeof AS_MERGED] : mark
+			return mark && (merge() || history()) ? AS_MERGED[mark as keyof typeof AS_MERGED] : mark
 		},
 		merge: () => (merge() ? {published: merge()!.published} : undefined),
 		comparing,

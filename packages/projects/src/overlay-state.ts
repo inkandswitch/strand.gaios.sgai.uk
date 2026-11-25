@@ -3,7 +3,7 @@ import {subscribe} from "@inkandswitch/patchwork-providers"
 import {createEffect, createMemo, createSignal, onCleanup, type Accessor} from "solid-js"
 import type {Versions} from "./compare.ts"
 import type {Comparing} from "./panel.tsx"
-import {overlayName, type Comparison, type OverlaysState} from "./types.ts"
+import {historyShown, overlayName, type Comparison, type OverlaysState} from "./types.ts"
 
 /**
  * What the providers around `element` say about the root (`root`): its
@@ -40,8 +40,10 @@ export function useOverlayState(
 			return {
 				root: root(),
 				b: current.b,
+				bAt: current.kind === "compare" ? current.bAt : null,
 				names: {a: overlayName(state, current.a), b: overlayName(state, current.b)},
-				merging: current.kind === "merge",
+				// Two points in one history read before to after, like a merge.
+				merging: current.kind === "merge" || historyShown(current),
 			}
 		},
 		undefined,
@@ -49,6 +51,7 @@ export function useOverlayState(
 			equals: (a, b) =>
 				a?.root === b?.root &&
 				a?.b === b?.b &&
+				a?.bAt === b?.bAt &&
 				a?.names.a === b?.names.a &&
 				a?.names.b === b?.names.b &&
 				a?.merging === b?.merging,

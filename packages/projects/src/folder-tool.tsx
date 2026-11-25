@@ -6,6 +6,7 @@ import {Dock} from "./dock.tsx"
 import {injectStyles} from "./styles.ts"
 import {connectWorkspace} from "./workspace.ts"
 import {useOverlayState} from "./overlay-state.ts"
+import {versionKey} from "./types.ts"
 
 /**
  * A folder as the root: its tree on the left and its documents tiled beside
@@ -42,7 +43,7 @@ function FolderWorkspace(props: {element: ToolElement; rootUrl: AutomergeUrl}) {
 							<Dock
 								route={workspace.route()!}
 								repo={props.element.repo}
-								overlayKey={state.overlays()!.checkedOut ?? "main"}
+								overlayKey={versionKey(state.overlays()!)}
 								comparing={state.comparing()}
 								focus={workspace.focus}
 								host={props.element}

@@ -84,6 +84,24 @@ describe("formatHash", () => {
 		expect(parseHash(hash)).toEqual(location)
 	})
 
+	it("writes the points in history beside the overlay and what it's compared with", () => {
+		const location = {
+			projectId: PROJECT,
+			segments: ["Roadmap"],
+			overlay: `automerge:${DRAFT}` as AutomergeUrl,
+			at: "abc123",
+			compare: null,
+			compareAt: "def456",
+		}
+		const hash = formatHash(location, "Q3")
+		expect(hash).toBe(
+			`q3/automerge:${PROJECT}/Roadmap?overlay=automerge:${DRAFT}&at=abc123&compare=main&compare-at=def456`
+		)
+		expect(parseHash(hash)).toEqual(location)
+		// A point to compare with means nothing without something compared.
+		expect(parseHash(`automerge:${PROJECT}?compare-at=def456`)).toEqual({projectId: PROJECT, segments: []})
+	})
+
 	it("writes the overlay after the tool", () => {
 		const location = {
 			projectId: PROJECT,

@@ -17,6 +17,7 @@ import {
 
 import { canonicalUrl, watchDocTree, type DocTree } from "./children.js";
 import { cloneAt, docAt, draftVersion, install, type Version } from "./draft-clones.js";
+import { headsAt, metasOf, type Point } from "./history.js";
 import { OverlayHandle, forwardingProxy } from "./overlay-handle.js";
 import type {
   CloneEntry,
@@ -59,6 +60,7 @@ export async function openOverlay(base: Repo, url: Overlay): Promise<Checkout> {
 const OWNED: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
   "base",
   "overlay",
+  "at",
   "handles",
   "find",
   "findWithProgress",
@@ -105,6 +107,9 @@ type Entry = {
  * contacts, ...) land on the document itself. With no root every document
  * forks.
  *
+ * Checked out at a point in a draft's or main's history, every member reads
+ * as it was then, read-only (see `headsAt`), and nothing is cloned.
+ *
  * `checkout` re-points every live handle in place, so switching overlays
  * remounts nothing. Finds wait for `ready`, so a document opened before the
  * first checkout is known doesn't show main first.
@@ -113,6 +118,7 @@ export class OverlayRepo {
   readonly base: Repo;
   readonly #ready: Promise<unknown>;
   #checkout: Checkout = null;
+  #at: Point | null = null;
   readonly #entries = new Map<AutomergeUrl, Entry>();
   readonly #resolving = new Map<AutomergeUrl, Promise<DocHandle<unknown>>>();
   #root: AutomergeUrl | null = null;
@@ -139,6 +145,11 @@ export class OverlayRepo {
   /** The checked-out overlay, null for main. */
   get overlay(): Overlay {
     return this.#checkout?.url ?? null;
+  }
+
+  /** The point in its history it's checked out at; null for the working copy. */
+  get at(): Point | null {
+    return this.#at;
   }
 
   get handles(): Record<DocumentId, DocHandle<unknown>> {
@@ -208,11 +219,15 @@ export class OverlayRepo {
     return handle;
   }
 
-  /** Re-point every live handle at `next`; resolves once they all have. */
-  checkout(next: Checkout): Promise<void> {
+  /**
+   * Re-point every live handle at `next`, as it was at `at` if that's set
+   * (not for a merge); resolves once they all have.
+   */
+  checkout(next: Checkout, at: Point | null = null): Promise<void> {
     if (this.#disposed) return Promise.resolve();
     const previous = this.#checkout;
     this.#checkout = next;
+    this.#at = next?.kind === "merge" ? null : at;
     if (previous?.url !== next?.url) {
       this.#stopWatching();
       this.#stopWatching = watch(
@@ -265,8 +280,10 @@ export class OverlayRepo {
     await this.#tree?.settled();
     const root = canonicalUrl(url);
     await this.find(root);
-    if (this.#checkout && this.#belongs(root)) this.#cloneOnWrite(root);
     const entry = this.#entries.get(root);
+    // A point in history, pinned: read where it is, as it was.
+    if (this.#at && entry) return { url: root, cloneUrl: entry.applied as AutomergeUrl };
+    if (this.#checkout && this.#belongs(root)) this.#cloneOnWrite(root);
     const backing = entry?.handle.backingHandle.url;
     return !backing || canonicalUrl(backing) === root
       ? { url: root }
@@ -360,14 +377,31 @@ export class OverlayRepo {
       if (segments.length) handle = subOf(handle, segments);
       return { key: handle.url, handle };
     }
+    const at = this.#at;
+    if (at && !heads) {
+      const version = this.#draftVersionOf(root);
+      const source = await this.base.find<unknown>(version.url);
+      const pinned = pinnedHeads(source.doc() as Automerge.Doc<unknown>, at, version.heads);
+      const url = this.#draftBackingUrl(root, segments, pinned);
+      // A view of the handle already loaded, not a find of `url`: the heads
+      // come from this very document, and a find with heads checks them with
+      // `hasHeads`, which hashes the document's changes (tens of milliseconds
+      // a document, every one).
+      let handle = source.view(pinned);
+      if (segments.length) handle = subOf(handle, segments);
+      return { key: url, handle };
+    }
     const url = this.#draftBackingUrl(root, segments, heads);
     return { key: url, handle: await this.base.find<unknown>(url) };
   }
 
-  #draftBackingUrl(root: AutomergeUrl, segments: unknown[], heads: UrlHeads | undefined): AutomergeUrl {
+  #draftVersionOf(root: AutomergeUrl): Version {
     const checkout = this.#checkout;
-    const draft = checkout?.kind === "draft" ? checkout.handle.doc() : null;
-    const version = draftVersion(draft, root);
+    return draftVersion(checkout?.kind === "draft" ? checkout.handle.doc() : null, root);
+  }
+
+  #draftBackingUrl(root: AutomergeUrl, segments: unknown[], heads: UrlHeads | undefined): AutomergeUrl {
+    const version = this.#draftVersionOf(root);
     return stringifyAutomergeUrl({
       documentId: parseAutomergeUrl(version.url).documentId,
       segments: segments.length ? (segments as never) : undefined,
@@ -409,7 +443,7 @@ export class OverlayRepo {
   // they move onto it quietly.
   #cloneOnWrite(root: AutomergeUrl): void {
     const checkout = this.#checkout;
-    if (!checkout) return;
+    if (!checkout || this.#at) return;
     if (checkout.kind === "merge") {
       if (!this.#belongs(root)) return;
       const member = this.#merged.get(root);
@@ -467,7 +501,7 @@ export class OverlayRepo {
   // Read from a fork point the next write clones, rather than pinned.
   #isSnapshot(root: AutomergeUrl): boolean {
     const checkout = this.#checkout;
-    if (checkout?.kind !== "draft") return false;
+    if (checkout?.kind !== "draft" || this.#at) return false;
     const entry = checkout.handle.doc()?.clones?.[root];
     return !!entry && !entry.cloneUrl;
   }
@@ -669,6 +703,15 @@ function watch(handles: (DocHandle<unknown> | null | undefined)[], listener: () 
   return () => {
     for (const handle of live) handle.off("change", listener);
   };
+}
+
+// Where a point in history leaves a document an overlay reads at `within`
+// (or as it is): as it was then, or, made later than that, as it was made.
+function pinnedHeads(doc: Automerge.Doc<unknown>, at: Point, within: UrlHeads | undefined): UrlHeads {
+  const heads = headsAt(doc, at, within);
+  if (heads) return heads;
+  const first = metasOf(doc)[0];
+  return first ? encodeHeads([first.hash]) : (within ?? encodeHeads([]));
 }
 
 function subOf(handle: DocHandle<unknown>, segments: unknown[]): DocHandle<unknown> {

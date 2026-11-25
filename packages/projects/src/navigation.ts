@@ -25,7 +25,7 @@ import {
 	type Resolved,
 } from "./resolve.ts"
 import type {SelectedView} from "./selection.ts"
-import type {Overlay, OverlaysState} from "./types.ts"
+import type {At, Overlay, OverlaysState} from "./types.ts"
 
 /**
  * What's open in a project's focused panel. `placement` says where an open
@@ -59,8 +59,14 @@ export type Route =
 	| {page: "account"}
 	| ({page: "project"} & ProjectRoute)
 
-/** The project whose overlays are mounted, and the overlay to start it on. */
-export type OverlayScope = {projectUrl: AutomergeUrl; overlay?: AutomergeUrl}
+/**
+ * The project whose overlays are mounted, and the overlay to start it on, at
+ * a point in its history if `at` is set.
+ */
+export type OverlayScope = {projectUrl: AutomergeUrl; overlay?: AutomergeUrl; at?: string}
+
+/** An overlay (null for main) at a point in its history (null for its working copy). */
+type Version = {overlay: Overlay; at: At}
 
 /** A mounted overlay provider; its repo reads whichever overlay is checked out. */
 export type OverlayProviderElement = HTMLElement & {repo: Repo}
@@ -72,8 +78,11 @@ export type Navigation = {
 	open(url: string, toolId?: string | null, placement?: Placement): void
 	/** another panel took focus, or the last one closed */
 	focus(panel: ProjectRoute | undefined): void
-	/** the open project is compared with another of its overlays or main, or isn't */
-	compare(overlay: Overlay | undefined): void
+	/**
+	 * the open project is compared with another of its overlays or main, or
+	 * a point in one's history, or isn't
+	 */
+	compare(overlay: Overlay | undefined, at?: At): void
 	/** the page for installing packages: tools, datatypes */
 	packages(): void
 	/** the page for the account: who's signed in, signing in and out */
@@ -95,12 +104,12 @@ type Attached = {
 	projectUrl: AutomergeUrl
 	provider: OverlayProviderElement
 	find: FindDoc
-	/** the overlay it was started on */
-	initial: Overlay
+	/** the version it was started on */
+	initial: Version
 	/** what it has checked out, once it has said */
-	checkedOut: Overlay | undefined
+	checkedOut: Version | undefined
 	/** a switch navigation asked for, so it's not taken for the user's */
-	switching: Overlay | undefined
+	switching: Version | undefined
 }
 
 /**
@@ -112,8 +121,9 @@ type Attached = {
  * A project is seen through one of its overlays, or main: the frame mounts
  * an overlay provider for it (see `scope`), and everything in the project,
  * paths included, is looked up through that provider's repo. The hash's
- * `overlay=` and the checked-out overlay follow each other, and `compare=`
- * and what it's compared with. Opening another project starts it on main.
+ * `overlay=` and `at=` and the checked-out version follow each other, and
+ * `compare=` and `compare-at=` and what it's compared with. Opening another
+ * project starts it on main.
  */
 export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	const find: FindDoc = async url => (await repo.find(url)).doc()
@@ -204,8 +214,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			{
 				...location,
 				toolId: toolId ?? undefined,
-				overlay: sameProject ? current.location.overlay : undefined,
-				compare: sameProject ? current.location.compare : undefined,
+				...(sameProject ? versionsOf(current.location) : {}),
 			},
 			"push",
 			sameProject ? placement : undefined
@@ -230,17 +239,22 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			panel.resolved,
 			{
 				...panel.location,
-				overlay: current.location.overlay,
-				compare: current.location.compare,
+				overlay: undefined,
+				at: undefined,
+				compare: undefined,
+				compareAt: undefined,
+				...versionsOf(current.location),
 			},
 			"replace"
 		)
 	}
 
-	function compare(overlay: Overlay | undefined) {
+	function compare(overlay: Overlay | undefined, at: At = null) {
 		const current = project()
-		if (!current || current.location.compare === overlay) return
-		show(current.resolved, {...current.location, compare: overlay}, "replace")
+		const compareAt = overlay === undefined ? undefined : (at ?? undefined)
+		if (!current) return
+		if (current.location.compare === overlay && current.location.compareAt === compareAt) return
+		show(current.resolved, {...current.location, compare: overlay, compareAt}, "replace")
 	}
 
 	function packages() {
@@ -283,23 +297,25 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		try {
 			const projectUrl = await findProject(location, find)
 			if (mine !== attempt) return
-			const scoped = await enter(projectUrl, location.overlay)
+			const scoped = await enter(projectUrl, location.overlay, location.at)
 			if (mine !== attempt) return
-			const overlay = location.overlay ?? null
-			if (overlay !== overlayOf(scoped)) {
-				scoped.switching = overlay
+			const wanted: Version = {overlay: location.overlay ?? null, at: location.at ?? null}
+			if (!sameVersion(wanted, versionOf(scoped))) {
+				scoped.switching = wanted
 				const done = await request<true | null>(scoped.provider, {
 					type: "overlay:checkout",
-					overlay,
+					overlay: wanted.overlay,
+					at: wanted.at,
 				})
-				if (done) scoped.checkedOut = overlay
+				if (done) scoped.checkedOut = wanted
 				scoped.switching = undefined
 				if (mine !== attempt) return
 			}
 			const resolved = await resolveLocation(location, scoped.find)
 			const folder = await endsInFolder(resolved, scoped.find)
 			if (mine !== attempt) return
-			const shown = {...location, overlay: overlayOf(scoped) ?? undefined}
+			const now = versionOf(scoped)
+			const shown = {...location, overlay: now.overlay ?? undefined, at: now.at ?? undefined}
 			if (!folder) show(resolved, shown, mode, placement)
 			else if (mode === "replace") show(projectRoot(resolved), atRoot(shown), mode)
 			else if (left?.resolved.projectUrl !== projectUrl) restore(left)
@@ -314,13 +330,14 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	// wait for it.
 	function enter(
 		projectUrl: AutomergeUrl,
-		overlay: AutomergeUrl | undefined
+		overlay: AutomergeUrl | undefined,
+		at: string | undefined
 	): Promise<Attached> {
 		const current = attached()
 		if (current?.projectUrl === projectUrl) return Promise.resolve(current)
 		if (scope()?.projectUrl !== projectUrl) {
 			waiting = []
-			setScope({projectUrl, overlay})
+			setScope({projectUrl, overlay, at})
 		}
 		return new Promise(resolve => waiting.push(resolve))
 	}
@@ -330,7 +347,11 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		if (scope()?.projectUrl === left?.resolved.projectUrl) return
 		waiting = []
 		setScope(
-			left && {projectUrl: left.resolved.projectUrl, overlay: left.location.overlay}
+			left && {
+				projectUrl: left.resolved.projectUrl,
+				overlay: left.location.overlay,
+				at: left.location.at,
+			}
 		)
 	}
 
@@ -339,12 +360,13 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 			projectUrl,
 			provider,
 			find: async url => (await provider.repo.find(url)).doc(),
-			initial: scope()?.overlay ?? null,
+			initial: {overlay: scope()?.overlay ?? null, at: scope()?.at ?? null},
 			checkedOut: undefined,
 			switching: undefined,
 		}
 		const unsubscribe = subscribe<OverlaysState>(provider, {type: "overlays"}, state => {
-			if (state.status !== "loading") onOverlaySelected(scoped, state.checkedOut)
+			if (state.status !== "loading")
+				onOverlaySelected(scoped, {overlay: state.checkedOut, at: state.at ?? null})
 		})
 		setAttached(scoped)
 		const ready = waiting
@@ -356,18 +378,23 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		}
 	}
 
-	// Someone picked another overlay, or the one checked out went away: show
+	// Someone picked another version, or the one checked out went away: show
 	// the same thing in it, or the project with nothing open if it isn't
 	// there.
-	function onOverlaySelected(scoped: Attached, checkedOut: Overlay) {
-		if (scoped.checkedOut === checkedOut) return
+	function onOverlaySelected(scoped: Attached, checkedOut: Version) {
+		if (scoped.checkedOut && sameVersion(scoped.checkedOut, checkedOut)) return
 		scoped.checkedOut = checkedOut
-		if (scoped.switching === checkedOut) return
+		if (scoped.switching && sameVersion(scoped.switching, checkedOut)) return
 		const current = project()
 		if (!current || current.resolved.projectUrl !== scoped.projectUrl) return
-		if ((current.location.overlay ?? null) === checkedOut) return
+		const shown = {overlay: current.location.overlay ?? null, at: current.location.at ?? null}
+		if (sameVersion(shown, checkedOut)) return
 		const mine = ++attempt
-		const location = {...current.location, overlay: checkedOut ?? undefined}
+		const location = {
+			...current.location,
+			overlay: checkedOut.overlay ?? undefined,
+			at: checkedOut.at ?? undefined,
+		}
 		void relocate(current.resolved, scoped.find).then(
 			next => {
 				if (mine !== attempt) return
@@ -452,9 +479,23 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	}
 }
 
-/** The overlay a provider is on, or is about to be on. */
-function overlayOf(scoped: Attached) {
-	return scoped.checkedOut === undefined ? scoped.initial : scoped.checkedOut
+/** The version a provider is on, or is about to be on. */
+function versionOf(scoped: Attached): Version {
+	return scoped.checkedOut ?? scoped.initial
+}
+
+function sameVersion(a: Version, b: Version) {
+	return a.overlay === b.overlay && a.at === b.at
+}
+
+/** What a location is seen in and compared with, to carry over to another. */
+function versionsOf(location: Location): Partial<Location> {
+	return {
+		overlay: location.overlay,
+		at: location.at,
+		compare: location.compare,
+		compareAt: location.compareAt,
+	}
 }
 
 function atRoot(location: Location): Location {
