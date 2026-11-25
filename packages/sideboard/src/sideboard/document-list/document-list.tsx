@@ -191,7 +191,11 @@ export function DocumentList(props: DocumentListProps) {
                 async function syncTitle() {
                   const title = await titleOf();
                   if (cancelled || !title || title === seen) return;
+                  // The first title read is where the document starts, not
+                  // a change (it may not have been readable when opened).
+                  const before = seen;
                   seen = title;
+                  if (before === undefined) return;
                   // Compare by value: pushwork stores names as
                   // ImmutableStrings, which never === a plain string.
                   const currentName = props.handle.doc()?.docs?.[index()]?.name;

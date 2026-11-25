@@ -56,6 +56,14 @@ export function WorkspaceHeader(props: {
 		() => props.overlays.checkedOut
 	)
 	const point = (at: string | null) => pointName(history(), at, now())
+	// The project's documents have loaded once its members are known (the
+	// tree has been walked). Told once; switching drafts doesn't hide it again.
+	const [loaded, setLoaded] = createSignal(false)
+	createEffect(() => {
+		if (loaded()) return
+		const selector = {type: "overlay:members", overlay: props.overlays.checkedOut, at: props.overlays.at}
+		onCleanup(subscribe(props.element, selector as Selector, () => setLoaded(true)))
+	})
 	const range = () =>
 		historyShown(props.comparison) && props.comparison?.kind === "compare" ? props.comparison : undefined
 	// Back to the working copy, comparing nothing.
@@ -71,7 +79,8 @@ export function WorkspaceHeader(props: {
 			<Show when={merge()}>
 				{current => <MergeBar merge={current()} name={name} element={props.element} />}
 			</Show>
-			<Show when={!merge()}>
+			{/* the drafts once the project is in: not a lone "Main" over an empty card */}
+			<Show when={!merge() && loaded()}>
 				<div class="projects__tokens">
 					<Show
 						when={!renaming() || !draft()}
@@ -242,6 +251,7 @@ function OverlayMenu(props: {
 	const name = (overlay: Overlay) => overlayName(props.overlays, overlay)
 	const draft = () => props.overlays.drafts.find(entry => entry.url === ours())
 	const drafts = () => inTreeOrder(props.overlays.drafts)
+	const twoVersions = () => !!props.comparison && !historyShown(props.comparison)
 	const copiedFrom = (entry: DraftEntry) => `copied from ${name(entry.parent)}`
 	// What a draft would merge into first: the one it was copied from.
 	const parent = (): Overlay | undefined => draft()?.parent
@@ -324,11 +334,12 @@ function OverlayMenu(props: {
 				ref={token}
 				type="button"
 				class="projects__token"
-				classList={{"projects__token--ours": !!props.comparison}}
+				classList={{"projects__token--ours": twoVersions()}}
 				aria-haspopup="menu"
 				title="Drafts"
 				popovertarget={id}>
-				<Show when={props.comparison}>
+				{/* coloured only beside another version, not two points in its own history */}
+				<Show when={twoVersions()}>
 					<span class="projects__token-dot" aria-hidden="true" />
 				</Show>
 				<span class="projects__token-name">{name(ours())}</span>

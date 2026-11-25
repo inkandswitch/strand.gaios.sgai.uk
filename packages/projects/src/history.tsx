@@ -2,6 +2,7 @@ import {request, subscribe, type Selector} from "@inkandswitch/patchwork-provide
 import {createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor} from "solid-js"
 import {
 	historyShown,
+	overlayName,
 	type At,
 	type Comparison,
 	type HistoryEntry,
@@ -88,8 +89,13 @@ export function pointName(entries: HistoryEntry[] | undefined, at: At, now: numb
 type Lane = 0 | 1
 
 type Row =
-	| {kind: "working"; lane: Lane; label: string}
-	| {kind: "entry"; entry: HistoryEntry; lane: Lane; shared: boolean}
+	| {kind: "working"; lane: Lane; label: string; meta: string}
+	| {kind: "entry"; entry: HistoryEntry; lane: Lane}
+	// What two versions share, from before they parted, folded into one row.
+	| {kind: "parted"; lane: 0; count: number}
+
+const keyOf = (row: Row) =>
+	row.kind === "working" ? `working-${row.lane}` : row.kind === "parted" ? "parted" : row.entry.id
 
 type Badge = {label: string; tone: "a" | "b" | "neutral"}
 
@@ -150,53 +156,65 @@ export function HistoryPanel(props: {
 		if (right() === undefined) {
 			const going = openEntry(ours, now())
 			return [
-				{kind: "working", lane: 0, label: "Working copy"},
-				...ours
-					.filter(entry => entry !== going)
-					.map(entry => ({kind: "entry", entry, lane: 0, shared: false}) as Row),
+				{kind: "working", lane: 0, label: "Working copy", meta: "now"},
+				...ours.filter(entry => entry !== going).map(entry => ({kind: "entry", entry, lane: 0}) as Row),
 			]
 		}
+		// Two lanes: what each has of its own since they parted, newest first,
+		// then what they share, folded away.
 		const theirs = rightEntries() ?? []
 		const inLeft = new Set(ours.map(entry => entry.id))
 		const inRight = new Set(theirs.map(entry => entry.id))
-		const all = new Map<string, HistoryEntry>()
-		for (const entry of [...ours, ...theirs]) all.set(entry.id, entry)
-		const sorted = [...all.values()].sort((a, b) => b.time - a.time)
-		const out: Row[] = merge() ? [{kind: "working", lane: 0, label: "Merge result"}] : []
-		for (const entry of sorted) {
-			const shared = inLeft.has(entry.id) && inRight.has(entry.id)
-			out.push({kind: "entry", entry, lane: shared || inLeft.has(entry.id) ? 0 : 1, shared})
+		const merging = !!merge()
+		const leftOwn = ours.filter(entry => !inRight.has(entry.id))
+		const rightOwn = theirs.filter(entry => !inLeft.has(entry.id))
+		// Comparing, each lane's working copy heads it, and a burst still
+		// going is that working copy.
+		const settled = (own: HistoryEntry[]) => {
+			const going = merging ? undefined : openEntry(own, now())
+			return own.filter(entry => entry !== going)
 		}
-		return out
+		const own: Row[] = [
+			...settled(leftOwn).map(entry => ({kind: "entry", entry, lane: 0}) as Row),
+			...settled(rightOwn).map(entry => ({kind: "entry", entry, lane: 1}) as Row),
+		].sort((a, b) => (b as {entry: HistoryEntry}).entry.time - (a as {entry: HistoryEntry}).entry.time)
+		const name = (overlay: Overlay | undefined) => overlayName(props.overlays, overlay ?? null)
+		const heads: Row[] = merging
+			? [{kind: "working", lane: 0, label: "Merge result", meta: "now"}]
+			: [
+					{kind: "working", lane: 0, label: "Working copy", meta: name(left())},
+					{kind: "working", lane: 1, label: "Working copy", meta: name(right())},
+				]
+		const shared = ours.filter(entry => inRight.has(entry.id)).length
+		return [...heads, ...own, ...(shared ? [{kind: "parted", lane: 0, count: shared} as Row] : [])]
 	})
 
 	// Which row each mark goes on.
 	const badges = createMemo(() => {
 		const out = new Map<string, Badge>()
 		const list = rows()
-		const keyOf = (row: Row) => (row.kind === "working" ? "working" : row.entry.id)
 		const current = range()
 		if (current) {
-			out.set(current.later ?? "working", {label: "B", tone: "neutral"})
+			out.set(current.later ?? "working-0", {label: "B", tone: "neutral"})
 			if (current.earlier) out.set(current.earlier, {label: "A", tone: "neutral"})
 		}
-		const merging = merge()
-		if (merging) {
-			const own = (lane: Lane) =>
-				list.find(row => row.kind === "entry" && row.lane === lane && !row.shared)
-			const into = own(0)
-			const to = own(1)
-			const from = list.find(row => row.kind === "entry" && row.shared)
+		if (merge()) {
+			const newest = (lane: Lane) => list.find(row => row.kind === "entry" && row.lane === lane)
+			const into = newest(0)
+			const to = newest(1)
 			if (into) out.set(keyOf(into), {label: "into", tone: "b"})
 			if (to) out.set(keyOf(to), {label: "to", tone: "a"})
-			if (from) out.set(keyOf(from), {label: "from", tone: "neutral"})
+			if (list.some(row => row.kind === "parted")) out.set("parted", {label: "from", tone: "neutral"})
 		}
 		return out
 	})
 
+	// The point each lane is at: in one lane, what's checked out; comparing,
+	// A's (checked out) on the right and B's (compared with) on the left.
 	const selected = (row: Row) => {
-		if (merge() || pair()) return false
-		const at = props.overlays.at
+		if (merge() || row.kind === "parted") return false
+		const compared = pair()
+		const at = compared ? (row.lane === 1 ? compared.aAt : compared.bAt) : props.overlays.at
 		return row.kind === "working" ? at === null : row.entry.id === at
 	}
 	// In a range: the rows from A to B, and those outside it, muted.
@@ -204,8 +222,7 @@ export function HistoryPanel(props: {
 		const current = range()
 		if (!current) return undefined
 		const list = rows()
-		const index = (at: At) =>
-			list.findIndex(row => (at === null ? row.kind === "working" : row.kind === "entry" && row.entry.id === at))
+		const index = (at: At) => list.findIndex(row => keyOf(row) === (at ?? "working-0"))
 		const top = index(current.later)
 		const bottom = index(current.earlier)
 		return top < 0 || bottom < 0 ? undefined : {top: Math.min(top, bottom), bottom: Math.max(top, bottom)}
@@ -214,36 +231,36 @@ export function HistoryPanel(props: {
 		const current = span()
 		return !!current && (index < current.top || index > current.bottom)
 	}
+	const pickable = (row: Row) => !merge() && row.kind !== "parted"
 
 	const pick = async (row: Row, event: MouseEvent) => {
-		if (merge()) return
-		// In two lanes, an entry views its own lane's overlay; one both share,
-		// the checked-out one.
-		const overlay =
-			pair() && row.kind === "entry" && !row.shared
-				? row.lane === 1
-					? right()!
-					: left()!
-				: props.overlays.checkedOut
+		if (!pickable(row) || row.kind === "parted") return
 		const at: At = row.kind === "working" ? null : row.entry.id
+		// Comparing two versions: a point in either lane moves that side,
+		// and they stay compared.
+		const compared = pair()
+		if (compared) {
+			if (row.lane === 1) await send({type: "overlay:checkout", overlay: compared.a, at})
+			else await send({type: "compare:set", overlay: compared.b, at})
+			return
+		}
+		const overlay = props.overlays.checkedOut
 		const from = props.overlays.at
-		const extending = event.shiftKey && !pair() && from !== at && overlay === props.overlays.checkedOut
-		if (!extending) {
+		if (!event.shiftKey || from === at) {
 			if (props.comparison) await send({type: "compare:clear"})
 			await send({type: "overlay:checkout", overlay, at})
 			return
 		}
 		// The later of the two is checked out, the earlier compared with it.
 		const list = rows()
-		const index = (point: At) =>
-			list.findIndex(each => (point === null ? each.kind === "working" : each.kind === "entry" && each.entry.id === point))
+		const index = (point: At) => list.findIndex(each => keyOf(each) === (point ?? "working-0"))
 		const [later, earlier] = index(at) < index(from) ? [at, from] : [from, at]
 		if (props.overlays.at !== later) await send({type: "overlay:checkout", overlay, at: later})
 		await send({type: "compare:set", overlay, at: earlier})
 	}
 
-	const colorOf = (lane: Lane, shared: boolean) => {
-		if (shared || right() === undefined) return "var(--projects-history-line)"
+	const colorOf = (lane: Lane) => {
+		if (right() === undefined) return "var(--projects-history-line)"
 		if (merge()) return lane === 1 ? "var(--compare-b)" : "var(--compare-a)"
 		return lane === 1 ? "var(--compare-a)" : "var(--compare-b)"
 	}
@@ -306,31 +323,31 @@ export function HistoryPanel(props: {
 								/>
 							)}
 						</Show>
-						<Lanes rows={rows()} colorOf={colorOf} twoLanes={right() !== undefined} />
+						<Lanes rows={rows()} colorOf={colorOf} selected={row => !!pair() && selected(row)} />
 						<For each={rows()}>
 							{(row, i) => (
 								<button
 									type="button"
 									class="projects__history-row"
 									classList={{
-										"projects__history-row--muted": muted(i()) || (row.kind === "entry" && row.shared && !!pair()),
+										"projects__history-row--muted": muted(i()) || row.kind === "parted",
 										"projects__history-row--selected": selected(row),
-										"projects__history-row--static": !!merge(),
+										"projects__history-row--static": !pickable(row),
 									}}
 									style={{top: `${i() * ROW}px`, "padding-left": `${TEXT_X[row.lane]}px`}}
-									disabled={!!merge()}
-									title={
-										merge()
-											? undefined
-											: row.kind === "working"
-												? "Back to the working copy"
-												: "View as it was then; shift-click another to compare"
-									}
+									disabled={!pickable(row)}
+									title={titleOf(row, !!pair(), !!merge())}
 									onClick={event => void pick(row, event)}>
-									<span class="projects__history-row-title" classList={{"projects__history-row-title--working": row.kind === "working"}}>
-										{row.kind === "working" ? row.label : ago(row.entry.time, now())}
+									<span
+										class="projects__history-row-title"
+										classList={{"projects__history-row-title--working": row.kind === "working"}}>
+										{row.kind === "working"
+											? row.label
+											: row.kind === "parted"
+												? "Before they parted"
+												: ago(row.entry.time, now())}
 									</span>
-									<Show when={badges().get(row.kind === "working" ? "working" : row.entry.id)}>
+									<Show when={badges().get(keyOf(row))}>
 										{badge => (
 											<span class={`projects__history-badge projects__history-badge--${badge().tone}`}>
 												{badge().label}
@@ -339,10 +356,14 @@ export function HistoryPanel(props: {
 									</Show>
 									<span class="projects__history-row-meta">
 										{row.kind === "working"
-											? "now"
-											: row.lane === 1
-												? when(row.entry.time, now())
-												: metaOf(row.entry, now())}
+											? row.meta
+											: row.kind === "parted"
+												? row.count === 1
+													? "1 entry they share"
+													: `${row.count} entries they share`
+												: row.lane === 1
+													? when(row.entry.time, now())
+													: metaOf(row.entry, now())}
 									</span>
 								</button>
 							)}
@@ -354,54 +375,53 @@ export function HistoryPanel(props: {
 	)
 }
 
-// The lines down each lane and its dots. A second lane runs down to the
-// newest entry both share, where it joins the first.
-function Lanes(props: {rows: Row[]; colorOf(lane: Lane, shared: boolean): string; twoLanes: boolean}) {
+function titleOf(row: Row, comparing: boolean, merging: boolean): string | undefined {
+	if (merging || row.kind === "parted") return undefined
+	if (comparing) return row.lane === 1 ? "Check this point out" : "Compare with this point"
+	return row.kind === "working"
+		? "Back to the working copy"
+		: "View as it was then; shift-click another to compare"
+}
+
+// The lines down each lane and its dots. A second lane runs down to where
+// the two parted, and joins the first there.
+function Lanes(props: {rows: Row[]; colorOf(lane: Lane): string; selected(row: Row): boolean}) {
 	const y = (index: number) => index * ROW + ROW / 2
 	const path = createMemo(() => {
 		const rows = props.rows
-		const lane0 = rows.findIndex(row => row.lane === 0)
-		const lane1First = rows.findIndex(row => row.lane === 1)
+		const first = (lane: Lane) => rows.findIndex(row => row.lane === lane && row.kind !== "parted")
+		let lane0Last = -1
 		let lane1Last = -1
 		rows.forEach((row, i) => {
-			if (row.lane === 1) lane1Last = i
+			if (row.kind === "parted") return
+			if (row.lane === 0) lane0Last = i
+			else lane1Last = i
 		})
-		const fork = rows.findIndex((row, i) => i > lane1Last && row.kind === "entry" && row.shared)
-		const sharedFirst = rows.findIndex(row => row.kind === "entry" && row.shared)
-		return {lane0, lane1First, lane1Last, fork, sharedFirst, last: rows.length - 1}
+		const parted = rows.findIndex(row => row.kind === "parted")
+		return {lane0: first(0), lane1: first(1), lane0Last, lane1Last, parted}
 	})
+	const end0 = () => (path().parted >= 0 ? path().parted : path().lane0Last)
 	return (
-		<svg class="projects__history-lanes" width="290" height={props.rows.length * ROW + 8} aria-hidden="true">
-			<Show when={path().lane0 >= 0}>
-				{/* the first lane, in its colour down to what's shared */}
+		<svg class="projects__history-lanes" width="100%" height={props.rows.length * ROW + 8} aria-hidden="true">
+			<Show when={path().lane0 >= 0 && end0() > path().lane0}>
 				<line
 					x1={LANE_X[0]}
 					y1={y(path().lane0)}
 					x2={LANE_X[0]}
-					y2={y(props.twoLanes && path().sharedFirst >= 0 ? path().sharedFirst : path().last)}
-					stroke={props.colorOf(0, false)}
+					y2={y(end0())}
+					stroke={props.colorOf(0)}
 					stroke-width="2"
 				/>
-				<Show when={props.twoLanes && path().sharedFirst >= 0}>
-					<line
-						x1={LANE_X[0]}
-						y1={y(path().sharedFirst)}
-						x2={LANE_X[0]}
-						y2={y(path().last)}
-						stroke={props.colorOf(0, true)}
-						stroke-width="1.5"
-					/>
-				</Show>
 			</Show>
-			<Show when={path().lane1First >= 0}>
+			<Show when={path().lane1 >= 0}>
 				<path
 					d={
-						path().fork >= 0
-							? `M${LANE_X[1]},${y(path().lane1First)} V${y(path().fork) - 34} C${LANE_X[1]},${y(path().fork) - 12} ${LANE_X[0]},${y(path().fork) - 22} ${LANE_X[0]},${y(path().fork)}`
-							: `M${LANE_X[1]},${y(path().lane1First)} V${y(path().lane1Last)}`
+						path().parted >= 0
+							? `M${LANE_X[1]},${y(path().lane1)} V${y(path().parted) - 34} C${LANE_X[1]},${y(path().parted) - 12} ${LANE_X[0]},${y(path().parted) - 22} ${LANE_X[0]},${y(path().parted)}`
+							: `M${LANE_X[1]},${y(path().lane1)} V${y(path().lane1Last)}`
 					}
 					fill="none"
-					stroke={props.colorOf(1, false)}
+					stroke={props.colorOf(1)}
 					stroke-width="2"
 				/>
 			</Show>
@@ -410,13 +430,16 @@ function Lanes(props: {rows: Row[]; colorOf(lane: Lane, shared: boolean): string
 					<circle
 						cx={LANE_X[row.lane]}
 						cy={y(i())}
-						r={row.kind === "working" ? 4.5 : 4.5}
-						class={row.kind === "working" ? "projects__history-dot--working" : "projects__history-dot"}
-						style={
+						r={props.selected(row) ? 6 : 4.5}
+						class={
 							row.kind === "working"
-								? {stroke: props.colorOf(row.lane, false)}
-								: {fill: props.colorOf(row.lane, row.shared)}
+								? "projects__history-dot--working"
+								: row.kind === "parted"
+									? "projects__history-dot--parted"
+									: "projects__history-dot"
 						}
+						classList={{"projects__history-dot--chosen": props.selected(row)}}
+						style={row.kind === "working" ? {stroke: props.colorOf(row.lane)} : row.kind === "entry" ? {fill: props.colorOf(row.lane)} : {}}
 					/>
 				)}
 			</For>

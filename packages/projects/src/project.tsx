@@ -111,6 +111,17 @@ export function ProjectView(props: {
 				attr:against={against()}
 				attr:against-at={againstAt()}
 				class="projects__compare-scope">
+				<div class="projects__desk">
+				{/* the history, a sheet tucked under the card's left edge */}
+				<Show when={mounted() && state.overlays()?.status === "ready" && card()}>
+					{at => (
+						<HistoryPanel
+							element={at()}
+							overlays={state.overlays()!}
+							comparison={state.comparison()}
+						/>
+					)}
+				</Show>
 				<section ref={setCard} class="projects__card">
 					<Show when={mounted() && state.overlays() && card()}>
 						{at => (
@@ -132,12 +143,6 @@ export function ProjectView(props: {
 									ours={overlayName(state.overlays(), state.overlays()!.checkedOut)}
 									theirs={state.comparing()?.names.b}
 									comments={comments}>
-									<div class="projects__with-history">
-									<HistoryPanel
-										element={at()}
-										overlays={state.overlays()!}
-										comparison={state.comparison()}
-									/>
 									<Show
 										when={folder()}
 										fallback={
@@ -167,12 +172,12 @@ export function ProjectView(props: {
 											element={at()}
 										/>
 									</Show>
-									</div>
 								</CommentsScope>
 							</>
 						)}
 					</Show>
 				</section>
+				</div>
 			</patchwork-view>
 		</div>
 	)
