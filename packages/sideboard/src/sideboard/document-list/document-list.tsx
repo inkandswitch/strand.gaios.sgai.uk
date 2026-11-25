@@ -154,7 +154,9 @@ export function DocumentList(props: DocumentListProps) {
               });
           };
 
-          // Sync title from doc content → folder docref + @patchwork.title
+          // A title changed inside the open document renames its entry in
+          // the folder. Only a change does: opening a document writes
+          // nothing, to it or to its folder.
           createEffect(() => {
             if (!props.isSelected(doc.url)) return;
 
@@ -168,45 +170,39 @@ export function DocumentList(props: DocumentListProps) {
 
                 const datatypes = getRegistry<Datatype>("patchwork:datatype");
 
-                async function syncTitle() {
+                async function titleOf(): Promise<string | undefined> {
                   const docData = docHandle.doc();
-                  if (!docData) return;
+                  if (!docData) return undefined;
 
                   const metadata = (docData as any)["@patchwork"];
-                  if (!metadata?.type) return;
+                  if (!metadata?.type) return undefined;
 
                   const datatype = datatypes.get(metadata.type) as Datatype;
-                  if (!datatype) return;
+                  if (!datatype) return undefined;
 
                   await datatypes.load(datatype.id);
-                  if (cancelled) return;
-                  if (!isLoadedPlugin(datatype)) return;
+                  if (cancelled || !isLoadedPlugin(datatype)) return undefined;
+                  return datatype.module.getTitle(docData) || undefined;
+                }
 
-                  const title = datatype.module.getTitle(docData);
-                  if (!title) return;
+                let seen = await titleOf();
+                if (cancelled) return;
 
-                  // Update folder docref name and @patchwork.title if
-                  // different. Compare by value: pushwork stores these as
-                  // ImmutableStrings, which never === a plain string, and
-                  // an unguarded write would land on every open.
-                  const currentFolder = props.handle.doc();
-                  const currentName = currentFolder?.docs?.[index()]?.name;
+                async function syncTitle() {
+                  const title = await titleOf();
+                  if (cancelled || !title || title === seen) return;
+                  seen = title;
+                  // Compare by value: pushwork stores names as
+                  // ImmutableStrings, which never === a plain string.
+                  const currentName = props.handle.doc()?.docs?.[index()]?.name;
                   if (asString(currentName) !== title) {
                     props.handle.change((folder) =>
                       setText(folder, ["docs", index(), "name"], title)
                     );
                   }
-                  if (asString(metadata.title) !== title) {
-                    docHandle.change((d: any) =>
-                      setText(d, ["@patchwork", "title"], title)
-                    );
-                  }
                 }
 
-                await syncTitle();
-                if (cancelled) return;
-
-                const onChange = () => syncTitle();
+                const onChange = () => void syncTitle();
                 docHandle.on("change", onChange);
                 removeListener = () => docHandle.off("change", onChange);
               });
