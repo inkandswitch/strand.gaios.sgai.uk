@@ -1207,6 +1207,89 @@ button.projects__token:popover-open {
 	overflow: auto;
 }
 
+/* a folder open in a panel while comparing: what differs beneath it, one
+   document under another */
+.projects__review {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+}
+
+.projects__review-section {
+	display: flex;
+	flex-direction: column;
+	flex: none;
+	border-bottom: 1px solid var(--projects-surface-edge);
+}
+
+.projects__review-header {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	gap: var(--projects-space-sm);
+	min-height: 2.25rem;
+	padding: 0 var(--projects-space-sm);
+	border-bottom: 1px solid var(--projects-surface-edge);
+	background: var(--projects-field);
+	font-size: 0.85rem;
+}
+
+.projects__review-fold {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 1.5rem;
+	height: 1.5rem;
+	padding: 0;
+	border: none;
+	border-radius: var(--projects-radius);
+	background: none;
+	color: var(--projects-muted);
+}
+
+.projects__review-fold:hover {
+	background: var(--projects-hover);
+}
+
+.projects__review-name {
+	overflow: hidden;
+	font-weight: 600;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.projects__review-folder {
+	overflow: hidden;
+	color: var(--projects-muted);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.projects__review-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--projects-space-xs);
+	flex: none;
+	margin-left: auto;
+}
+
+.projects__review-body {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.projects__review-missing {
+	margin: 0;
+	padding: var(--projects-space-sm) var(--projects-space-lg);
+	color: var(--projects-muted);
+	font-size: 0.85rem;
+}
+
 /* a folder open in a panel: its entries, and when each was last edited */
 .projects__listing {
 	display: flex;

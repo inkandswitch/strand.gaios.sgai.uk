@@ -26,14 +26,17 @@ import {OtherOverlay} from "./overlays.tsx"
 import type {At, Member, Overlay} from "./types.ts"
 
 /**
- * The version the checked-out one is compared with, B, at `bAt` in its
- * history: views of it are checked out of the root by an overlay provider of
- * their own. `names` are what A and B are called. `merging` while A is a
- * merge and B its target, or A and B are two points in one overlay's
- * history: then B is before and A after, and before comes first.
+ * The version checked out, A, at `aAt` in its history, and the one it's
+ * compared with, B, at `bAt`: views of B are checked out of the root by an
+ * overlay provider of their own. `names` are what A and B are called.
+ * `merging` while A is a merge and B its target, or A and B are two points
+ * in one overlay's history: then B is before and A after, and before comes
+ * first.
  */
 export type Comparing = {
 	root: AutomergeUrl
+	a: Overlay
+	aAt: At
 	b: Overlay
 	bAt: At
 	names: {a: string; b: string}

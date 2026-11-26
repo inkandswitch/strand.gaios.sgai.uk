@@ -23,7 +23,7 @@ import {
 	type Setter,
 } from "solid-js"
 import {render} from "solid-js/web"
-import {useCompareModes, type WorkspaceCompare} from "./compare.ts"
+import {useCompareModes, type Versions, type WorkspaceCompare} from "./compare.ts"
 import {FolderPanel} from "./folder-panel.tsx"
 import {isFolder} from "./folders.ts"
 import {useDoc, useDocTitle, useHandle} from "./hooks.ts"
@@ -36,6 +36,7 @@ import {
 	createPanelState,
 	type Comparing,
 	type PanelCompare,
+	type PanelModes,
 	type PanelState,
 } from "./panel.tsx"
 import {projectRoot, relocate, type FindDoc} from "./resolve.ts"
@@ -66,6 +67,9 @@ type Panel = PanelState & {
 	/** whether what it shows is a folder, once that's known */
 	folder: Accessor<boolean | undefined>
 	setFolder: Setter<boolean | undefined>
+	/** a folder's documents under review, each compared like a panel */
+	sections: Accessor<PanelState[]>
+	setSections: Setter<PanelState[]>
 }
 
 /**
@@ -94,8 +98,12 @@ export function Dock(props: {
 		modes: useCompareModes(),
 		workspace: props.workspace,
 		comparing: () => props.comparing,
-		// a folder's panel has no mode of its own
-		panels: () => panelList().filter(panel => panel.folder() === false),
+		// a folder's panel has no mode of its own, but its documents under
+		// review each have theirs
+		panels: () =>
+			panelList().flatMap(panel =>
+				panel.folder() === false ? [panel] : panel.folder() ? panel.sections() : []
+			),
 	})
 	let element!: HTMLDivElement
 	let api: DockviewApi | undefined
@@ -236,6 +244,7 @@ export function Dock(props: {
 		const [shown, setShown] = createSignal(route)
 		const [tool, setTool] = createSignal<string>()
 		const [folder, setFolder] = createSignal<boolean>()
+		const [sections, setSections] = createSignal<PanelState[]>([])
 		panels.set(id, {
 			...createPanelState(),
 			route: shown,
@@ -244,6 +253,8 @@ export function Dock(props: {
 			setTool,
 			folder,
 			setFolder,
+			sections,
+			setSections,
 		})
 		setPanelList([...panels.values()])
 		api?.addPanel({id, component: "document", title: "", position})
@@ -294,6 +305,10 @@ export function Dock(props: {
 							host={props.host}
 							overlays={() => props.overlays}
 							open={url => openFrom(panelApi.id, url)}
+							openTab={url => openTab(panelApi.id, url)}
+							modes={modes}
+							versions={() => props.workspace.versions()}
+							setSections={panel.setSections}
 						/>
 					),
 					element
@@ -358,6 +373,12 @@ export function Dock(props: {
 		open(url, beside ? {group: beside.id} : {to: "tab", group: own.id})
 	}
 
+	// A document under review opens in a tab of its own, beside the folder's.
+	function openTab(panelId: string, url: AutomergeUrl) {
+		const group = api?.getPanel(panelId)?.group
+		if (group) open(url, {to: "tab", group: group.id})
+	}
+
 	// "Open with" reopens the open document under another tool, and it's the
 	// focused panel that's open: focus this one first.
 	function openWith(panelId: string | undefined, url: AutomergeUrl, toolId: string) {
@@ -390,6 +411,10 @@ function DockPanel(props: {
 	host: HTMLElement | undefined
 	overlays: Accessor<OverlaysState>
 	open(url: AutomergeUrl): void
+	openTab(url: AutomergeUrl): void
+	modes: PanelModes
+	versions: Accessor<Versions | undefined>
+	setSections(sections: PanelState[]): void
 }) {
 	const docUrl = () => props.route().resolved.docUrl
 	const doc = useDoc(useHandle<unknown>(props.repo, docUrl))
@@ -427,6 +452,11 @@ function DockPanel(props: {
 								host={host()}
 								overlays={props.overlays()}
 								open={props.open}
+								openTab={props.openTab}
+								comparing={props.compare.comparing()}
+								modes={props.modes}
+								versions={props.versions()}
+								setSections={props.setSections}
 							/>
 						)}
 					</Show>

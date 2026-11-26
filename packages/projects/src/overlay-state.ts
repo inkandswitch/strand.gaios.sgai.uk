@@ -39,6 +39,8 @@ export function useOverlayState(
 			if (!state || !current) return undefined
 			return {
 				root: root(),
+				a: current.a,
+				aAt: current.kind === "compare" ? current.aAt : null,
 				b: current.b,
 				bAt: current.kind === "compare" ? current.bAt : null,
 				names: {a: overlayName(state, current.a), b: overlayName(state, current.b)},
@@ -50,6 +52,8 @@ export function useOverlayState(
 		{
 			equals: (a, b) =>
 				a?.root === b?.root &&
+				a?.a === b?.a &&
+				a?.aAt === b?.aAt &&
 				a?.b === b?.b &&
 				a?.bAt === b?.bAt &&
 				a?.names.a === b?.names.a &&
