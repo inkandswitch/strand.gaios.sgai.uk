@@ -266,8 +266,11 @@ function Review(props: FolderPanelProps & {comparing: Comparing}) {
 		}
 		return state
 	}
+	const compared = createMemo(() => ids().filter(id => byId().get(id)?.side !== "theirs"), [], {
+		equals: sameList,
+	})
 	createEffect(() => {
-		const shown = ids().filter(id => byId().get(id)?.side !== "theirs")
+		const shown = compared()
 		for (const id of [...states.keys()]) if (!shown.includes(id)) states.delete(id)
 		props.setSections(shown.map(stateOf))
 	})

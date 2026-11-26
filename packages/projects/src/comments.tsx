@@ -121,7 +121,8 @@ export function CommentsScope(props: {
 		projectName: props.route.resolved.projectName,
 		root: props.route.resolved.root === "folder" ? "folder" : "document",
 		openDocs: props.visible.docs,
-		viewed: viewed(),
+		// a view in a tab behind another stays counted, but isn't visible
+		viewed: viewed().filter(url => props.visible.docs.includes(url)),
 		ours: props.ours ?? null,
 		theirs: props.theirs ?? null,
 		scope: props.visible.whole ? "all" : "open",
