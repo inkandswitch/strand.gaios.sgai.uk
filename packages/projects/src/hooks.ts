@@ -1,5 +1,6 @@
 import type {AutomergeUrl, DocHandle, Repo} from "@automerge/automerge-repo/slim"
 import type {HasPatchworkMetadata} from "@inkandswitch/patchwork-filesystem"
+import {subscribe, type Selector} from "@inkandswitch/patchwork-providers"
 import {
 	getRegistry,
 	isLoadedPlugin,
@@ -11,9 +12,11 @@ import {
 	createMemo,
 	createSignal,
 	onCleanup,
+	untrack,
 	type Accessor,
 } from "solid-js"
 import {asString} from "./folders.ts"
+import type {Member} from "./types.ts"
 
 /** A document's title, by its datatype, kept current as the document changes. */
 export function useDocTitle(
@@ -98,4 +101,25 @@ export function useMounted(
 		onCleanup(() => current.removeEventListener("patchwork:mounted", onMounted))
 	})
 	return mounted
+}
+
+/** An overlay's members at a point, while it's asked for. */
+export function useMembers(
+	host: Accessor<HTMLElement | undefined>,
+	version: Accessor<{overlay: AutomergeUrl | null; at: string | null} | undefined>
+): Accessor<Member[] | undefined> {
+	const [members, setMembers] = createSignal<Member[]>()
+	const key = createMemo(() => {
+		const current = version()
+		return current && `${current.overlay ?? "main"}@${current.at ?? ""}`
+	})
+	createEffect(() => {
+		const at = host()
+		const which = key() && untrack(version)
+		setMembers(undefined)
+		if (!at || !which) return
+		const selector = {type: "overlay:members", overlay: which.overlay, at: which.at} as Selector
+		onCleanup(subscribe<Member[]>(at, selector, value => setMembers(value)))
+	})
+	return members
 }

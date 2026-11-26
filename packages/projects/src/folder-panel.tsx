@@ -1,5 +1,5 @@
 import type {AutomergeUrl, DocHandle, Repo} from "@automerge/automerge-repo/slim"
-import {request, subscribe, type Selector} from "@inkandswitch/patchwork-providers"
+import {request, type Selector} from "@inkandswitch/patchwork-providers"
 import {
 	createEffect,
 	createMemo,
@@ -12,7 +12,7 @@ import {
 } from "solid-js"
 import type {Versions} from "./compare.ts"
 import {folderLinks, segmentFor, type Link} from "./folders.ts"
-import {useDoc, useHandle} from "./hooks.ts"
+import {useDoc, useHandle, useMembers} from "./hooks.ts"
 import {short, useHistory, useNow} from "./history.tsx"
 import {formatLocationUrl} from "./location.ts"
 import {documentOf, foldersToRead, lastEdited, review, type Section} from "./members.ts"
@@ -25,7 +25,7 @@ import {
 	type PanelModes,
 	type PanelState,
 } from "./panel.tsx"
-import type {Member, OverlaysState} from "./types.ts"
+import type {OverlaysState} from "./types.ts"
 
 /** How tall a document under review is drawn, to begin with. */
 const SECTION_HEIGHT = "24rem"
@@ -140,27 +140,6 @@ function useLastEdited(
 	const entries = useHistory(host, checkedOut)
 	const members = useMembers(host, () => ({overlay: checkedOut(), at: at()}))
 	return createMemo(() => lastEdited(entries() ?? [], members() ?? [], at()))
-}
-
-/** An overlay's members at a point, while it's asked for. */
-export function useMembers(
-	host: Accessor<HTMLElement | undefined>,
-	version: Accessor<{overlay: AutomergeUrl | null; at: string | null} | undefined>
-): Accessor<Member[] | undefined> {
-	const [members, setMembers] = createSignal<Member[]>()
-	const key = createMemo(() => {
-		const current = version()
-		return current && `${current.overlay ?? "main"}@${current.at ?? ""}`
-	})
-	createEffect(() => {
-		const at = host()
-		const which = key() && untrack(version)
-		setMembers(undefined)
-		if (!at || !which) return
-		const selector = {type: "overlay:members", overlay: which.overlay, at: which.at} as Selector
-		onCleanup(subscribe<Member[]>(at, selector, value => setMembers(value)))
-	})
-	return members
 }
 
 // lucide `folder`

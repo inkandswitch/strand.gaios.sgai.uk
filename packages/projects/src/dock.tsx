@@ -86,6 +86,8 @@ export function Dock(props: {
 	overlays: OverlaysState
 	comparing: Comparing | undefined
 	focus(panel: ProjectRoute | undefined): void
+	/** what's in front in each group, by its url */
+	showing(urls: AutomergeUrl[]): void
 	/** where the dock's groups are offered, for opening into one */
 	host: HTMLElement | undefined
 	/** the modes every panel shares */
@@ -128,6 +130,7 @@ export function Dock(props: {
 			dock.onDidRemovePanel(panel => {
 				panels.delete(panel.id)
 				setPanelList([...panels.values()])
+				refresh()
 				if (!dock.totalPanels) props.focus(undefined)
 			}),
 			dock.onDidLayoutChange(refresh),
@@ -148,6 +151,23 @@ export function Dock(props: {
 		const host = props.host
 		if (host) offerGroups(host, groups)
 	})
+
+	// Only the tab in front in each group is showing; the ones behind it
+	// aren't on screen.
+	const showing = createMemo(
+		() => {
+			groups()
+			panelList()
+			const urls = (api?.groups ?? []).flatMap(group => {
+				const panel = group.activePanel && panels.get(group.activePanel.id)
+				return panel ? [withoutHeads(panel.route().resolved.docUrl)] : []
+			})
+			return [...new Set(urls)]
+		},
+		[],
+		{equals: (a, b) => a.length === b.length && a.every((url, i) => url === b[i])}
+	)
+	createEffect(() => props.showing(showing()))
 
 	return (
 		<div class="projects__dock-area">

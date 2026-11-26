@@ -77,6 +77,12 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
     equals: sameList,
   });
   const comparing = () => !!context()?.theirs;
+  // What's shown in views, to reveal a thread in.
+  const viewed = createMemo<AutomergeUrl[]>(
+    () => context()?.viewed ?? context()?.openDocs ?? [],
+    [],
+    { equals: sameList }
+  );
 
   // ---------------------------------------------------------------- threads
   // Every thread in the project is kept in its root document.
@@ -259,7 +265,7 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
     setPinned(wasPrimary ? undefined : item.key);
     if (wasPrimary) return select([]);
     const c = context();
-    if (c && !c.openDocs.includes(item.docUrl)) {
+    if (c && !viewed().includes(item.docUrl)) {
       // Opening takes where it is in the project, so find that first.
       const segments =
         c.root === "document" ? [] : await findSegments(repo, c.projectUrl, item.docUrl);
@@ -280,7 +286,7 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
   // to mount and say what it has selected, then select the thread's target.
   createEffect(() => {
     const item = revealing();
-    if (!item || !openDocs().includes(item.docUrl)) return;
+    if (!item || !viewed().includes(item.docUrl)) return;
     const timer = setTimeout(() => {
       setRevealing(undefined);
       select(item.thread.refs);

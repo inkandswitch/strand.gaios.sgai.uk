@@ -23,8 +23,8 @@ import {NameInput, SidebarButton, type SidebarToggle} from "./workspaces.tsx"
 /**
  * The bar above the card, flat on the page: the sidebar's button, the
  * workspace's name, then the version unit (what's checked out, and the next
- * thing to do with it), then, at its end, what the column beside the card is
- * about and the buttons that unfold its history and comments.
+ * thing to do with it), then, at its end, the buttons that unfold the
+ * history and the comments beside the card.
  */
 export function WorkspaceHeader(props: {
 	name: string
@@ -54,7 +54,6 @@ export function WorkspaceHeader(props: {
 		const selector = {type: "overlay:members", overlay: props.overlays.checkedOut, at: props.overlays.at}
 		onCleanup(subscribe(props.element, selector as Selector, () => setLoaded(true)))
 	})
-	const panelsOpen = () => props.panels.history() || props.panels.comments()
 
 	return (
 		<header class="projects__topbar">
@@ -79,9 +78,6 @@ export function WorkspaceHeader(props: {
 			</div>
 			<div class="projects__header-end">
 				<div ref={element => props.actions?.(element)} class="projects__header-actions" />
-				<Show when={panelsOpen()}>
-					<ScopeToggle panels={props.panels} />
-				</Show>
 				<button
 					type="button"
 					class="projects__icon-button"
@@ -102,26 +98,6 @@ export function WorkspaceHeader(props: {
 				</button>
 			</div>
 		</header>
-	)
-}
-
-/** What the history and the comments are about: the open documents, or all. */
-function ScopeToggle(props: {panels: SidePanels}) {
-	const option = (scope: "open" | "all", label: string) => (
-		<button
-			type="button"
-			role="radio"
-			aria-checked={props.panels.scope() === scope}
-			class="projects__segment"
-			onClick={() => props.panels.setScope(scope)}>
-			{label}
-		</button>
-	)
-	return (
-		<div class="projects__segments" role="radiogroup" aria-label="History and comments on">
-			{option("open", "Open documents")}
-			{option("all", "All documents")}
-		</div>
 	)
 }
 

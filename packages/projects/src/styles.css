@@ -577,35 +577,6 @@ button.projects__token:popover-open {
 	white-space: nowrap;
 }
 
-/* what the history and the comments are about */
-.projects__segments {
-	display: flex;
-	flex: none;
-	margin-right: var(--projects-space-sm);
-	padding: 2px;
-	border-radius: var(--projects-radius-lg);
-	background: color-mix(in oklch, var(--projects-fg) 7%, var(--projects-ground));
-}
-
-.projects__segment {
-	height: 1.5rem;
-	padding: 0 0.65rem;
-	border: none;
-	border-radius: 6px;
-	background: none;
-	color: var(--projects-secondary);
-	font-size: 0.75rem;
-	font-weight: 500;
-	white-space: nowrap;
-}
-
-.projects__segment[aria-checked="true"] {
-	background: var(--projects-surface);
-	box-shadow: 0 1px 2px rgb(31 30 29 / 0.08);
-	color: var(--projects-fg);
-	font-weight: 600;
-}
-
 .projects__token-rename {
 	width: 10rem;
 	height: 1.8rem;
@@ -1446,6 +1417,12 @@ button.projects__token:popover-open {
 	color: var(--projects-fg);
 	font-size: 0.8rem;
 	font-weight: 600;
+}
+
+/* what the history covers, when that's less than the project */
+.projects__side-covering {
+	color: var(--projects-secondary);
+	font-weight: 400;
 }
 
 .projects__comments-view,

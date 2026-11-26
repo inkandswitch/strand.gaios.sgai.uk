@@ -2,7 +2,7 @@ import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
 import {request, subscribe, type Selector} from "@inkandswitch/patchwork-providers"
 import {createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor} from "solid-js"
 import {folderLinks} from "./folders.ts"
-import type {PanelScope} from "./side-panels.ts"
+import {documentOf} from "./members.ts"
 import {
 	historyShown,
 	overlayName,
@@ -203,16 +203,16 @@ type Mark = {letter: "A" | "B"} | {word: string; tone: "a" | "b" | "neutral"}
  * overlay, with its working copy at the top: clicking an entry views it,
  * read-only, and shift-clicking another compares the two. While two
  * overlays are compared or merged, a lane for each down to where they
- * parted, and then the history they share. With the scope at the open
- * documents, only the entries that changed one of them.
+ * parted, and then the history they share. Covering less than the whole
+ * project, only the entries that changed something it covers.
  */
 export function HistoryPanel(props: {
 	element: HTMLElement
 	overlays: OverlaysState
 	comparison: Comparison
 	names: Map<AutomergeUrl, string>
-	openDocs: AutomergeUrl[]
-	scope: PanelScope
+	/** the members it's about: what's visible; undefined for the whole project */
+	covers: AutomergeUrl[] | undefined
 }) {
 	const now = useNow()
 	const send = (selector: Record<string, unknown>) => request(props.element, selector as Selector)
@@ -246,9 +246,9 @@ export function HistoryPanel(props: {
 			: undefined
 
 	const inScope = createMemo(() => {
-		if (props.scope !== "open") return () => true
-		const open = new Set(props.openDocs)
-		return (entry: HistoryEntry) => entry.members.some(url => open.has(url))
+		if (!props.covers) return () => true
+		const covered = new Set(props.covers.map(documentOf))
+		return (entry: HistoryEntry) => entry.members.some(url => covered.has(documentOf(url)))
 	})
 
 	const rows = createMemo<Row[]>(() => {
@@ -290,7 +290,7 @@ export function HistoryPanel(props: {
 					{kind: "head", lane: 0, label: name(first()), meta: "now"},
 					{kind: "head", lane: 1, label: name(second()), meta: "now"},
 				]
-		// Where they parted stays, whatever the scope.
+		// Where they parted stays, whatever's covered.
 		const shared = ours
 			.filter(entry => inSecond.has(entry.id))
 			.filter((entry, i) => i === 0 || shown(entry))

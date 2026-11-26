@@ -46,6 +46,7 @@ function FolderWorkspace(props: {element: ToolElement; rootUrl: AutomergeUrl}) {
 								overlays={state.overlays()!}
 								comparing={state.comparing()}
 								focus={workspace.focus}
+								showing={workspace.showing}
 								host={props.element}
 								workspace={workspace.compare}
 							/>

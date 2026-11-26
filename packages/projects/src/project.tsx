@@ -1,11 +1,11 @@
 import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
 import {request} from "@inkandswitch/patchwork-providers"
-import {createEffect, createSignal, on, Show, untrack} from "solid-js"
+import {createEffect, createMemo, createSignal, on, Show, untrack} from "solid-js"
 import {Portal} from "solid-js/web"
 import {CommentsScope} from "./comments.tsx"
 import {createWorkspaceCompare, useCompareModes, type Mode, type WorkspaceCompare} from "./compare.ts"
 import {WorkspaceHeader} from "./header.tsx"
-import {useDocTitle, useMounted} from "./hooks.ts"
+import {useDocTitle, useMembers, useMounted} from "./hooks.ts"
 import type {ProjectRoute} from "./navigation.ts"
 import {OpenWith} from "./open-with.tsx"
 import {
@@ -21,6 +21,7 @@ import {provideWorkspace} from "./workspace.ts"
 import type {SidebarToggle} from "./workspaces.tsx"
 import {useOverlayState} from "./overlay-state.ts"
 import {HistoryPanel, useMemberNames} from "./history.tsx"
+import {covered} from "./members.ts"
 import {createSidePanels} from "./side-panels.ts"
 import {overlayName, versionKey, type At, type Overlay} from "./types.ts"
 
@@ -64,6 +65,27 @@ export function ProjectView(props: {
 		() => state.overlays()?.checkedOut
 	)
 	const modes = useCompareModes()
+	// What's showing: what's in front in each of a folder's groups, or a
+	// document on its own. The history and the comments cover it, a folder
+	// as everything beneath it.
+	const [showing, setShowing] = createSignal<AutomergeUrl[]>([])
+	const shown = () => (folder() ? showing() : [props.route.resolved.projectUrl])
+	const members = useMembers(
+		() => (mounted() ? desk() : undefined),
+		() => {
+			const current = state.overlays()
+			return current && {overlay: current.checkedOut, at: current.at}
+		}
+	)
+	const visible = createMemo(() => covered(shown(), members() ?? [], props.route.resolved.projectUrl))
+	// Named only when it's less than the whole project.
+	const covering = () =>
+		visible().whole
+			? undefined
+			: shown()
+					.map(url => names().get(url)?.replace(/\/$/, ""))
+					.filter(Boolean)
+					.join(", ")
 	// What it's compared with: an overlay, main (null), or nothing, and the
 	// point in its history.
 	const compared = () => {
@@ -143,18 +165,19 @@ export function ProjectView(props: {
 									ours={overlayName(state.overlays(), state.overlays()!.checkedOut)}
 									theirs={state.comparing()?.names.b}
 									panels={panels}
-									history={openDocs => (
+									visible={visible()}
+									covering={covering()}
+									history={
 										<Show when={state.overlays()?.status === "ready"}>
 											<HistoryPanel
 												element={at()}
 												overlays={state.overlays()!}
 												comparison={state.comparison()}
 												names={names()}
-												openDocs={openDocs()}
-												scope={panels.scope()}
+												covers={visible().whole ? undefined : visible().docs}
 											/>
 										</Show>
-									)}>
+									}>
 									<Show
 										when={folder()}
 										fallback={
@@ -179,6 +202,7 @@ export function ProjectView(props: {
 											url={props.route.resolved.projectUrl}
 											route={props.route}
 											focus={props.focus}
+											showing={setShowing}
 											workspace={workspaceCompare}
 											modes={modes}
 											element={at()}
@@ -202,6 +226,7 @@ function FolderRoot(props: {
 	url: AutomergeUrl
 	route: ProjectRoute
 	focus(panel: ProjectRoute | undefined): void
+	showing(urls: AutomergeUrl[]): void
 	workspace: WorkspaceCompare
 	modes: () => Mode[]
 	element: HTMLElement
@@ -209,6 +234,7 @@ function FolderRoot(props: {
 	provideWorkspace(props.element, {
 		route: () => props.route,
 		focus: route => props.focus(route),
+		showing: urls => props.showing(urls),
 		compare: props.workspace,
 		modes: props.modes,
 	})

@@ -210,3 +210,31 @@ function sameHeads(a: readonly string[], b: readonly string[]) {
 	const set = new Set(b)
 	return a.every(head => set.has(head))
 }
+
+/**
+ * What the history and the comments cover: what's shown, each folder as
+ * every member beneath it, in the order shown. `whole` when the root is
+ * among them.
+ */
+export function covered(
+	shown: readonly AutomergeUrl[],
+	members: readonly Member[],
+	root: AutomergeUrl
+): {whole: boolean; docs: AutomergeUrl[]} {
+	const parents = parentsOf(members)
+	const docs: AutomergeUrl[] = []
+	const seen = new Set<string>()
+	const add = (url: AutomergeUrl) => {
+		const id = documentOf(url)
+		if (seen.has(id)) return
+		seen.add(id)
+		docs.push(url)
+	}
+	for (const url of shown) {
+		add(url)
+		const id = documentOf(url)
+		for (const member of members) if (upFrom(member.url, parents).includes(id)) add(member.url)
+	}
+	const whole = shown.length === 0 || shown.some(url => documentOf(url) === documentOf(root))
+	return {whole, docs}
+}

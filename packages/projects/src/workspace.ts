@@ -1,3 +1,4 @@
+import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
 import {accept, request, subscribe, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
 import {createEffect, createSignal, on, onCleanup, type Accessor} from "solid-js"
 import {
@@ -18,6 +19,8 @@ import type {ProjectRoute} from "./navigation.ts"
  *     for it to go), pushed on every change; null while there's none
  *   - `navigation:focus { route }` → another panel took focus, or the last
  *     one closed (null); answers true
+ *   - `navigation:showing { urls }` → what each group of panels is showing,
+ *     the tab in front in each, documents and folders; answers true
  *   - `compare-mode:picked` → the mode last picked for every panel, with a
  *     count, so picking the same one again is told apart; pushed on every
  *     change
@@ -39,6 +42,8 @@ export function provideWorkspace(
 	props: {
 		route: Accessor<ProjectRoute | undefined>
 		focus(route: ProjectRoute | undefined): void
+		/** what the tool's panels show, in front */
+		showing(urls: AutomergeUrl[]): void
 		compare: WorkspaceCompare
 		modes: Accessor<Mode[]>
 	}
@@ -65,6 +70,12 @@ export function provideWorkspace(
 			case "navigation:focus":
 				accept<boolean>(event, respond => {
 					props.focus((selector.route as ProjectRoute | null) ?? undefined)
+					respond(true)
+				})
+				return
+			case "navigation:showing":
+				accept<boolean>(event, respond => {
+					props.showing(ids(selector.urls) as AutomergeUrl[])
 					respond(true)
 				})
 				return
@@ -147,6 +158,7 @@ export function provideWorkspace(
 export function connectWorkspace(element: HTMLElement): {
 	route: Accessor<ProjectRoute | undefined>
 	focus(route: ProjectRoute | undefined): void
+	showing(urls: AutomergeUrl[]): void
 	compare: WorkspaceCompare
 } {
 	const [route, setRoute] = createSignal<ProjectRoute>()
@@ -208,6 +220,7 @@ export function connectWorkspace(element: HTMLElement): {
 	return {
 		route,
 		focus: next => void request(element, {type: "navigation:focus", route: plain(next)}),
+		showing: urls => void request(element, {type: "navigation:showing", urls}),
 		compare: {
 			picked,
 			pick: mode => setPicked({mode}),

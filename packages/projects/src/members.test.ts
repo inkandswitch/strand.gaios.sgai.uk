@@ -1,6 +1,6 @@
 import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
 import {describe, expect, it} from "vitest"
-import {documentOf, foldersToRead, lastEdited, review} from "./members.ts"
+import {covered, documentOf, foldersToRead, lastEdited, review} from "./members.ts"
 import type {HistoryEntry, Member} from "./types.ts"
 
 const ROOT = "automerge:3regSr3818zmNnyXN5EobkuGtGhB" as AutomergeUrl
@@ -104,5 +104,12 @@ describe("review", () => {
 			["chart.png"],
 			["notes.ipynb"],
 		])
+	})
+})
+
+describe("covered", () => {
+	it("is an open folder's members beneath it, and the whole project with the root open", () => {
+		expect(covered([FIGURES, CONFIG], members, ROOT)).toEqual({whole: false, docs: [FIGURES, CHART, CONFIG]})
+		expect(covered([CONFIG, ROOT], members, ROOT).whole).toBe(true)
 	})
 })

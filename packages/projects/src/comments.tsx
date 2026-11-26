@@ -3,7 +3,7 @@ import {accept, subscribe, type SubscribeEvent} from "@inkandswitch/patchwork-pr
 import {createEffect, createMemo, createSignal, onCleanup, Show, type Accessor, type JSX} from "solid-js"
 import type {ProjectRoute} from "./navigation.ts"
 import {Provider} from "./provider.tsx"
-import type {PanelScope, SidePanels} from "./side-panels.ts"
+import type {SidePanels} from "./side-panels.ts"
 
 /** The comments sidebar's component (packages/comments). */
 const SIDEBAR = "gaios-comments"
@@ -11,9 +11,11 @@ const SIDEBAR = "gaios-comments"
 /*
  * The frame and the comments sidebar talk with plain data:
  *
- *   - `comments:context` → the project, the documents open in it, the
- *     drafts' names and which threads to list (the side column's scope),
- *     pushed on every change (see packages/comments/context.ts)
+ *   - `comments:context` → the project, the documents visible in it (a
+ *     folder's being everything beneath it) and those shown in views, the
+ *     drafts' names and which threads to list: all of them while the whole
+ *     project is visible, else those on what's visible; pushed on every
+ *     change (see packages/comments/context.ts)
  *   - `comments:create { refs }` → from any tool: start a thread about
  *     `refs` in the project's root document, where every thread is kept,
  *     with a draft comment by whoever's signed in, and show it in the
@@ -27,11 +29,14 @@ type Context = {
 	projectId: string
 	projectName: string
 	root: "folder" | "document"
+	/** what's visible, a folder as everything beneath it */
 	openDocs: AutomergeUrl[]
+	/** the documents shown in views */
+	viewed: AutomergeUrl[]
 	ours: string | null
 	theirs: string | null
-	/** the threads to list: on the open documents, or all of them */
-	scope: PanelScope
+	/** the threads to list: on what's visible, or all of them */
+	scope: "open" | "all"
 	/** the thread a tool last asked to show, with a count so asking again is told apart */
 	active: {threadUrl: AutomergeUrl; count: number} | null
 }
@@ -61,12 +66,15 @@ export function CommentsScope(props: {
 	ours: string | undefined
 	theirs: string | undefined
 	panels: SidePanels
-	/** the history, told which documents are open */
-	history(openDocs: Accessor<AutomergeUrl[]>): JSX.Element
+	/** what's visible, a folder as everything beneath it; `whole` when that's the project */
+	visible: {whole: boolean; docs: AutomergeUrl[]}
+	/** what the history covers, when that's less than the project */
+	covering: string | undefined
+	history: JSX.Element
 	children: JSX.Element
 }) {
 	const [scope, setScope] = createSignal<HTMLElement>()
-	const openDocs = useOpenDocs(scope)
+	const viewed = useViewedDocs(scope)
 	const [active, setActive] = createSignal<Context["active"]>(null)
 	let shown = 0
 	const showThread = (threadUrl: AutomergeUrl | undefined) => {
@@ -112,10 +120,11 @@ export function CommentsScope(props: {
 		projectId: props.route.location.projectId,
 		projectName: props.route.resolved.projectName,
 		root: props.route.resolved.root === "folder" ? "folder" : "document",
-		openDocs: openDocs(),
+		openDocs: props.visible.docs,
+		viewed: viewed(),
 		ours: props.ours ?? null,
 		theirs: props.theirs ?? null,
-		scope: props.panels.scope(),
+		scope: props.visible.whole ? "all" : "open",
 		active: active(),
 	}))
 
@@ -168,8 +177,13 @@ export function CommentsScope(props: {
 						hidden={!props.panels.history() && !props.panels.comments()}>
 						<Show when={props.panels.history()}>
 							<section class="projects__side-section projects__side-section--history" aria-label="History">
-								<h2 class="projects__side-title">History</h2>
-								{props.history(openDocs)}
+								<h2 class="projects__side-title">
+									History
+									<Show when={props.covering}>
+										{covering => <span class="projects__side-covering"> · {covering()}</span>}
+									</Show>
+								</h2>
+								{props.history}
 							</section>
 						</Show>
 						{/* kept mounted while hidden, so it's ready when shown */}
@@ -188,11 +202,11 @@ export function CommentsScope(props: {
 }
 
 /**
- * The documents open in the dock (or the root shown on its own): the
- * outermost documents mounted in `.projects__main`, in the order they
+ * The documents shown in views in the dock (or the root shown on its own):
+ * the outermost documents mounted in `.projects__main`, in the order they
  * opened. What they embed, and the tree and the sidebar, don't count.
  */
-function useOpenDocs(scope: Accessor<HTMLElement | undefined>): Accessor<AutomergeUrl[]> {
+function useViewedDocs(scope: Accessor<HTMLElement | undefined>): Accessor<AutomergeUrl[]> {
 	const [docs, setDocs] = createSignal<AutomergeUrl[]>([])
 	createEffect(() => {
 		const element = scope()
