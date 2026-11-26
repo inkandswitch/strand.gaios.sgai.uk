@@ -9,11 +9,10 @@ import {useOverlayState} from "./overlay-state.ts"
 import {versionKey} from "./types.ts"
 
 /**
- * A folder as the root: its tree on the left and its documents tiled beside
- * it. Folders only live in the tree, which opens and closes them; the dock
- * only ever holds documents. What's open comes from the frame around it (see
- * `workspace.ts`); which overlay, and what it's compared with, from the
- * providers it's inside.
+ * A folder as the root: its tree on the left and what's open in it tiled
+ * beside it, documents and folders alike. What's open comes from the frame
+ * around it (see `workspace.ts`); which overlay, and what it's compared
+ * with, from the providers it's inside.
  */
 export function renderFolderTool(handle: DocHandle<unknown>, element: ToolElement) {
 	injectStyles()
@@ -44,6 +43,7 @@ function FolderWorkspace(props: {element: ToolElement; rootUrl: AutomergeUrl}) {
 								route={workspace.route()!}
 								repo={props.element.repo}
 								overlayKey={versionKey(state.overlays()!)}
+								overlays={state.overlays()!}
 								comparing={state.comparing()}
 								focus={workspace.focus}
 								host={props.element}

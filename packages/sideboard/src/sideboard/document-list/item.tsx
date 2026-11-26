@@ -54,7 +54,7 @@ export default function Item(props: {
   /** compared with another version, and the same in both */
   unchanged?: boolean;
   children: JSX.Element;
-  /** unset for folders: pressing a folder's row expands it instead */
+  /** opens it, a folder too; a folder without it expands instead */
   openWith?(toolId?: string, placement?: Placement): void;
   /** where it sits in the project, for opening it where it's dropped */
   location?: string;
@@ -129,10 +129,11 @@ export default function Item(props: {
   const cancelLongPress = () => clearTimeout(longPress);
   onCleanup(cancelLongPress);
 
+  // A folder's row opens it, like any row; its arrow unfolds it.
   function open() {
     clearDragstack();
-    if (isFolder()) props.onToggleExpand?.();
-    else props.openWith?.();
+    if (props.openWith) props.openWith();
+    else if (isFolder()) props.onToggleExpand?.();
   }
 
   return (

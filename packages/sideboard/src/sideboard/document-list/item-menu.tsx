@@ -149,7 +149,8 @@ function MenuItems(props: {
           </>
         )}
       </Show>
-      <Show when={t.openWith && tools.length}>
+      {/* a folder opens as a folder, whatever tools take its type */}
+      <Show when={t.openWith && t.type !== "folder" && tools.length}>
         <SubMenu label="Open with...">
           <For each={tools}>
             {(tool) => (

@@ -16,7 +16,6 @@ import {
 } from "./location.ts"
 import {
 	LocationError,
-	endsInFolder,
 	findProject,
 	projectRoot,
 	relocate,
@@ -147,8 +146,9 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	const selectedView = createMemo<SelectedView | undefined>(
 		() => {
 			const current = project()
-			const url = current?.resolved.docUrl
-			return url ? {url, toolId: current.location.toolId ?? null} : undefined
+			return current
+				? {url: current.resolved.docUrl, toolId: current.location.toolId ?? null}
+				: undefined
 		},
 		undefined,
 		{equals: (a, b) => a?.url === b?.url && a?.toolId === b?.toolId}
@@ -228,8 +228,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		const current = project()
 		if (!current) return
 		if (!panel) {
-			if (current.resolved.docUrl)
-				show(projectRoot(current.resolved), atRoot(current.location), "replace")
+			show(projectRoot(current.resolved), atRoot(current.location), "replace")
 			return
 		}
 		if (panel.resolved.projectUrl !== current.resolved.projectUrl) return
@@ -285,8 +284,8 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		else reject(new LocationError("not-a-project"), "replace")
 	}
 
-	// Folders only expand in the tree, they never open. Asking to open one does
-	// nothing; a hash naming one shows its project with nothing open.
+	// Anything in the project opens, folders and the project itself included:
+	// a folder is shown like any other document (see `folder-panel.tsx`).
 	async function go(
 		location: Location,
 		mode: HistoryMode,
@@ -312,13 +311,9 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 				if (mine !== attempt) return
 			}
 			const resolved = await resolveLocation(location, scoped.find)
-			const folder = await endsInFolder(resolved, scoped.find)
 			if (mine !== attempt) return
 			const now = versionOf(scoped)
-			const shown = {...location, overlay: now.overlay ?? undefined, at: now.at ?? undefined}
-			if (!folder) show(resolved, shown, mode, placement)
-			else if (mode === "replace") show(projectRoot(resolved), atRoot(shown), mode)
-			else if (left?.resolved.projectUrl !== projectUrl) restore(left)
+			show(resolved, {...location, overlay: now.overlay ?? undefined, at: now.at ?? undefined}, mode, placement)
 		} catch (error) {
 			if (mine !== attempt) return
 			if (mode === "push") restore(left)
@@ -379,8 +374,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	}
 
 	// Someone picked another version, or the one checked out went away: show
-	// the same thing in it, or the project with nothing open if it isn't
-	// there.
+	// the same thing in it, or the project itself if it isn't there.
 	function onOverlaySelected(scoped: Attached, checkedOut: Version) {
 		if (scoped.checkedOut && sameVersion(scoped.checkedOut, checkedOut)) return
 		scoped.checkedOut = checkedOut
@@ -434,8 +428,8 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	// Entries get renamed while they're open (sideboard names a document's
 	// entry after its title), so watch the folders on the way to the open
 	// document and keep the hash naming things as they're named now. One
-	// that's gone (removed, or not in this overlay) leaves the project open
-	// with nothing in it.
+	// that's gone (removed, or not in this overlay) leaves the project itself
+	// open.
 	function followRenames() {
 		createEffect(() => {
 			const current = project()

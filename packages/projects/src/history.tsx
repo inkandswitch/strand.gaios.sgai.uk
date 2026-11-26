@@ -133,7 +133,7 @@ export function ago(time: number, now: number): string {
 }
 
 /** How long ago `time` was, as short as it goes: "5m", "2h", "3d". */
-function short(time: number, now: number): string {
+export function short(time: number, now: number): string {
 	const minutes = Math.floor(Math.max(0, now - time) / 60)
 	if (minutes < 1) return "now"
 	if (minutes < 60) return `${minutes}m`

@@ -715,3 +715,8 @@ button {
   width: 100%;
   height: 100%;
 }
+
+/* the folder the list is of, heading it */
+.document-list .document-list-item--root {
+  font-weight: 600;
+}

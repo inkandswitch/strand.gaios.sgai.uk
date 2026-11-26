@@ -78,7 +78,9 @@ export function ProjectView(props: {
 	createEffect(() => workspaceCompare.setVersions(state.versions()))
 
 	createEffect(() => {
-		const shown = folder() ? [title(), name()] : [name()]
+		// the project itself open is named once
+		const inside = folder() && docUrl() !== props.route.resolved.projectUrl
+		const shown = inside ? [title(), name()] : [name()]
 		document.title = [...shown, props.siteTitle].filter(Boolean).join(" | ")
 	})
 

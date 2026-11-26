@@ -13,6 +13,7 @@ import type {
 import {createDockview, themeLight} from "dockview-core/dist/dockview-core.js"
 import {
 	createEffect,
+	createMemo,
 	createSignal,
 	on,
 	onCleanup,
@@ -23,7 +24,9 @@ import {
 } from "solid-js"
 import {render} from "solid-js/web"
 import {useCompareModes, type WorkspaceCompare} from "./compare.ts"
-import {useDocTitle} from "./hooks.ts"
+import {FolderPanel} from "./folder-panel.tsx"
+import {isFolder} from "./folders.ts"
+import {useDoc, useDocTitle, useHandle} from "./hooks.ts"
 import type {Placement, ProjectRoute, Side} from "./navigation.ts"
 import {OpenWith} from "./open-with.tsx"
 import {
@@ -36,6 +39,7 @@ import {
 	type PanelState,
 } from "./panel.tsx"
 import {projectRoot, relocate, type FindDoc} from "./resolve.ts"
+import type {OverlaysState} from "./types.ts"
 
 const EMPTY = "Open something from the project, or make something new."
 
@@ -59,11 +63,15 @@ type Panel = PanelState & {
 	/** the tool its document's view mounted, the route's or the fallback */
 	tool: Accessor<string | undefined>
 	setTool: Setter<string | undefined>
+	/** whether what it shows is a folder, once that's known */
+	folder: Accessor<boolean | undefined>
+	setFolder: Setter<boolean | undefined>
 }
 
 /**
- * The project's documents, tiled. Each panel shows a place in the project;
- * an open goes where its route's placement says, or into the focused panel.
+ * The project's documents and folders, tiled. Each panel shows a place in
+ * the project; an open goes where its route's placement says, or into the
+ * focused panel.
  * The focused panel is the route: focusing another one, or closing the last,
  * is reported back through `focus`. Nothing about the layout is kept.
  */
@@ -71,6 +79,7 @@ export function Dock(props: {
 	route: ProjectRoute
 	repo: Repo
 	overlayKey: string
+	overlays: OverlaysState
 	comparing: Comparing | undefined
 	focus(panel: ProjectRoute | undefined): void
 	/** where the dock's groups are offered, for opening into one */
@@ -85,7 +94,8 @@ export function Dock(props: {
 		modes: useCompareModes(),
 		workspace: props.workspace,
 		comparing: () => props.comparing,
-		panels: panelList,
+		// a folder's panel has no mode of its own
+		panels: () => panelList().filter(panel => panel.folder() === false),
 	})
 	let element!: HTMLDivElement
 	let api: DockviewApi | undefined
@@ -146,7 +156,7 @@ export function Dock(props: {
 			panels.get(target.id)?.setRoute(route)
 			target.api.setActive()
 		} else if (!active) {
-			if (route.resolved.docUrl) add(route)
+			add(route)
 		} else if (placement && "to" in placement) {
 			add(route, positionFor(api, placement, active.group.id))
 		} else {
@@ -225,12 +235,15 @@ export function Dock(props: {
 		const id = `panel-${++count}`
 		const [shown, setShown] = createSignal(route)
 		const [tool, setTool] = createSignal<string>()
+		const [folder, setFolder] = createSignal<boolean>()
 		panels.set(id, {
 			...createPanelState(),
 			route: shown,
 			setRoute: setShown,
 			tool,
 			setTool,
+			folder,
+			setFolder,
 		})
 		setPanelList([...panels.values()])
 		api?.addPanel({id, component: "document", title: "", position})
@@ -243,7 +256,7 @@ export function Dock(props: {
 		const focused = api?.activePanel?.id
 		for (const [id, panel] of panels) {
 			const route = panel.route()
-			if (id === focused || !route.resolved.docUrl) continue
+			if (id === focused) continue
 			void relocate(route.resolved, find).then(next => {
 				if (panels.get(id) !== panel || panel.route() !== route) return
 				panel.setRoute(
@@ -276,7 +289,11 @@ export function Dock(props: {
 							}}
 							setTool={panel.setTool}
 							tool={panel.tool}
+							setFolder={panel.setFolder}
 							compare={modes.compareOf(panel)}
+							host={props.host}
+							overlays={() => props.overlays}
+							open={url => openFrom(panelApi.id, url)}
 						/>
 					),
 					element
@@ -287,7 +304,7 @@ export function Dock(props: {
 	}
 
 	// The compare and open-with menus in each group's tab bar, for the tab
-	// it's showing.
+	// it's showing, if it's a document.
 	function groupActions(): IHeaderActionsRenderer {
 		const element = document.createElement("div")
 		element.className = "projects__group-actions"
@@ -306,7 +323,7 @@ export function Dock(props: {
 						return id === undefined ? undefined : panels.get(id)
 					}
 					return (
-						<Show when={panel()}>
+						<Show when={panel()?.folder() === false && panel()}>
 							{panel => (
 								<>
 									<PanelCompareControls
@@ -315,16 +332,12 @@ export function Dock(props: {
 										comparing={!!props.comparing}
 										versions={props.workspace.versions()}
 									/>
-									<Show when={panel().route().resolved.docUrl}>
-										{url => (
-											<OpenWith
-												docUrl={url()}
-												repo={props.repo}
-												toolId={panel().tool()}
-												pick={toolId => openWith(active(), url(), toolId)}
-											/>
-										)}
-									</Show>
+									<OpenWith
+										docUrl={panel().route().resolved.docUrl}
+										repo={props.repo}
+										toolId={panel().tool()}
+										pick={toolId => openWith(active(), panel().route().resolved.docUrl, toolId)}
+									/>
 								</>
 							)}
 						</Show>
@@ -333,6 +346,16 @@ export function Dock(props: {
 			},
 			dispose: () => dispose?.(),
 		}
+	}
+
+	// A row of a folder panel opens in the pane beside it, so the folder
+	// stays in view, or as a tab in its own group when it's alone.
+	function openFrom(panelId: string, url: AutomergeUrl) {
+		const panel = api?.getPanel(panelId)
+		if (!api || !panel) return
+		const own = panel.group
+		const beside = nearest(own, api.groups.filter(group => group !== own))
+		open(url, beside ? {group: beside.id} : {to: "tab", group: own.id})
 	}
 
 	// "Open with" reopens the open document under another tool, and it's the
@@ -351,6 +374,10 @@ export function Dock(props: {
 	}
 }
 
+/**
+ * What a panel shows: a folder's entries, or a document, compared while
+ * two versions are.
+ */
 function DockPanel(props: {
 	route: Accessor<ProjectRoute>
 	repo: Repo
@@ -358,30 +385,75 @@ function DockPanel(props: {
 	setTitle(title: string): void
 	setTool(toolId: string | undefined): void
 	tool: Accessor<string | undefined>
+	setFolder(folder: boolean | undefined): void
 	compare: PanelCompare
+	host: HTMLElement | undefined
+	overlays: Accessor<OverlaysState>
+	open(url: AutomergeUrl): void
 }) {
 	const docUrl = () => props.route().resolved.docUrl
+	const doc = useDoc(useHandle<unknown>(props.repo, docUrl))
+	const folder = createMemo(() => {
+		const current = doc()
+		return current === undefined ? undefined : isFolder(current)
+	})
+	createEffect(() => props.setFolder(folder()))
 	const title = useDocTitle(props.repo, docUrl)
-	createEffect(() => props.setTitle(docUrl() ? (title() ?? "") : "Nothing open"))
+	// A folder is named as it's named in the project until its title loads.
+	const named = () => props.route().resolved.trail.at(-1)?.segment ?? props.route().resolved.projectName
+	createEffect(() => props.setTitle(title() ?? (folder() ? named() : "")))
 	return (
-		<Show when={docUrl()} fallback={<p class="projects__empty">{EMPTY}</p>}>
-			{url => (
-				// Most tools keep showing what they first read when their handle
-				// moves onto another overlay's copy, so each overlay gets views of
-				// its own.
-				<Show when={props.overlayKey()} keyed>
-					{_overlay => (
-						<Compared
-							url={url()}
-							toolId={props.route().location.toolId}
-							tool={props.tool}
-							setTool={props.setTool}
-							compare={props.compare}
-						/>
-					)}
+		// Most tools keep showing what they first read when their handle moves
+		// onto another overlay's copy, so each overlay gets views of its own.
+		<Show when={props.overlayKey()} keyed>
+			{_overlay => (
+				<Show when={folder() !== undefined}>
+					<Show
+						when={folder() && props.host}
+						fallback={
+							<Compared
+								url={docUrl()}
+								toolId={props.route().location.toolId}
+								tool={props.tool}
+								setTool={props.setTool}
+								compare={props.compare}
+							/>
+						}>
+						{host => (
+							<FolderPanel
+								url={withoutHeads(docUrl())}
+								route={props.route()}
+								repo={props.repo}
+								host={host()}
+								overlays={props.overlays()}
+								open={props.open}
+							/>
+						)}
+					</Show>
 				</Show>
 			)}
 		</Show>
+	)
+}
+
+function withoutHeads(url: AutomergeUrl): AutomergeUrl {
+	return url.split("#")[0] as AutomergeUrl
+}
+
+// The group whose middle is nearest `group`'s.
+function nearest(group: DockviewGroupPanel, others: DockviewGroupPanel[]) {
+	const middle = (each: DockviewGroupPanel) => {
+		const box = each.element.getBoundingClientRect()
+		return {x: box.left + box.width / 2, y: box.top + box.height / 2}
+	}
+	const from = middle(group)
+	const distance = (each: DockviewGroupPanel) => {
+		const to = middle(each)
+		return Math.hypot(to.x - from.x, to.y - from.y)
+	}
+	return others.reduce<DockviewGroupPanel | undefined>(
+		(best, each) => (!best || distance(each) < distance(best) ? each : best),
+		undefined
 	)
 }
 

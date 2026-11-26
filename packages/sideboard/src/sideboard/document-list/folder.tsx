@@ -189,6 +189,10 @@ export default function Folder(props: {
         rootFolderHandle={props.rootFolderHandle}
         parentFolderHandle={props.parentFolderHandle}
         itemIndex={props.itemIndex}
+        location={props.location}
+        openWith={(toolId, placement) =>
+          props.open({ url: props.location as AutomergeUrl, toolId, placement })
+        }
         isExpanded={expanded()}
         onToggleExpand={() => setExpanded((yn) => !yn)}
         expand={() => setExpanded(true)}

@@ -25,10 +25,10 @@ export type Resolved = {
 	/** the root's datatype */
 	rootType: string
 	/**
-	 * What's open: in a folder, undefined until something is; a document on
-	 * its own is itself
+	 * What's open: a document or a folder in the project, or the project
+	 * itself when nothing else is; a document on its own is itself
 	 */
-	docUrl?: AutomergeUrl
+	docUrl: AutomergeUrl
 	/** one step per segment: the folder searched and the entry found in it */
 	trail: Step[]
 }
@@ -93,30 +93,20 @@ export async function resolveLocation(
 		folder = await findFolder(link.url, find, "not-found")
 		folderUrl = link.url
 	}
-	const last = trail.at(-1)?.url
+	const last = trail.at(-1)?.url ?? projectUrl
 	return {
 		projectUrl,
 		projectName: rootTitle(project),
 		root,
 		rootType,
-		docUrl: last && withHeads(last, location.heads),
+		docUrl: withHeads(last, location.heads),
 		trail,
 	}
 }
 
-/** Whether the document a location names is itself a folder. */
-export async function endsInFolder(
-	resolved: Resolved,
-	find: FindDoc
-): Promise<boolean> {
-	const last = resolved.trail.at(-1)
-	return last ? isFolder(await find(last.url)) : false
-}
-
-/** The same project, with nothing open: a document on its own stays open. */
+/** The project itself open: a folder's listing, or a document on its own. */
 export function projectRoot(resolved: Resolved): Resolved {
-	const docUrl = resolved.root === "document" ? resolved.projectUrl : undefined
-	return {...resolved, docUrl, trail: []}
+	return {...resolved, docUrl: resolved.projectUrl, trail: []}
 }
 
 /**
