@@ -56,7 +56,9 @@ its own CodeMirror extensions to the editor. Just before the editor is
 created, the file tool dispatches a bubbling `file:codemirror-extensions`
 event from inside the patchwork-view; push extensions onto
 `event.detail.extensions`. It also carries `handle`, `doc`, and `readOnly`
-(true for the read-only viewer used for ImmutableString and very long files):
+(true when the text can't be typed into: an ImmutableString, text kept as
+bytes, or a read-only handle such as a point in history). The editor is
+rebuilt, and the event sent again, when that changes:
 
 ```js
 host.addEventListener("file:codemirror-extensions", (event) => {
@@ -74,11 +76,10 @@ file/
 ├── src/
 │   ├── components/        # Solid.js components
 │   │   ├── FileEditor.tsx       # Main editor component
-│   │   ├── TextFileEditor.tsx   # Text editing
+│   │   ├── TextFileEditor.tsx   # Text, editable or read-only
 │   │   ├── ImageFileViewer.tsx  # Image display
 │   │   ├── PDFFileViewer.tsx    # PDF display
-│   │   ├── HTMLFileViewer.tsx   # HTML preview
-│   │   └── ReadOnlyTextViewer.tsx # Read-only text viewer
+│   │   └── HTMLFileViewer.tsx   # HTML preview
 │   ├── datatype.ts        # File datatype definition
 │   ├── tool.tsx           # Plugin tool implementation
 │   ├── types.ts           # TypeScript type definitions
@@ -107,7 +108,8 @@ file/
 - HTML files (rendered in iframe)
 
 ### Special Handling
-- Large text files (>100KB) are displayed in read-only mode for performance
+- ImmutableString text, text kept as bytes, and files read through a
+  read-only handle (a point in history) are shown read-only
 - Binary files are detected automatically using content analysis
 
 ## Plugin Definition

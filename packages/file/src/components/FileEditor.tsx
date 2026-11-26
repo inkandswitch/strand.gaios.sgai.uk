@@ -4,7 +4,7 @@ import {
 	createDocumentProjection,
 } from "solid-automerge"
 import type {FileDoc} from "../types"
-import {isImmutableStringFileDoc, isTextBytesFileDoc} from "../datatype"
+import {isTextBytesFileDoc} from "../datatype"
 import {isImageFile} from "../utils"
 import {HTMLFileViewer, isHTMLFile} from "./HTMLFileViewer"
 import {ImageFileViewer} from "./ImageFileViewer"
@@ -12,7 +12,6 @@ import {PDFFileViewer, isPDFFile} from "./PDFFileViewer"
 import {AudioFileViewer, isAudioFile} from "./AudioFileViewer"
 import {VideoFileViewer, isVideoFile} from "./VideoFileViewer"
 import {TextFileEditor, isTextFile} from "./TextFileEditor"
-import {ReadOnlyTextViewer} from "./ReadOnlyTextViewer"
 import {DocHandle} from "@automerge/automerge-repo/slim"
 import {UnixFileEntry} from "@inkandswitch/patchwork-filesystem"
 import {PatchworkViewElement} from "@inkandswitch/patchwork-elements"
@@ -61,31 +60,12 @@ export function FileEditor(props: {
 				<Match when={isVideoFile(doc()!)}>
 					<VideoFileViewer doc={doc()!} />
 				</Match>
-				{/* Text is editable unless it's an ImmutableString or we were handed
-				    a read-only handle (e.g. a view of the file at some heads). */}
-				<Match
-					when={
-						isTextFile(doc()!) &&
-						!isImmutableStringFileDoc(doc()!) &&
-						!props.handle.isReadOnly()
-					}>
+				{/* Text, editable or not: the editor tells from the handle and the
+				    content (see TextFileEditor). */}
+				<Match when={isTextFile(doc()!) || isTextBytesFileDoc(doc()!)}>
 					<TextFileEditor
 						doc={doc()!}
 						handle={props.handle}
-						element={props.element}
-					/>
-				</Match>
-				<Match when={isTextFile(doc()!)}>
-					<ReadOnlyTextViewer
-						doc={doc()!}
-						handle={props.handle as any}
-						element={props.element}
-					/>
-				</Match>
-				<Match when={isTextBytesFileDoc(doc()!)}>
-					<ReadOnlyTextViewer
-						doc={doc()!}
-						handle={props.handle as any}
 						element={props.element}
 					/>
 				</Match>
