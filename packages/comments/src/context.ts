@@ -25,8 +25,8 @@ export type CommentsContext = {
   /** the draft it's compared with, while comparing */
   theirs: string | null;
   /**
-   * which threads to list, when the frame decides: on the open documents,
-   * or all of them; it then titles the sidebar too
+   * which threads to list, when the frame decides: on what's visible
+   * (`openDocs`), or all of them; it then titles the sidebar too
    */
   scope?: "open" | "all";
   /** the thread a tool last asked to show (counted, so asking again is new) */

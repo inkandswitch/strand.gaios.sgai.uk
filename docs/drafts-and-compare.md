@@ -183,6 +183,7 @@ type Member = {
   url: AutomergeUrl               // the same in every overlay
   heads: UrlHeads                 // the version this overlay reads
   parent: AutomergeUrl | null     // the member it was reached from; null for the root
+  changed?: true                  // a draft's: it changed this since it was forked
 }
 ```
 
@@ -203,6 +204,12 @@ type Member = {
   listed, and its document is left behind.
 - `overlay:members` answers for any overlay, not only the checked-out one, and
   pushes again when the members or any heads change.
+- A draft's members are marked `changed` where the draft has changed them
+  since it was forked: the clone it records reads other heads than its
+  `clonedAt`, or there's no record at all, since the fork recorded every
+  member there was and so only the draft can have added it. Being cloned
+  without being edited (a descriptor asked for, say) isn't a change. Main's
+  and a merge's members are never marked.
 - `repo:handle-descriptor` with an `overlay` says where that overlay's version
   of `url` lives, whatever is checked out. Without one it answers for the
   checked-out overlay, as before. This is the one place where leaving an
@@ -260,9 +267,12 @@ time, and good enough for looking back. Nothing is cloned or written.
   heads, so it opens read-only.
 - The provider starts on the `at` attribute's point, beside `overlay`'s.
 
-The History panel sits to the left of everything below the card's header: a
-rail of dots, unfolding into the entries, each titled with how long ago it
-was. The newest burst is the working copy until ten minutes pass without a
+The History panel sits in the column beside the card, with the comments: a
+rail of dots, unfolding into the entries, each titled with the documents it
+changed and how long ago it was. Both cover what's visible (see Navigation):
+History lists only the entries that changed something visible, and is headed
+with what that is when it's less than the whole project ("History ·
+figures"). The newest burst is the working copy until ten minutes pass without a
 change. Clicking an entry checks it out at that point; shift-clicking
 another compares the two, the later checked out (B) and the earlier compared
 with (A), shown from A to B like a merge from before to after. While two
@@ -607,6 +617,19 @@ Nothing answers "what changed". Whoever wants to know subscribes to
   versions'. A member with open conflicts, and every folder above it, is
   marked as having them. The sidebar says whether it's a preview or a pull
   request.
+- A folder open in a tab while comparing reviews it the same way: every
+  document beneath it, at any depth, whose heads differ or that only one
+  version has, in the tree's order, each drawn by its own compare view.
+  Folders themselves aren't listed.
+
+Not comparing, the sidebar and a folder's listing mark a different fact, in
+the same dots, without quietening what's unmarked:
+
+| Checked out | Marked, with every folder above |
+|---|---|
+| a point in history (`at`) | the members its `HistoryEntry` changed |
+| a draft's working copy | its members marked `changed` |
+| main's working copy | nothing |
 
 ## Compare modes
 
@@ -633,6 +656,24 @@ comparison.
 
 `workspace:route` and `workspace:focus` are renamed `navigation:route` and
 `navigation:focus`.
+
+Everything in a project opens in a tab, folders included: a location
+ending in a folder shows that folder, and a project with nothing else open
+shows itself, so the card is never empty while a project is open. The tree
+has the project as its top row; clicking a folder's row opens it, and its
+arrow unfolds it.
+
+A folder's tab lists its own entries, folders first, in the folder's order,
+with when each was last edited (the newest history entry that changed it,
+or anything beneath it, as of the point checked out). A row opens in the
+pane beside, if there is one, or in a tab of its own. While comparing, the
+tab is a review instead (see What differs between two versions).
+
+The root's tool reports what each group of tabs is showing, the tab in
+front only, with `navigation:showing { urls }`. The History panel and the
+comments cover what's visible: what's shown, each folder as every member
+beneath it. With the project itself shown, that's everything. There is no
+switch for it.
 
 ## What a view does
 
@@ -703,5 +744,7 @@ copy when absent).
 | Finding conflicts, how each went | `packages/drafts/src/conflicts.ts` |
 | Text conflicts | `packages/file/src/conflicts.ts` |
 | The header, panels, links | `packages/projects/src/` |
-| Comparing members, for the sidebar | `packages/sideboard/src/sideboard/document-list/changes.ts` |
+| A folder's tab: its listing and its review | `packages/projects/src/folder-panel.tsx`, `members.ts` |
+| What the side column covers | `packages/projects/src/members.ts` (`covered`), `comments.tsx` |
+| Comparing members, and marks outside comparing, for the sidebar | `packages/sideboard/src/sideboard/document-list/changes.ts` |
 | Text and image views | `packages/file/src/components/draft-diff.ts`, `ImageFileViewer.tsx` |
