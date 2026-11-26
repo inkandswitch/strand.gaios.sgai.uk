@@ -38,6 +38,8 @@ export type Step = {
 	url: AutomergeUrl
 	/** the canonical segment for the entry, as it's named right now */
 	segment: string
+	/** the entry's datatype, as its folder lists it */
+	type: string
 }
 
 export type Rejection = "not-a-project" | "not-found" | "unavailable"
@@ -88,7 +90,7 @@ export async function resolveLocation(
 		const links = folderLinks(folder)
 		const link = findLink(links, segment)
 		if (!link) throw new LocationError("not-found")
-		trail.push({folderUrl, url: link.url, segment: segmentFor(link, links)})
+		trail.push({folderUrl, url: link.url, segment: segmentFor(link, links), type: link.type})
 		if (index === location.segments.length - 1) break
 		folder = await findFolder(link.url, find, "not-found")
 		folderUrl = link.url
@@ -102,6 +104,12 @@ export async function resolveLocation(
 		docUrl: withHeads(last, location.heads),
 		trail,
 	}
+}
+
+/** Whether what's open is a folder: the project, if it is one, or an entry listed as one. */
+export function showsFolder(resolved: Resolved): boolean {
+	const last = resolved.trail.at(-1)
+	return last ? last.type === "folder" : resolved.root === "folder"
 }
 
 /** The project itself open: a folder's listing, or a document on its own. */
@@ -123,7 +131,7 @@ export async function relocate(
 		const links = folderLinks(await find(step.folderUrl))
 		const link = links.find(link => link.url === step.url)
 		if (!link) return undefined
-		trail.push({...step, segment: segmentFor(link, links)})
+		trail.push({...step, segment: segmentFor(link, links), type: link.type})
 	}
 	return {...resolved, projectName: rootTitle(project), trail}
 }

@@ -25,8 +25,7 @@ import {
 import {render} from "solid-js/web"
 import {useCompareModes, type Versions, type WorkspaceCompare} from "./compare.ts"
 import {FolderPanel} from "./folder-panel.tsx"
-import {isFolder} from "./folders.ts"
-import {useDoc, useDocTitle, useHandle} from "./hooks.ts"
+import {useDocTitle} from "./hooks.ts"
 import type {Placement, ProjectRoute, Side} from "./navigation.ts"
 import {OpenWith} from "./open-with.tsx"
 import {
@@ -39,7 +38,7 @@ import {
 	type PanelModes,
 	type PanelState,
 } from "./panel.tsx"
-import {projectRoot, relocate, type FindDoc} from "./resolve.ts"
+import {projectRoot, relocate, showsFolder, type FindDoc} from "./resolve.ts"
 import type {OverlaysState} from "./types.ts"
 
 const EMPTY = "Open something from the project, or make something new."
@@ -64,9 +63,8 @@ type Panel = PanelState & {
 	/** the tool its document's view mounted, the route's or the fallback */
 	tool: Accessor<string | undefined>
 	setTool: Setter<string | undefined>
-	/** whether what it shows is a folder, once that's known */
-	folder: Accessor<boolean | undefined>
-	setFolder: Setter<boolean | undefined>
+	/** whether what it shows is a folder */
+	folder: Accessor<boolean>
 	/** a folder's documents under review, each compared like a panel */
 	sections: Accessor<PanelState[]>
 	setSections: Setter<PanelState[]>
@@ -104,7 +102,7 @@ export function Dock(props: {
 		// review each have theirs
 		panels: () =>
 			panelList().flatMap(panel =>
-				panel.folder() === false ? [panel] : panel.folder() ? panel.sections() : []
+				panel.folder() ? panel.sections() : [panel]
 			),
 	})
 	let element!: HTMLDivElement
@@ -263,7 +261,6 @@ export function Dock(props: {
 		const id = `panel-${++count}`
 		const [shown, setShown] = createSignal(route)
 		const [tool, setTool] = createSignal<string>()
-		const [folder, setFolder] = createSignal<boolean>()
 		const [sections, setSections] = createSignal<PanelState[]>([])
 		panels.set(id, {
 			...createPanelState(),
@@ -271,8 +268,7 @@ export function Dock(props: {
 			setRoute: setShown,
 			tool,
 			setTool,
-			folder,
-			setFolder,
+			folder: () => showsFolder(shown().resolved),
 			sections,
 			setSections,
 		})
@@ -320,7 +316,6 @@ export function Dock(props: {
 							}}
 							setTool={panel.setTool}
 							tool={panel.tool}
-							setFolder={panel.setFolder}
 							compare={modes.compareOf(panel)}
 							host={props.host}
 							overlays={() => props.overlays}
@@ -358,7 +353,7 @@ export function Dock(props: {
 						return id === undefined ? undefined : panels.get(id)
 					}
 					return (
-						<Show when={panel()?.folder() === false && panel()}>
+						<Show when={!panel()?.folder() && panel()}>
 							{panel => (
 								<>
 									<PanelCompareControls
@@ -426,7 +421,6 @@ function DockPanel(props: {
 	setTitle(title: string): void
 	setTool(toolId: string | undefined): void
 	tool: Accessor<string | undefined>
-	setFolder(folder: boolean | undefined): void
 	compare: PanelCompare
 	host: HTMLElement | undefined
 	overlays: Accessor<OverlaysState>
@@ -437,12 +431,7 @@ function DockPanel(props: {
 	setSections(sections: PanelState[]): void
 }) {
 	const docUrl = () => props.route().resolved.docUrl
-	const doc = useDoc(useHandle<unknown>(props.repo, docUrl))
-	const folder = createMemo(() => {
-		const current = doc()
-		return current === undefined ? undefined : isFolder(current)
-	})
-	createEffect(() => props.setFolder(folder()))
+	const folder = () => showsFolder(props.route().resolved)
 	const title = useDocTitle(props.repo, docUrl)
 	// A folder is named as it's named in the project until its title loads.
 	const named = () => props.route().resolved.trail.at(-1)?.segment ?? props.route().resolved.projectName
@@ -452,18 +441,18 @@ function DockPanel(props: {
 		// onto another overlay's copy, so each overlay gets views of its own.
 		<Show when={props.overlayKey()} keyed>
 			{_overlay => (
-				<Show when={folder() !== undefined}>
-					<Show
-						when={folder() && props.host}
-						fallback={
-							<Compared
-								url={docUrl()}
-								toolId={props.route().location.toolId}
-								tool={props.tool}
-								setTool={props.setTool}
-								compare={props.compare}
-							/>
-						}>
+				<Show
+					when={folder()}
+					fallback={
+						<Compared
+							url={docUrl()}
+							toolId={props.route().location.toolId}
+							tool={props.tool}
+							setTool={props.setTool}
+							compare={props.compare}
+						/>
+					}>
+					<Show when={props.host}>
 						{host => (
 							<FolderPanel
 								url={withoutHeads(docUrl())}

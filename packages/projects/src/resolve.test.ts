@@ -6,6 +6,7 @@ import {
 	projectRoot,
 	relocate,
 	resolveLocation,
+	showsFolder,
 } from "./resolve.ts"
 
 const PROJECT = "automerge:3regSr3818zmNnyXN5EobkuGtGhB" as AutomergeUrl
@@ -59,15 +60,15 @@ describe("resolveLocation", () => {
 	it("opens a folder inside the project like a document", async () => {
 		const resolved = await resolveLocation(at("Notes"), repo(docs))
 		expect(resolved.docUrl).toBe(NOTES)
-		expect(resolved.trail).toEqual([{folderUrl: PROJECT, url: NOTES, segment: "Notes"}])
+		expect(resolved.trail).toEqual([{folderUrl: PROJECT, url: NOTES, segment: "Notes", type: "folder"}])
 	})
 
 	it("follows names down to the document", async () => {
 		const resolved = await resolveLocation(at("Notes", "Roadmap"), repo(docs))
 		expect(resolved.docUrl).toBe(ROADMAP)
 		expect(resolved.trail).toEqual([
-			{folderUrl: PROJECT, url: NOTES, segment: "Notes"},
-			{folderUrl: NOTES, url: ROADMAP, segment: "Roadmap"},
+			{folderUrl: PROJECT, url: NOTES, segment: "Notes", type: "folder"},
+			{folderUrl: NOTES, url: ROADMAP, segment: "Roadmap", type: "md"},
 		])
 	})
 
@@ -144,6 +145,16 @@ describe("projectRoot", () => {
 	it("opens the project itself", async () => {
 		const folder = await resolveLocation(at("Notes"), repo(docs))
 		expect(projectRoot(folder)).toEqual(await resolveLocation(at(), repo(docs)))
+	})
+})
+
+describe("showsFolder", () => {
+	it("is true for a folder project, or a folder in one, and false for documents", async () => {
+		const find = repo(docs)
+		expect(showsFolder(await resolveLocation(at(), find))).toBe(true)
+		expect(showsFolder(await resolveLocation(at("Notes"), find))).toBe(true)
+		expect(showsFolder(await resolveLocation(at("Notes", "Roadmap"), find))).toBe(false)
+		expect(showsFolder(await resolveLocation({projectId: idOf(ROADMAP), segments: []}, find))).toBe(false)
 	})
 })
 
