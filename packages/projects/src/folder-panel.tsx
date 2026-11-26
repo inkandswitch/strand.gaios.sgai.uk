@@ -15,7 +15,15 @@ import {folderLinks, segmentFor, type Link} from "./folders.ts"
 import {useDoc, useHandle, useMembers} from "./hooks.ts"
 import {short, useHistory, useNow} from "./history.tsx"
 import {formatLocationUrl} from "./location.ts"
-import {documentOf, foldersToRead, lastEdited, review, type Section} from "./members.ts"
+import {
+	documentOf,
+	foldersToRead,
+	lastEdited,
+	quietMarks,
+	review,
+	type Marks,
+	type Section,
+} from "./members.ts"
 import type {ProjectRoute} from "./navigation.ts"
 import {
 	Compared,
@@ -81,7 +89,7 @@ function Listing(props: FolderPanelProps) {
 		const all = links()
 		return [...all.filter(link => link.type === "folder"), ...all.filter(link => link.type !== "folder")]
 	})
-	const edited = useLastEdited(() => props.host, () => props.overlays)
+	const {edited, marks} = useEdits(() => props.host, () => props.overlays)
 	const now = useNow()
 
 	// Where an entry is, one segment below this folder.
@@ -100,10 +108,15 @@ function Listing(props: FolderPanelProps) {
 				<span class="projects__listing-time" role="columnheader">
 					Last edited
 				</span>
+				<span class="projects__listing-mark" role="columnheader" />
 			</div>
 			<For each={entries()}>
 				{link => {
 					const time = () => edited().get(documentOf(link.url))
+					const mark = () => {
+						const current = marks()
+						return current?.ids.has(documentOf(link.url)) ? current.kind : undefined
+					}
 					return (
 						<button
 							type="button"
@@ -119,6 +132,16 @@ function Listing(props: FolderPanelProps) {
 							<span class="projects__listing-time" role="cell">
 								{time() === undefined ? "" : short(time()!, now())}
 							</span>
+							<span class="projects__listing-mark" role="cell">
+								<Show when={mark()}>
+									{kind => (
+										<span
+											class={`projects__listing-dot projects__listing-dot--${kind()}`}
+											title={kind() === "draft" ? "Changed in this draft" : "Changed in this version"}
+										/>
+									)}
+								</Show>
+							</span>
 						</button>
 					)
 				}}
@@ -129,17 +152,20 @@ function Listing(props: FolderPanelProps) {
 
 /**
  * When each member of the checked-out overlay was last edited, by document,
- * as of the point it's checked out at.
+ * as of the point it's checked out at; and what's marked as changed there.
  */
-function useLastEdited(
+function useEdits(
 	host: Accessor<HTMLElement>,
 	overlays: Accessor<OverlaysState>
-): Accessor<Map<string, number>> {
+): {edited: Accessor<Map<string, number>>; marks: Accessor<Marks>} {
 	const checkedOut = createMemo(() => overlays().checkedOut)
 	const at = createMemo(() => overlays().at)
 	const entries = useHistory(host, checkedOut)
 	const members = useMembers(host, () => ({overlay: checkedOut(), at: at()}))
-	return createMemo(() => lastEdited(entries() ?? [], members() ?? [], at()))
+	return {
+		edited: createMemo(() => lastEdited(entries() ?? [], members() ?? [], at())),
+		marks: createMemo(() => quietMarks(overlays(), entries() ?? [], members() ?? [])),
+	}
 }
 
 // lucide `folder`

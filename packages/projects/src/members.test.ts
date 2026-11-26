@@ -1,6 +1,6 @@
 import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
 import {describe, expect, it} from "vitest"
-import {covered, documentOf, foldersToRead, lastEdited, review} from "./members.ts"
+import {covered, documentOf, foldersToRead, lastEdited, quietMarks, review} from "./members.ts"
 import type {HistoryEntry, Member} from "./types.ts"
 
 const ROOT = "automerge:3regSr3818zmNnyXN5EobkuGtGhB" as AutomergeUrl
@@ -111,5 +111,22 @@ describe("covered", () => {
 	it("is an open folder's members beneath it, and the whole project with the root open", () => {
 		expect(covered([FIGURES, CONFIG], members, ROOT)).toEqual({whole: false, docs: [FIGURES, CHART, CONFIG]})
 		expect(covered([CONFIG, ROOT], members, ROOT).whole).toBe(true)
+	})
+})
+
+describe("quietMarks", () => {
+	const DRAFT = "automerge:2mT8bMBVJ7DwX3GxbmDsBF2DLVhE" as AutomergeUrl
+	const ids = (...urls: AutomergeUrl[]) => new Set(urls.map(documentOf))
+
+	it("marks what a picked version changed, and the folders above it", () => {
+		const state = {checkedOut: null, at: "b", drafts: []}
+		expect(quietMarks(state, entries, members)).toEqual({kind: "version", ids: ids(CHART, FIGURES, ROOT)})
+	})
+
+	it("marks what a draft has changed, and nothing on main's working copy", () => {
+		const changed = members.map(each => (each.url === CONFIG ? {...each, changed: true as const} : each))
+		const draft = {checkedOut: DRAFT, at: null, drafts: [{url: DRAFT, name: "Draft", parent: null}]}
+		expect(quietMarks(draft, entries, changed)).toEqual({kind: "draft", ids: ids(CONFIG, ROOT)})
+		expect(quietMarks({checkedOut: null, at: null, drafts: []}, entries, changed)).toBeUndefined()
 	})
 })

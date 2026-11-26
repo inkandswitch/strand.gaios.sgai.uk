@@ -1331,6 +1331,29 @@ button.projects__token:popover-open {
 	text-align: end;
 }
 
+/* a dot where it changed, as the tree marks it: in the draft's colour, or
+   for a point picked in the history */
+.projects__listing-mark {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 1rem;
+}
+
+.projects__listing-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+}
+
+.projects__listing-dot--draft {
+	background: var(--projects-theirs);
+}
+
+.projects__listing-dot--version {
+	background: var(--projects-fg);
+}
+
 @media (max-width: 40rem) {
 	.projects {
 		flex-direction: column;

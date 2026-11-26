@@ -125,6 +125,8 @@ export type Member = {
 	url: AutomergeUrl
 	heads: string[]
 	parent: AutomergeUrl | null
+	/** a draft's member it has changed since it was forked */
+	changed?: true
 }
 
 /** What an overlay is called: main, a draft's name, or a merge's two sides. */

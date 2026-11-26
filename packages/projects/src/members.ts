@@ -1,6 +1,6 @@
 import {parseAutomergeUrl, type AutomergeUrl} from "@automerge/automerge-repo/slim"
 import {segmentFor, type Link} from "./folders.ts"
-import type {At, HistoryEntry, Member} from "./types.ts"
+import type {At, HistoryEntry, Member, OverlaysState} from "./types.ts"
 
 /*
  * Reading the overlay provider's `overlay:members` and `overlay:history`:
@@ -237,4 +237,32 @@ export function covered(
 	}
 	const whole = shown.length === 0 || shown.some(url => documentOf(url) === documentOf(root))
 	return {whole, docs}
+}
+
+/** What a listing marks outside a comparison, and why. */
+export type Marks = {kind: "draft" | "version"; ids: Set<string>} | undefined
+
+/**
+ * What's marked while nothing is compared, by document, with the folders
+ * above: what the point picked in the history changed, or what the draft
+ * checked out has changed since it was forked. Main's working copy has none.
+ */
+export function quietMarks(
+	state: Pick<OverlaysState, "checkedOut" | "at" | "drafts">,
+	entries: readonly HistoryEntry[],
+	members: readonly Member[]
+): Marks {
+	let changed: AutomergeUrl[]
+	let kind: "draft" | "version"
+	if (state.at !== null) {
+		kind = "version"
+		changed = entries.find(entry => entry.id === state.at)?.members ?? []
+	} else if (state.drafts.some(draft => draft.url === state.checkedOut)) {
+		kind = "draft"
+		changed = members.filter(member => member.changed).map(member => member.url)
+	} else return undefined
+	const parents = parentsOf(members)
+	const ids = new Set<string>()
+	for (const url of changed) for (const id of upFrom(url, parents)) ids.add(id)
+	return {kind, ids}
 }

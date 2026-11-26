@@ -15,6 +15,10 @@ import {createEffect, createMemo, createSignal, onCleanup} from "solid-js"
 // member with conflicts no one has resolved, and the folders above it. Two
 // points in one overlay's history read the same way, as what happened from
 // the earlier (B) to the later (A).
+//
+// Not comparing, a point picked in the history marks what that `version`
+// changed, and a draft checked out what the `draft` has changed since it was
+// forked, each with the folders above. Main's working copy has no marks.
 export type Mark =
 	| "differs"
 	| "ours"
@@ -23,6 +27,8 @@ export type Mark =
 	| "added"
 	| "removed"
 	| "conflict"
+	| "draft"
+	| "version"
 
 const AS_MERGED: Record<"differs" | "ours" | "theirs", Mark> = {
 	differs: "changed",
@@ -63,7 +69,21 @@ type Comparison =
 	| {kind: "compare"; a: Overlay; b: Overlay; aAt?: At; bAt?: At}
 	| {kind: "merge"; a: AutomergeUrl; b: Overlay; published: boolean}
 	| null
-type Member = {url: AutomergeUrl; heads: string[]; parent: AutomergeUrl | null}
+type Member = {
+	url: AutomergeUrl
+	heads: string[]
+	parent: AutomergeUrl | null
+	/** a draft's member it changed since it was forked */
+	changed?: true
+}
+// The overlay provider's `overlays` and `overlay:history`, as this reads them.
+type OverlaysState = {
+	checkedOut: Overlay
+	at?: At
+	status: string
+	drafts: {url: AutomergeUrl}[]
+}
+type HistoryEntry = {id: string; members: AutomergeUrl[]}
 type Link = {url?: unknown; name?: unknown; type?: unknown}
 // The overlay provider's `merge:conflicts`, as this reads it.
 type MergeConflicts = Record<AutomergeUrl, {state: string}[]>
@@ -215,8 +235,10 @@ export function useChangeMarks(
 		return current?.kind === "compare" && current.a === current.b
 	}
 	const comparing = () => !!changes()
+	const {marked: quiet, kind: quietKind} = useQuietMarks(element, comparison)
 	return {
 		mark: url => {
+			if (!comparison()) return quiet().has(documentOf(url)) ? quietKind() : undefined
 			if (conflicted().has(documentOf(url))) return "conflict"
 			const mark = changes()?.marks.get(documentOf(url))
 			return mark && (merge() || history()) ? AS_MERGED[mark as keyof typeof AS_MERGED] : mark
@@ -293,4 +315,63 @@ function sameHeads(a: readonly string[], b: readonly string[]) {
 
 function documentOf(url: AutomergeUrl): string {
 	return parseAutomergeUrl(url).documentId
+}
+
+/**
+ * What's marked while nothing is compared: what the point picked in the
+ * history changed, or what the draft checked out has changed since it was
+ * forked, and the folders above them, by document. A different fact from a
+ * comparison's, so nothing else is quietened.
+ */
+function useQuietMarks(element: HTMLElement, comparison: () => Comparison) {
+	const overlays = subscribe(element, {type: "overlays"}, null) as unknown as () => OverlaysState | null
+	const which = createMemo(
+		() => {
+			const state = overlays()
+			if (comparison() || !state || state.status !== "ready") return undefined
+			if (state.at) return {kind: "version" as const, overlay: state.checkedOut, at: state.at}
+			if (state.drafts.some(draft => draft.url === state.checkedOut))
+				return {kind: "draft" as const, overlay: state.checkedOut, at: null}
+			return undefined
+		},
+		undefined,
+		{equals: (a, b) => a?.kind === b?.kind && a?.overlay === b?.overlay && a?.at === b?.at}
+	)
+	const members = createMemo(() => {
+		const current = which()
+		if (!current) return undefined
+		return subscribe(element, {
+			type: "overlay:members",
+			overlay: current.overlay,
+			at: current.at,
+		} as never) as unknown as () => Member[] | undefined
+	})
+	const entries = createMemo(() => {
+		const current = which()
+		if (current?.kind !== "version") return undefined
+		return subscribe(element, {
+			type: "overlay:history",
+			overlay: current.overlay,
+		} as never) as unknown as () => HistoryEntry[] | undefined
+	})
+	const marked = createMemo(() => {
+		const current = which()
+		const all = members()?.()
+		const out = new Set<string>()
+		if (!current || !all) return out
+		const changed =
+			current.kind === "version"
+				? (entries()?.()?.find(entry => entry.id === current.at)?.members ?? [])
+				: all.filter(member => member.changed).map(member => member.url)
+		const parents = new Map(all.map(member => [documentOf(member.url), member.parent]))
+		for (const url of changed) {
+			let cursor: AutomergeUrl | null | undefined = url
+			while (cursor && !out.has(documentOf(cursor))) {
+				out.add(documentOf(cursor))
+				cursor = parents.get(documentOf(cursor))
+			}
+		}
+		return out
+	})
+	return {marked, kind: (): Mark => (which()?.kind === "version" ? "version" : "draft")}
 }

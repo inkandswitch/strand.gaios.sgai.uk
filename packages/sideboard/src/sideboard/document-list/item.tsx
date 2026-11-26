@@ -328,6 +328,8 @@ const MARK_TITLES: Record<Mark, string> = {
   added: "Added by the merge",
   removed: "Removed by the merge",
   conflict: "Has conflicts to resolve",
+  draft: "Changed in this draft",
+  version: "Changed in this version",
 };
 
 // Compared, a dot per version it's in; merging, one for what the merge does.
@@ -339,4 +341,6 @@ const MARK_DOTS: Record<Mark, string[]> = {
   added: ["added"],
   removed: ["removed"],
   conflict: ["conflict"],
+  draft: ["draft"],
+  version: ["version"],
 };

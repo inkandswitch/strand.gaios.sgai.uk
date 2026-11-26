@@ -187,6 +187,36 @@ describe("the overlay provider", () => {
     dispose();
   });
 
+  it("marks the members a draft has changed since it was forked", async () => {
+    const { root, note, child, overlayRepo, overlays, send, onCheckout, dispose } = project();
+    await overlays.until((s) => s.status === "ready");
+    const draft = await send<AutomergeUrl>({ type: "draft:create", parent: null });
+    const onMain = watch<Member[]>(child, { type: "overlay:members", overlay: null });
+    const onDraft = watch<Member[]>(child, { type: "overlay:members", overlay: draft });
+    const changed = (members: Member[]) =>
+      members.filter((member) => member.changed).map((member) => member.url);
+
+    expect(changed(await onDraft.until((m) => m.length === 2))).toEqual([]);
+    // Being read, cloned and all, isn't a change.
+    await send({ type: "repo:handle-descriptor", url: note.url, overlay: draft });
+    await settle();
+    expect(changed(onDraft.latest()!)).toEqual([]);
+
+    await edit(await onCheckout(), "draft");
+    expect(changed(await onDraft.until((m) => changed(m).length > 0))).toEqual([note.url]);
+
+    // One the draft adds is changed, and so is the folder it's added to.
+    const made = overlayRepo().create<Note>({ "@patchwork": { type: "note" }, text: "new" });
+    (await overlayRepo().find<Folder>(root.url)).change((d) => {
+      d.docs.push(made.url);
+    });
+    await settle();
+    const after = await onDraft.until((m) => m.length === 3);
+    expect(new Set(changed(after))).toEqual(new Set([root.url, note.url, made.url]));
+    expect(changed(await onMain.until((m) => m.length === 2))).toEqual([]);
+    dispose();
+  });
+
   it("merges in memory, writing nothing until the merge is edited", async () => {
     const { repo, note, overlays, send, onCheckout, dispose } = project();
     await overlays.until((s) => s.status === "ready");

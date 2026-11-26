@@ -15,7 +15,7 @@ import {
   type UrlHeads,
 } from "@automerge/automerge-repo/slim";
 
-import { canonicalUrl, watchDocTree, type DocTree } from "./children.js";
+import { canonicalUrl, sameHeads, watchDocTree, type DocTree } from "./children.js";
 import { cloneAt, docAt, draftVersion, install, type Version } from "./draft-clones.js";
 import { hasAll, headsAt, metasOf, type Point } from "./history.js";
 import { OverlayHandle, forwardingProxy } from "./overlay-handle.js";
@@ -256,12 +256,30 @@ export class OverlayRepo {
       : null;
   }
 
-  /** Every member as the checked-out overlay has it, once they're all known. */
+  /**
+   * Every member as the checked-out overlay has it, once they're all known,
+   * a draft's marked where it has changed them.
+   */
   async members(): Promise<Member[]> {
     await this.#ready;
     if (!this.#tree) return [];
     await this.#tree.settled();
-    return this.#tree.members();
+    return this.#markChanged(this.#tree.members());
+  }
+
+  // What a draft has changed since it was forked: each member whose clone
+  // reads other heads than it was cloned at, and each the fork didn't know
+  // about, which only the draft can have added. (One made in the draft is
+  // its own clone, cloned at nothing, once it's written to.)
+  #markChanged(members: Member[]): Member[] {
+    const checkout = this.#checkout;
+    if (checkout?.kind !== "draft") return members;
+    const clones = checkout.handle.doc()?.clones ?? {};
+    return members.map((member) => {
+      const entry = clones[member.url];
+      const changed = !entry || (!!entry.cloneUrl && !sameHeads(member.heads, entry.clonedAt));
+      return changed ? { ...member, changed: true } : member;
+    });
   }
 
   /** Calls `listener` whenever the members, or any of their heads, move. */

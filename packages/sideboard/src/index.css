@@ -385,6 +385,16 @@ button {
   background: var(--document-list-changed);
 }
 
+/* not comparing: what the draft checked out has changed, in its colour, or
+   what the point picked in the history changed */
+.document-list-item__changed--draft {
+  background: var(--document-list-theirs);
+}
+
+.document-list-item__changed--version {
+  background: var(--document-list-line);
+}
+
 /* a merge's member with conflicts no one has resolved yet */
 .document-list-item__changed--conflict {
   width: 8px;

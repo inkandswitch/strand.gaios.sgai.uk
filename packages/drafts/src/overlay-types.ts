@@ -98,6 +98,10 @@ export type Member = {
   heads: UrlHeads;
   // The member it was reached from; null for the root.
   parent: AutomergeUrl | null;
+  // Set when a draft has changed it since it was forked: its clone has moved
+  // on from the heads it was cloned at, or the draft added it. Never set on
+  // main or a merge.
+  changed?: true;
 };
 
 // --- History -----------------------------------------------------------------
