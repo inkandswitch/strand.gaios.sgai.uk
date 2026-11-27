@@ -3,10 +3,10 @@ import {describe, expect, it} from "vitest"
 import type {Location} from "./location.ts"
 import {
 	LocationError,
-	endsInFolder,
 	projectRoot,
 	relocate,
 	resolveLocation,
+	showsFolder,
 } from "./resolve.ts"
 
 const PROJECT = "automerge:3regSr3818zmNnyXN5EobkuGtGhB" as AutomergeUrl
@@ -45,24 +45,30 @@ const at = (...segments: string[]): Location => ({
 })
 
 describe("resolveLocation", () => {
-	it("opens a project with nothing selected", async () => {
+	it("opens a project on itself", async () => {
 		const resolved = await resolveLocation(at(), repo(docs))
 		expect(resolved).toEqual({
 			projectUrl: PROJECT,
 			projectName: "Q3 Planning",
 			root: "folder",
 			rootType: "folder",
-			docUrl: undefined,
+			docUrl: PROJECT,
 			trail: [],
 		})
+	})
+
+	it("opens a folder inside the project like a document", async () => {
+		const resolved = await resolveLocation(at("Notes"), repo(docs))
+		expect(resolved.docUrl).toBe(NOTES)
+		expect(resolved.trail).toEqual([{folderUrl: PROJECT, url: NOTES, segment: "Notes", type: "folder"}])
 	})
 
 	it("follows names down to the document", async () => {
 		const resolved = await resolveLocation(at("Notes", "Roadmap"), repo(docs))
 		expect(resolved.docUrl).toBe(ROADMAP)
 		expect(resolved.trail).toEqual([
-			{folderUrl: PROJECT, url: NOTES, segment: "Notes"},
-			{folderUrl: NOTES, url: ROADMAP, segment: "Roadmap"},
+			{folderUrl: PROJECT, url: NOTES, segment: "Notes", type: "folder"},
+			{folderUrl: NOTES, url: ROADMAP, segment: "Roadmap", type: "md"},
 		])
 	})
 
@@ -135,19 +141,20 @@ describe("resolveLocation", () => {
 	})
 })
 
-describe("endsInFolder", () => {
-	it("is true for a folder inside the project, false for a document or the project", async () => {
-		const find = repo(docs)
-		const folder = await resolveLocation(at("Notes"), find)
-		const document = await resolveLocation(at("Notes", "Roadmap"), find)
-		expect(await endsInFolder(folder, find)).toBe(true)
-		expect(await endsInFolder(document, find)).toBe(false)
-		expect(await endsInFolder(await resolveLocation(at(), find), find)).toBe(false)
-	})
-
-	it("leaves the project with nothing open, for projectRoot", async () => {
+describe("projectRoot", () => {
+	it("opens the project itself", async () => {
 		const folder = await resolveLocation(at("Notes"), repo(docs))
 		expect(projectRoot(folder)).toEqual(await resolveLocation(at(), repo(docs)))
+	})
+})
+
+describe("showsFolder", () => {
+	it("is true for a folder project, or a folder in one, and false for documents", async () => {
+		const find = repo(docs)
+		expect(showsFolder(await resolveLocation(at(), find))).toBe(true)
+		expect(showsFolder(await resolveLocation(at("Notes"), find))).toBe(true)
+		expect(showsFolder(await resolveLocation(at("Notes", "Roadmap"), find))).toBe(false)
+		expect(showsFolder(await resolveLocation({projectId: idOf(ROADMAP), segments: []}, find))).toBe(false)
 	})
 })
 

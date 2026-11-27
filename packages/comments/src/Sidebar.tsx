@@ -56,7 +56,14 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
   const repo = element.repo;
 
   const context = subscribe<CommentsContext | null>(element, { type: CONTEXT } as never, null);
-  const [scope, setScopeSignal] = createSignal<Scope>(storedScope());
+  const [chosen, setScopeSignal] = createSignal<Scope>(storedScope());
+  // The frame may say which threads to list (its column's scope); then it
+  // also titles the sidebar, and the sidebar shows neither.
+  const framed = () => !!context()?.scope;
+  const scope = (): Scope => {
+    const given = context()?.scope;
+    return given ? (given === "open" ? "view" : "project") : chosen();
+  };
   const setScope = (next: Scope) => {
     setScopeSignal(next);
     try {
@@ -70,6 +77,12 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
     equals: sameList,
   });
   const comparing = () => !!context()?.theirs;
+  // What's shown in views, to reveal a thread in.
+  const viewed = createMemo<AutomergeUrl[]>(
+    () => context()?.viewed ?? context()?.openDocs ?? [],
+    [],
+    { equals: sameList }
+  );
 
   // ---------------------------------------------------------------- threads
   // Every thread in the project is kept in its root document.
@@ -252,7 +265,7 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
     setPinned(wasPrimary ? undefined : item.key);
     if (wasPrimary) return select([]);
     const c = context();
-    if (c && !c.openDocs.includes(item.docUrl)) {
+    if (c && !viewed().includes(item.docUrl)) {
       // Opening takes where it is in the project, so find that first.
       const segments =
         c.root === "document" ? [] : await findSegments(repo, c.projectUrl, item.docUrl);
@@ -273,7 +286,7 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
   // to mount and say what it has selected, then select the thread's target.
   createEffect(() => {
     const item = revealing();
-    if (!item || !openDocs().includes(item.docUrl)) return;
+    if (!item || !viewed().includes(item.docUrl)) return;
     const timer = setTimeout(() => {
       setRevealing(undefined);
       select(item.thread.refs);
@@ -307,8 +320,8 @@ export function Sidebar(props: { element: HTMLElement & { repo: Repo } }) {
   const names = () => ({ ours: context()?.ours ?? "", theirs: context()?.theirs ?? "" });
 
   return (
-    <div class="gc-sidebar">
-      <div class="gc-head">
+    <div class="gc-sidebar" classList={{ "gc-sidebar--framed": framed() }}>
+      <div class="gc-head" hidden={framed()}>
         <span class="gc-title">Comments</span>
         <label class="gc-filter">
           <span class="gc-visually-hidden">Show comments on</span>

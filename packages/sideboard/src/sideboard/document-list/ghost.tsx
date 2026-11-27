@@ -5,7 +5,7 @@ import type { ChangeMarks, Ghost } from "./changes.ts";
 import { ChangeMark } from "./item.tsx";
 
 /**
- * What the other draft has in a folder and the checked-out one doesn't, after
+ * What the other version has in a folder and the checked-out one doesn't, after
  * the folder's own rows. Ghosts can't be opened: a ghost folder only expands.
  */
 export function GhostRows(props: {
@@ -70,7 +70,6 @@ function GhostRow(props: {
       aria-disabled="true"
       aria-expanded={props.toggle ? !!props.expanded : undefined}
       class="document-list-item document-list-item--ghost"
-      classList={{ "document-list-item--removed": mark() === "removed" }}
       data-doc-url={props.ghost.url}
       on:click={() => props.toggle?.()}
       onkeydown={(event: KeyboardEvent) => {

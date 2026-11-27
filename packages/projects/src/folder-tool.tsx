@@ -1,17 +1,18 @@
 import type {AutomergeUrl, DocHandle} from "@automerge/automerge-repo/slim"
 import type {ToolElement} from "@inkandswitch/patchwork-plugins"
-import {Show} from "solid-js"
+import {createEffect, Show} from "solid-js"
 import {render} from "solid-js/web"
 import {Dock} from "./dock.tsx"
 import {injectStyles} from "./styles.ts"
 import {connectWorkspace} from "./workspace.ts"
-import {useWorkspaceState} from "./workspace-state.ts"
+import {useOverlayState} from "./overlay-state.ts"
+import {versionKey} from "./types.ts"
 
 /**
- * A folder as the root: its tree on the left and its documents tiled beside
- * it. Folders only live in the tree, which opens and closes them; the dock
- * only ever holds documents. What's open, and which draft, comes from the
- * frame around it (see `workspace.ts`).
+ * A folder as the root: its tree on the left and what's open in it tiled
+ * beside it, documents and folders alike. What's open comes from the frame
+ * around it (see `workspace.ts`); which overlay, and what it's compared
+ * with, from the providers it's inside.
  */
 export function renderFolderTool(handle: DocHandle<unknown>, element: ToolElement) {
 	injectStyles()
@@ -20,10 +21,12 @@ export function renderFolderTool(handle: DocHandle<unknown>, element: ToolElemen
 
 function FolderWorkspace(props: {element: ToolElement; rootUrl: AutomergeUrl}) {
 	const workspace = connectWorkspace(props.element)
-	const state = useWorkspaceState(
+	const state = useOverlayState(
 		() => props.element,
-		() => true
+		() => true,
+		() => props.rootUrl
 	)
+	createEffect(() => workspace.compare.setVersions(state.versions()))
 	return (
 		<div class="projects__body">
 			<aside class="projects__files" aria-label="Files">
@@ -35,13 +38,15 @@ function FolderWorkspace(props: {element: ToolElement; rootUrl: AutomergeUrl}) {
 			</aside>
 			{/* the comments and focus providers are the project card's, around this */}
 			<main class="projects__main">
-						<Show when={workspace.route() && state.drafts()}>
+						<Show when={workspace.route() && state.overlays()}>
 							<Dock
 								route={workspace.route()!}
 								repo={props.element.repo}
-								draftKey={state.drafts()!.checkedOut}
+								overlayKey={versionKey(state.overlays()!)}
+								overlays={state.overlays()!}
 								comparing={state.comparing()}
 								focus={workspace.focus}
+								showing={workspace.showing}
 								host={props.element}
 								workspace={workspace.compare}
 							/>

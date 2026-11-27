@@ -26,9 +26,8 @@ export type CompareModeImplementation = {
 }
 
 /**
- * What the two versions are called and marked with: A the checked-out draft
- * (or, merging, the merge's result), B the draft it's compared with (or
- * merged into).
+ * What the two versions are called and marked with: A the checked-out
+ * overlay, B the one it's compared with.
  */
 export type Versions = {a: Version; b: Version}
 export type Version = {name: string; color: string}
@@ -48,7 +47,7 @@ export type Options<O> = {
  * `prefers` the mode to start in.
  */
 export type CompareSelector = {
-	type: "compare:view"
+	type: "compare-mode:view"
 	modes?: Record<string, boolean>
 	draws?: string[]
 	collapses?: string[]
@@ -56,38 +55,11 @@ export type CompareSelector = {
 }
 
 /**
- * What it's told while its draft is compared with another: the mode, its
- * options, the other draft's version of the document, saved, or `missing`
- * when that draft doesn't have it, and whether to fold what's unchanged.
- * Both drafts' views are told, each with the other's version: the
- * checked-out draft's, and where the panel lays the other draft's view out
- * beside it, that one too, with `names` the other way round. `editable`
- * while that version can be changed with `compare:edit`: told to the
- * checked-out draft's view, while the other draft has the document and it
- * isn't a merge being looked over. `names` are the two drafts', this view's
- * first, to label each version with. `merging` while a merge is looked
- * over: the checked-out draft's view shows the document after the merge,
- * and the other the target's before it. All null when nothing's compared.
+ * What it's told while it's compared: the mode, and its options. In a mode
+ * it collapses in, the options also say whether to fold what's unchanged
+ * away (`collapsed`). Null while nothing is compared.
  */
-export type CompareView = {
-	mode: string | null
-	options: unknown
-	other: Uint8Array | null
-	missing: boolean
-	collapsed: boolean
-	editable: boolean
-	names: {ours: string; theirs: string} | null
-	merging: boolean
-}
-
-/**
- * Asked by a view drawing the other draft's version itself, to change it:
- * text spliced into that version, answered with whether it was.
- */
-export type CompareEdit = {
-	type: "compare:edit"
-	splices: {path: (string | number)[]; index: number; remove: number; insert: string}[]
-}
+export type CompareView = {mode: string; options: unknown} | null
 
 /**
  * The compare modes a whole workspace shares. Picking one puts every panel
@@ -141,19 +113,6 @@ export function createWorkspaceCompare(): WorkspaceCompare {
 function sameModes(a: Mode[], b: Mode[]) {
 	return a.length === b.length && a.every((mode, i) => mode === b[i])
 }
-
-/**
- * The compare provider's `compare:version`: null when nothing's compared.
- * `doc` is the other draft's version, `ours` the checked-out draft's.
- * Merging, they're the target's before the merge and after it, and
- * `removed` says the merge takes the document out.
- */
-export type ComparedVersion = {
-	draft: AutomergeUrl
-	doc: Uint8Array | null
-	ours?: Uint8Array | null
-	removed?: boolean
-} | null
 
 /** The registered compare modes, loaded, kept current as packages come and go. */
 export function useCompareModes(): Accessor<Mode[]> {

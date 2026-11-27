@@ -385,6 +385,23 @@ button {
   background: var(--document-list-changed);
 }
 
+/* not comparing: what the draft checked out has changed, in its colour, or
+   what the point picked in the history changed */
+.document-list-item__changed--draft {
+  background: var(--document-list-theirs);
+}
+
+.document-list-item__changed--version {
+  background: var(--document-list-line);
+}
+
+/* a merge's member with conflicts no one has resolved yet */
+.document-list-item__changed--conflict {
+  width: 8px;
+  height: 8px;
+  background: var(--compare-conflict, #dba617);
+}
+
 .document-list-item--unchanged {
   opacity: 0.55;
 }
@@ -398,8 +415,17 @@ button {
 .document-list__compare-bar {
   display: flex;
   flex: none;
+  align-items: center;
   justify-content: flex-end;
   margin-bottom: -0.5rem;
+}
+
+/* while a merge is shown: what the marks are about */
+.document-list__compare-kind {
+  margin-right: auto;
+  padding-inline-start: var(--document-list-padding-x);
+  color: var(--document-list-muted, var(--placeholder-line));
+  font-size: 0.8rem;
 }
 
 .document-list .document-list__collapse {
@@ -698,4 +724,9 @@ button {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* the folder the list is of, heading it */
+.document-list .document-list-item--root {
+  font-weight: 600;
 }

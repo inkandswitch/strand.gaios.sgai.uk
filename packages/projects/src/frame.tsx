@@ -3,9 +3,9 @@ import type {FolderDoc} from "@inkandswitch/patchwork-filesystem"
 import type {ToolElement} from "@inkandswitch/patchwork-plugins"
 import {createEffect, createSignal, Show} from "solid-js"
 import {render} from "solid-js/web"
-import {DraftScopeView} from "./drafts.tsx"
+import {OverlayScopeView} from "./overlays.tsx"
 import {useDoc, useDocTitle, useHandle} from "./hooks.ts"
-import {createNavigation, type DraftScope} from "./navigation.ts"
+import {createNavigation, type OverlayScope} from "./navigation.ts"
 import {AccountPage} from "./account-page.tsx"
 import {PackagesPage} from "./packages.tsx"
 import {ProjectView} from "./project.tsx"
@@ -73,8 +73,8 @@ function Frame(props: {
 		toggle: toggleSidebar,
 	}
 
-	// The open project, once it's the one whose drafts are mounted.
-	const shown = (scope: DraftScope) => {
+	// The open project, once it's the one whose overlays are mounted.
+	const shown = (scope: OverlayScope) => {
 		const project = navigation.project()
 		const projectRepo = navigation.projectRepo()
 		return project?.resolved.projectUrl === scope.projectUrl && projectRepo
@@ -120,7 +120,7 @@ function Frame(props: {
 						</Show>
 						<Show when={navigation.scope()} keyed>
 							{scope => (
-								<DraftScopeView scope={scope} attach={navigation.attach}>
+								<OverlayScopeView scope={scope} attach={navigation.attach}>
 									<Show when={shown(scope)}>
 										{shown => (
 											<ProjectView
@@ -133,7 +133,7 @@ function Frame(props: {
 											/>
 										)}
 									</Show>
-								</DraftScopeView>
+								</OverlayScopeView>
 							)}
 						</Show>
 					</div>

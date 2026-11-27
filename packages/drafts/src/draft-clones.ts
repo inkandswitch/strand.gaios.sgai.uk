@@ -1,42 +1,36 @@
-import * as Automerge from "@automerge/automerge/slim";
+import { Automerge } from "@automerge/automerge-repo/slim";
 import {
   decodeHeads,
-  parseAutomergeUrl,
-  stringifyAutomergeUrl,
   type AutomergeUrl,
   type DocHandle,
   type Repo,
   type UrlHeads,
 } from "@automerge/automerge-repo/slim";
 
-import type { CloneEntry } from "./draft-types.js";
+import { sameHeads } from "./children.js";
+import type { DraftDoc } from "./overlay-types.js";
 
-// Where a draft reads `url` when nothing pins it: its clone once it has one,
-// else the doc it was forked from, frozen at the fork point.
-export function entryReadUrl(url: AutomergeUrl, entry: CloneEntry): AutomergeUrl {
-  if (entry.cloneUrl) return entry.cloneUrl;
-  return stringifyAutomergeUrl({
-    documentId: parseAutomergeUrl(entry.source ?? url).documentId,
-    heads: entry.clonedAt,
-  });
+// Where a draft (null for main) reads `url`: its clone once it has one, else
+// the version it was forked off (`heads` set), else the member as it is.
+export type Version = { url: AutomergeUrl; heads?: UrlHeads };
+
+export function draftVersion(draft: DraftDoc | null | undefined, url: AutomergeUrl): Version {
+  const entry = draft?.clones?.[url];
+  if (!entry) return { url };
+  if (entry.cloneUrl) return { url: entry.cloneUrl };
+  return { url: entry.source ?? url, heads: entry.clonedAt };
 }
 
-// Where a draft reads `url`, keeping any heads it's pinned to: the draft's
-// version shares the original's history, so the same heads name the same
-// version in it.
-export function draftReadUrl(
-  clones: Record<AutomergeUrl, CloneEntry> | undefined,
-  url: AutomergeUrl
-): AutomergeUrl {
-  const { documentId, heads } = parseAutomergeUrl(url);
-  const entry = clones?.[stringifyAutomergeUrl({ documentId })];
-  if (!entry) return url;
-  if (!heads) return entryReadUrl(url, entry);
-  const read = entry.cloneUrl ?? entry.source ?? url;
-  return stringifyAutomergeUrl({
-    documentId: parseAutomergeUrl(read).documentId,
-    heads,
-  });
+// The document `handle` holds as of `heads`, as a document of its own: it can
+// be merged into others, and cloned. Undefined heads is the document as it is.
+export function docAt(
+  handle: DocHandle<unknown>,
+  heads: UrlHeads | undefined
+): Automerge.Doc<unknown> {
+  const doc = handle.doc() as Automerge.Doc<unknown>;
+  if (!heads || sameHeads(handle.heads(), heads)) return doc;
+  if (heads.length === 0) return Automerge.init<unknown>();
+  return docAtVersion(doc, heads);
 }
 
 // Clone `handle`'s doc as of `to`. When `to` is where the doc already is,
@@ -48,39 +42,32 @@ export function cloneAt(
 ): DocHandle<unknown> {
   if (sameHeads(handle.heads(), to)) return repo.clone(handle);
   if (to.length === 0) return repo.create<unknown>();
-  return cloneAtVersion(repo, handle, to);
+  return install(repo, docAtVersion(handle.doc() as Automerge.Doc<unknown>, to));
 }
 
-// --- Cloning a member at a version -------------------------------------------
+// A new document in `repo` holding `doc`.
+export function install(repo: Repo, doc: Automerge.Doc<unknown>): DocHandle<unknown> {
+  const handle = repo.create<unknown>();
+  handle.update(() => Automerge.clone(doc));
+  return handle;
+}
+
+// --- A document at a version -------------------------------------------------
 // The obvious way — `repo.clone(handle.view(to))`, i.e. wasm `fork_at` — is
 // broken upstream: on documents whose history contains certain concurrent
 // merge changes (as anything synced through subduction ends up with),
-// `fork_at` panics with `MissingOps` in `ChangeCollector::from_build_meta`
-// at *any* heads, and the panic poisons the doc object for the rest of the
-// session (every later call throws "recursive use of an object detected").
-// Confirmed offline against automerge 3.3.0-fragments.1 and .2 with a
-// 26-change minimal repro.
+// `fork_at` panics with `MissingOps` in `ChangeCollector::from_build_meta` at
+// *any* heads, and the panic poisons the doc object for the rest of the session (every later call
+// throws "recursive use of an object detected"). Confirmed offline against
+// automerge 3.3.0-fragments.1 and .2 with a 26-change minimal repro.
 //
-// So the version clone is built without `fork_at`: collect the ancestor
-// closure of the pin heads from the change metadata, bundle exactly those
-// changes (`saveBundle`), hydrate a fresh doc from the bundle
-// (`loadIncremental`), and install it into a new repo handle — the same move
-// `repo.clone` performs internally, minus the panicking wasm path. The
-// resulting doc's heads are exactly `to`, it shares history with the
-// original, and merges back cleanly.
-
-// Build a clone of `handle`'s doc pinned to the `to` heads and register it
-// with the repo. Throws (a plain JS error, no wasm panic) when the pin's
-// ancestry can't be resolved from the doc's change metadata.
-export function cloneAtVersion(
-  repo: Repo,
-  handle: DocHandle<unknown>,
-  to: UrlHeads
-): DocHandle<unknown> {
-  const doc = handle.doc() as Automerge.Doc<unknown>;
+// So the version is built without `fork_at`: collect the ancestor closure of
+// the heads from the change metadata, bundle exactly those changes
+// (`saveBundle`) and load them into a fresh doc (`loadIncremental`). Its
+// heads are exactly `to`, and it shares history with the original, so it
+// merges back cleanly.
+function docAtVersion(doc: Automerge.Doc<unknown>, to: UrlHeads): Automerge.Doc<unknown> {
   const pinHeads = decodeHeads(to);
-
-  // Ancestor closure of the pin heads, walked over the full change metadata.
   const metas = Automerge.getChangesMetaSince(doc, []);
   const byHash = new Map(metas.map((m) => [m.hash, m]));
   const closure = new Set<string>();
@@ -90,9 +77,7 @@ export function cloneAtVersion(
     if (closure.has(hash)) continue;
     const meta = byHash.get(hash);
     if (!meta) {
-      throw new Error(
-        `[drafts] change ${hash} is not in the doc's history metadata`
-      );
+      throw new Error(`[drafts] change ${hash} is not in the doc's history metadata`);
     }
     closure.add(hash);
     stack.push(...meta.deps);
@@ -105,17 +90,8 @@ export function cloneAtVersion(
   const wantHeads = [...pinHeads].sort();
   if (JSON.stringify(gotHeads) !== JSON.stringify(wantHeads)) {
     throw new Error(
-      `[drafts] version clone heads mismatch: wanted ${wantHeads}, got ${gotHeads}`
+      `[drafts] version heads mismatch: wanted ${wantHeads}, got ${gotHeads}`
     );
   }
-
-  const clone = repo.create<unknown>();
-  clone.update(() => pinned);
-  return clone;
-}
-
-function sameHeads(a: UrlHeads, b: UrlHeads): boolean {
-  if (a.length !== b.length) return false;
-  const set = new Set(b);
-  return a.every((h) => set.has(h));
+  return pinned;
 }

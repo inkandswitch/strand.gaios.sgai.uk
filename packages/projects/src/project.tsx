@@ -2,10 +2,10 @@ import type {AutomergeUrl, Repo} from "@automerge/automerge-repo/slim"
 import {request} from "@inkandswitch/patchwork-providers"
 import {createEffect, createMemo, createSignal, on, Show, untrack} from "solid-js"
 import {Portal} from "solid-js/web"
-import {CommentsScope, createCommentsToggle} from "./comments.tsx"
+import {CommentsScope} from "./comments.tsx"
 import {createWorkspaceCompare, useCompareModes, type Mode, type WorkspaceCompare} from "./compare.ts"
 import {WorkspaceHeader} from "./header.tsx"
-import {useDocTitle, useMounted} from "./hooks.ts"
+import {useDocTitle, useMembers, useMounted} from "./hooks.ts"
 import type {ProjectRoute} from "./navigation.ts"
 import {OpenWith} from "./open-with.tsx"
 import {
@@ -19,23 +19,29 @@ import {Provider} from "./provider.tsx"
 import {FOLDER_TOOL} from "./tool-ids.ts"
 import {provideWorkspace} from "./workspace.ts"
 import type {SidebarToggle} from "./workspaces.tsx"
-import {useWorkspaceState} from "./workspace-state.ts"
+import {useOverlayState} from "./overlay-state.ts"
+import {HistoryPanel, useMemberNames} from "./history.tsx"
+import {covered} from "./members.ts"
+import {createSidePanels} from "./side-panels.ts"
+import {overlayName, versionKey, type At, type Overlay} from "./types.ts"
 
 const COMPARE_PROVIDER = "patchwork-compare-provider"
 
 /**
- * A root as a card: its header, then the root itself, all seen through the
- * draft the provider around it has checked out (`repo` is that provider's),
- * and compared with another draft when one's picked. A folder lays out what's
- * open in it with its own tool, its tree beside its documents; any other
- * document is shown on its own.
+ * A root on a card, under a bar flat on the page with what's checked out,
+ * and beside the card a column, also flat, with the history and the
+ * comments. All of it seen through the overlay the provider around it has
+ * checked out (`repo` is that provider's), and compared with another
+ * version when one's picked. A folder
+ * lays out what's open in it with its own tool, its tree beside its
+ * documents; any other document is shown on its own.
  */
 export function ProjectView(props: {
 	route: ProjectRoute
 	repo: Repo
 	siteTitle: string
 	focus(panel: ProjectRoute | undefined): void
-	compare(draft: AutomergeUrl | undefined): void
+	compare(overlay: Overlay | undefined, at?: At): void
 	/** the sidebar, shown or hidden from the card header */
 	sidebar: SidebarToggle
 }) {
@@ -46,79 +52,109 @@ export function ProjectView(props: {
 	// calls it.
 	const name = () => (folder() ? props.route.resolved.projectName : title()) ?? props.route.resolved.projectName
 	const [provider, setProvider] = createSignal<HTMLElement>()
-	const [card, setCard] = createSignal<HTMLElement>()
+	const [desk, setDesk] = createSignal<HTMLElement>()
 	const [actions, setActions] = createSignal<HTMLElement>()
 	const [compareControls, setCompareControls] = createSignal<HTMLElement>()
 	const mounted = useMounted(COMPARE_PROVIDER, provider)
-	const state = useWorkspaceState(card, mounted)
+	const state = useOverlayState(desk, mounted, () => props.route.resolved.projectUrl)
 	const workspaceCompare = createWorkspaceCompare()
-	const comments = createCommentsToggle()
-	const draftName = (url: AutomergeUrl | null | undefined) =>
-		url ? state.drafts()?.drafts.find(entry => entry.url === url)?.name : undefined
+	const panels = createSidePanels()
+	const names = useMemberNames(
+		() => (mounted() ? desk() : undefined),
+		props.repo,
+		() => state.overlays()?.checkedOut
+	)
 	const modes = useCompareModes()
-	const compared = createMemo<AutomergeUrl | undefined>(previous => {
-		const current = state.against()
-		return current?.previewing || current?.merging ? previous : current?.draft
-	})
+	// What's showing: what's in front in each of a folder's groups, or a
+	// document on its own. The history and the comments cover it, a folder
+	// as everything beneath it.
+	const [showing, setShowing] = createSignal<AutomergeUrl[]>([])
+	const shown = () => (folder() ? showing() : [props.route.resolved.projectUrl])
+	const members = useMembers(
+		() => (mounted() ? desk() : undefined),
+		() => {
+			const current = state.overlays()
+			return current && {overlay: current.checkedOut, at: current.at}
+		}
+	)
+	const visible = createMemo(() => covered(shown(), members() ?? [], props.route.resolved.projectUrl))
+	// Named only when it's less than the whole project.
+	const covering = () =>
+		visible().whole
+			? undefined
+			: shown()
+					.map(url => names().get(url)?.replace(/\/$/, ""))
+					.filter(Boolean)
+					.join(", ")
+	// What it's compared with: an overlay, main (null), or nothing, and the
+	// point in its history.
+	const compared = () => {
+		const current = state.comparison()
+		return current ? current.b : undefined
+	}
+	const comparedAt = (): At => {
+		const current = state.comparison()
+		return current?.kind === "compare" ? current.bAt : null
+	}
 
-	// What the two versions are called: merging, A is what the merge leaves
-	// the target as.
-	createEffect(() => {
-		const drafts = state.drafts()
-		const current = state.against()
-		const ours = drafts?.drafts.find(entry => entry.url === drafts.checkedOut)?.name
-		const theirs = drafts?.drafts.find(entry => entry.url === current?.draft)?.name
-		workspaceCompare.setVersions(
-			current && ours !== undefined && theirs !== undefined
-				? {
-						a: {name: current.merging ? "Merged" : ours, color: "var(--projects-ours)"},
-						b: {name: theirs, color: "var(--projects-theirs)"},
-					}
-				: undefined
-		)
-	})
+	createEffect(() => workspaceCompare.setVersions(state.versions()))
 
 	createEffect(() => {
-		const shown = folder() ? [title(), name()] : [name()]
+		// the project itself open is named once
+		const inside = folder() && docUrl() !== props.route.resolved.projectUrl
+		const shown = inside ? [title(), name()] : [name()]
 		document.title = [...shown, props.siteTitle].filter(Boolean).join(" | ")
 	})
 
 	// The hash and the provider follow each other, once the provider has
 	// started from the hash's.
 	createEffect(() => {
-		if (state.heard()) props.compare(compared())
+		if (state.heard()) props.compare(compared(), comparedAt())
 	})
 	createEffect(
 		on(
-			() => props.route.location.compare,
-			wanted => {
-				const at = card()
-				if (!untrack(state.heard) || !at || wanted === untrack(compared)) return
-				void request(at, {type: "compare:set", draft: wanted ?? null})
+			() => [props.route.location.compare, props.route.location.compareAt ?? null] as const,
+			([wanted, wantedAt]) => {
+				const at = desk()
+				if (!untrack(state.heard) || !at) return
+				if (wanted === untrack(compared) && wantedAt === untrack(comparedAt)) return
+				void request(
+					at,
+					wanted === undefined
+						? {type: "compare:clear"}
+						: {type: "compare:set", overlay: wanted, at: wantedAt}
+				)
 			},
 			{defer: true}
 		)
 	)
+	const against = () => {
+		const wanted = props.route.location.compare
+		return wanted === undefined ? undefined : (wanted ?? "main")
+	}
+	const againstAt = () =>
+		props.route.location.compare === undefined ? undefined : props.route.location.compareAt
 
 	return (
 		<div class="projects__project">
 			<patchwork-view
 				ref={setProvider}
 				component={COMPARE_PROVIDER}
-				attr:against={props.route.location.compare}
+				attr:against={against()}
+				attr:against-at={againstAt()}
 				class="projects__compare-scope">
-				<section ref={setCard} class="projects__card">
-					<Show when={mounted() && state.drafts() && card()}>
+				<div ref={setDesk} class="projects__desk">
+					<Show when={mounted() && state.overlays() && desk()}>
 						{at => (
 							<>
 								<WorkspaceHeader
 									name={name()}
-									drafts={state.drafts()}
-									against={state.against()}
-									compared={compared()}
+									overlays={state.overlays()!}
+									comparison={state.comparison()}
 									element={at()}
 									sidebar={props.sidebar}
-									comments={comments}
+									panels={panels}
+									names={names}
 									compare={workspaceCompare}
 									actions={setActions}
 									compareControls={setCompareControls}
@@ -126,9 +162,22 @@ export function ProjectView(props: {
 								<CommentsScope
 									route={props.route}
 									repo={props.repo}
-									ours={draftName(state.drafts()?.checkedOut)}
-									theirs={state.against()?.merging ? undefined : draftName(compared())}
-									comments={comments}>
+									ours={overlayName(state.overlays(), state.overlays()!.checkedOut)}
+									theirs={state.comparing()?.names.b}
+									panels={panels}
+									visible={visible()}
+									covering={covering()}
+									history={
+										<Show when={state.overlays()?.status === "ready"}>
+											<HistoryPanel
+												element={at()}
+												overlays={state.overlays()!}
+												comparison={state.comparison()}
+												names={names()}
+												covers={visible().whole ? undefined : visible().docs}
+											/>
+										</Show>
+									}>
 									<Show
 										when={folder()}
 										fallback={
@@ -138,12 +187,12 @@ export function ProjectView(props: {
 														url={url()}
 														toolId={props.route.location.toolId}
 														repo={props.repo}
-														draftKey={state.drafts()!.checkedOut}
+														overlayKey={versionKey(state.overlays()!)}
 														comparing={state.comparing()}
 														workspace={workspaceCompare}
 														modes={modes}
 														actions={actions()}
-													compareControls={compareControls()}
+														compareControls={compareControls()}
 														element={at()}
 													/>
 												)}
@@ -153,6 +202,7 @@ export function ProjectView(props: {
 											url={props.route.resolved.projectUrl}
 											route={props.route}
 											focus={props.focus}
+											showing={setShowing}
 											workspace={workspaceCompare}
 											modes={modes}
 											element={at()}
@@ -162,7 +212,7 @@ export function ProjectView(props: {
 							</>
 						)}
 					</Show>
-				</section>
+				</div>
 			</patchwork-view>
 		</div>
 	)
@@ -176,6 +226,7 @@ function FolderRoot(props: {
 	url: AutomergeUrl
 	route: ProjectRoute
 	focus(panel: ProjectRoute | undefined): void
+	showing(urls: AutomergeUrl[]): void
 	workspace: WorkspaceCompare
 	modes: () => Mode[]
 	element: HTMLElement
@@ -183,6 +234,7 @@ function FolderRoot(props: {
 	provideWorkspace(props.element, {
 		route: () => props.route,
 		focus: route => props.focus(route),
+		showing: urls => props.showing(urls),
 		compare: props.workspace,
 		modes: props.modes,
 	})
@@ -199,7 +251,7 @@ function DocumentRoot(props: {
 	url: AutomergeUrl
 	toolId: string | undefined
 	repo: Repo
-	draftKey: string
+	overlayKey: string
 	comparing: Comparing | undefined
 	workspace: WorkspaceCompare
 	modes: () => Mode[]
@@ -251,10 +303,10 @@ function DocumentRoot(props: {
 			<div class="projects__body projects__body--document">
 				<main class="projects__main">
 							{/* Most tools keep showing what they first read when their
-							    handle moves onto another draft's copy, so each draft gets
-							    a view of its own. */}
-							<Show when={props.draftKey} keyed>
-								{_draft => (
+							    handle moves onto another overlay's copy, so each overlay
+							    gets a view of its own. */}
+							<Show when={props.overlayKey} keyed>
+								{_overlay => (
 									<Compared
 										url={props.url}
 										toolId={props.toolId}

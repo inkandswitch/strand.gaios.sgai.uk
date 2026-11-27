@@ -42,6 +42,16 @@ export const plugins = [
 		},
 	},
 	{
+		// Where a merge of a text file needs a person: lines both sides changed.
+		type: "patchwork:merge-conflicts",
+		id: "file-text-conflicts",
+		name: "Text conflicts",
+		datatypes: ["file"],
+		async load() {
+			return (await import("./conflicts")).findTextConflicts
+		},
+	},
+	{
 		type: "patchwork:datatype",
 		id: "new-file",
 		name: "New File",

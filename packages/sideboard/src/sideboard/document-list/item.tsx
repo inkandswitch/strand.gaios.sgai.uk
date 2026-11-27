@@ -49,12 +49,12 @@ export default function Item(props: {
   name: string;
   type: string;
   pressed: boolean;
-  /** how it differs, compared with another draft or merged into one */
+  /** how it differs, compared with another version */
   mark?: Mark;
-  /** compared with another draft, and the same on both */
+  /** compared with another version, and the same in both */
   unchanged?: boolean;
   children: JSX.Element;
-  /** unset for folders: pressing a folder's row expands it instead */
+  /** opens it, a folder too; a folder without it expands instead */
   openWith?(toolId?: string, placement?: Placement): void;
   /** where it sits in the project, for opening it where it's dropped */
   location?: string;
@@ -129,10 +129,11 @@ export default function Item(props: {
   const cancelLongPress = () => clearTimeout(longPress);
   onCleanup(cancelLongPress);
 
+  // A folder's row opens it, like any row; its arrow unfolds it.
   function open() {
     clearDragstack();
-    if (isFolder()) props.onToggleExpand?.();
-    else props.openWith?.();
+    if (props.openWith) props.openWith();
+    else if (isFolder()) props.onToggleExpand?.();
   }
 
   return (
@@ -320,22 +321,26 @@ export function ChangeMark(props: { mark: Mark }) {
 }
 
 const MARK_TITLES: Record<Mark, string> = {
-  differs: "Different on the two drafts",
-  ours: "Only on this draft",
-  theirs: "Only on the compared draft",
+  differs: "Different in the two versions",
+  ours: "Only in this version",
+  theirs: "Only in the compared version",
+  changed: "Changed by the merge",
   added: "Added by the merge",
   removed: "Removed by the merge",
-  changed: "Changed by the merge",
-  both: "Changed on both drafts: review it",
+  conflict: "Has conflicts to resolve",
+  draft: "Changed in this draft",
+  version: "Changed in this version",
 };
 
-// A dot per draft it's on, compared; merging, one for what the merge does.
+// Compared, a dot per version it's in; merging, one for what the merge does.
 const MARK_DOTS: Record<Mark, string[]> = {
   differs: ["ours", "theirs"],
   ours: ["ours"],
   theirs: ["theirs"],
+  changed: ["changed"],
   added: ["added"],
   removed: ["removed"],
-  changed: ["changed"],
-  both: ["changed"],
+  conflict: ["conflict"],
+  draft: ["draft"],
+  version: ["version"],
 };

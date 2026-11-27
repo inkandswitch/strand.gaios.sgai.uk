@@ -1,0 +1,281 @@
+import { Automerge } from "@automerge/automerge-repo/slim";
+import {
+  isValidAutomergeUrl,
+  type AutomergeUrl,
+  type DocHandle,
+  type Repo,
+  type UrlHeads,
+} from "@automerge/automerge-repo/slim";
+
+import { canonicalUrl, walkDocTree } from "./children.js";
+import { cloneAt } from "./draft-clones.js";
+import { ensureHistory, forkHistory, historyRefsOf, mergeHistory, writeRecord } from "./journal.js";
+import type {
+  CloneEntry,
+  DraftDoc,
+  HasWorkspace,
+  HistoryGroupsDoc,
+  JournalDoc,
+  MergeDoc,
+  Workspace,
+} from "./overlay-types.js";
+
+// What the overlay provider's commands change. Each takes the base repo: the
+// overlays' own bookkeeping never resolves through an overlay.
+
+// The root's workspace, made the first time it's needed.
+export async function ensureWorkspace(
+  repo: Repo,
+  root: DocHandle<HasWorkspace>
+): Promise<DocHandle<Workspace>> {
+  const existing = await findWorkspace(repo, root);
+  if (existing) return existing;
+  const workspace = repo.create<Workspace>({
+    "@patchwork": { type: "workspace" },
+    drafts: [],
+    merges: [],
+  });
+  root.change((d) => {
+    // Mutate `@patchwork` in place. Reassigning a spread would carry
+    // references to existing Automerge objects into a new object.
+    if (!d["@patchwork"]) d["@patchwork"] = {};
+    d["@patchwork"]!.workspaceUrl = workspace.url;
+  });
+  return workspace;
+}
+
+export async function findWorkspace(
+  repo: Repo,
+  root: DocHandle<HasWorkspace>
+): Promise<DocHandle<Workspace> | null> {
+  const url = root.doc()?.["@patchwork"]?.workspaceUrl;
+  return url && isValidAutomergeUrl(url) ? repo.find<Workspace>(url) : null;
+}
+
+// A draft forked off `parent` (null for main) as it is now. Forking clones
+// nothing: the draft records, per member, the version it branches off, and
+// reads that until the member's first write clones it. Its journal is a
+// fork of its parent's (made now if the parent has none yet).
+export async function createDraft(
+  repo: Repo,
+  root: DocHandle<HasWorkspace>,
+  parent: AutomergeUrl | null
+): Promise<AutomergeUrl> {
+  const workspace = await ensureWorkspace(repo, root);
+  const parentDoc = parent ? (await repo.find<DraftDoc>(parent)).doc() : null;
+  const clones = await forkPoints(repo, root.url, parentDoc);
+  const history = await forkHistory(repo, await ensureHistory(repo, workspace, parent));
+  const draft = repo.create<DraftDoc>({
+    "@patchwork": { type: "draft" },
+    parent,
+    clones,
+    history,
+  });
+  workspace.change((d) => {
+    d.drafts.push(draft.url);
+  });
+  return draft.url;
+}
+
+export async function renameDraft(
+  repo: Repo,
+  draft: AutomergeUrl,
+  name: string
+): Promise<void> {
+  const handle = await repo.find<DraftDoc>(draft);
+  const trimmed = name.trim();
+  handle.change((d) => {
+    if (trimmed) d.name = trimmed;
+    else delete d.name;
+  });
+}
+
+// `source` merged into `target`, to look over first: the pull request for
+// the pair if there is one, or else a new preview, which nothing lists.
+export async function createMerge(
+  repo: Repo,
+  root: DocHandle<HasWorkspace>,
+  source: AutomergeUrl | null,
+  target: AutomergeUrl | null
+): Promise<AutomergeUrl> {
+  const workspace = await findWorkspace(repo, root);
+  for (const url of workspace?.doc()?.merges ?? []) {
+    const doc = (await repo.find<MergeDoc>(url)).doc();
+    if (doc?.source === source && doc?.target === target) return url;
+  }
+  const merge = repo.create<MergeDoc>({
+    "@patchwork": { type: "merge" },
+    source,
+    target,
+    clones: {},
+  });
+  return merge.url;
+}
+
+// Lists a preview in the workspace, which makes it a pull request.
+export async function publishMerge(
+  repo: Repo,
+  root: DocHandle<HasWorkspace>,
+  merge: AutomergeUrl
+): Promise<void> {
+  const workspace = await ensureWorkspace(repo, root);
+  if (workspace.doc()?.merges.includes(merge)) return;
+  workspace.change((d) => {
+    d.merges.push(merge);
+  });
+}
+
+// Takes a draft or a merge off the list. A draft goes with every merge it's
+// the source or target of. Nothing is merged, and its members stay where
+// they are.
+export async function deleteOverlay(
+  repo: Repo,
+  workspace: DocHandle<Workspace>,
+  url: AutomergeUrl
+): Promise<void> {
+  const inputs = await mergesOf(repo, workspace, url);
+  workspace.change((d) => {
+    remove(d.drafts, url);
+    remove(d.merges, url);
+    for (const merge of inputs) remove(d.merges, merge);
+  });
+}
+
+// What a merge reads, for accepting it.
+export type MergeReading = {
+  // Every member of the merge, once they're all known.
+  members(): Promise<AutomergeUrl[]>;
+  // A member as the merge has it.
+  doc(url: AutomergeUrl): Promise<Automerge.Doc<unknown>>;
+};
+
+// The target takes the merge's content, and the merge, and a source that's a
+// draft, come off the list. The source's journal is merged into the
+// target's, and the target's records what it now reads: merging makes no
+// edit of its own for the journal to pick up.
+export async function acceptMerge(
+  repo: Repo,
+  workspace: DocHandle<Workspace>,
+  merge: DocHandle<MergeDoc>,
+  reading: MergeReading,
+  author?: AutomergeUrl
+): Promise<void> {
+  const doc = merge.doc();
+  if (!doc) throw new Error(`[drafts] merge ${merge.url} has no document`);
+  const target = doc.target ? await repo.find<DraftDoc>(doc.target) : null;
+  const heads: Record<AutomergeUrl, string[]> = {};
+  for (const url of await reading.members()) {
+    const merged = await reading.doc(url);
+    const copy = await writableCopy(repo, target, url);
+    if (!Automerge.hasHeads(copy.doc() as Automerge.Doc<unknown>, Automerge.getHeads(merged)))
+      copy.update((current) => Automerge.merge(current as Automerge.Doc<unknown>, merged));
+    heads[url] = [...Automerge.getHeads(copy.doc() as Automerge.Doc<unknown>)];
+  }
+  const into = await ensureHistory(repo, workspace, doc.target);
+  const from = await historyRefsOf(repo, workspace, doc.source);
+  if (from) await mergeHistory(repo, into, from);
+  const [journal, groups] = await Promise.all([
+    repo.find<JournalDoc>(into.journal),
+    repo.find<HistoryGroupsDoc>(into.groups),
+  ]);
+  writeRecord(journal, groups, {
+    members: heads,
+    time: Math.floor(Date.now() / 1000),
+    message: { draft: doc.target, merge: merge.url },
+    author,
+  });
+  const gone = doc.source ? [...(await mergesOf(repo, workspace, doc.source))] : [];
+  workspace.change((d) => {
+    remove(d.merges, merge.url);
+    if (!doc.source) return;
+    remove(d.drafts, doc.source);
+    for (const other of gone) remove(d.merges, other);
+  });
+}
+
+// The forks of a draft off `parent` (null for main), per member. A member the
+// parent cloned branches off its clone as it is now; one the parent only
+// recorded a fork point for keeps that point, since the parent never changed
+// it; every other member of main's branches off the member as it is now.
+export async function forkPoints(
+  repo: Repo,
+  rootUrl: AutomergeUrl,
+  parent: DraftDoc | null
+): Promise<Record<AutomergeUrl, CloneEntry>> {
+  const parentClones = parent?.clones ?? {};
+  const { members } = await walkDocTree(canonicalUrl(rootUrl), (url) => repo.find(url));
+  const clones: Record<AutomergeUrl, CloneEntry> = {};
+  const sources: { url: AutomergeUrl; read: AutomergeUrl }[] = members
+    .filter((member) => !parentClones[member.url])
+    .map((member) => ({ url: member.url, read: member.url }));
+  for (const [url, entry] of Object.entries(parentClones) as [AutomergeUrl, CloneEntry][]) {
+    if (entry.cloneUrl) sources.push({ url, read: entry.cloneUrl });
+    else clones[url] = forkEntry(url, entry.source, entry.clonedAt);
+  }
+  await Promise.all(
+    sources.map(async ({ url, read }) => {
+      try {
+        const handle = await repo.find<unknown>(read);
+        clones[url] = forkEntry(url, read, handle.heads());
+      } catch (err) {
+        console.warn("[drafts] failed to fork member:", url, err);
+      }
+    })
+  );
+  return clones;
+}
+
+// Automerge rejects `undefined` values, so `source` is only set when the
+// draft forks off something other than the member itself.
+function forkEntry(
+  url: AutomergeUrl,
+  source: AutomergeUrl | undefined,
+  clonedAt: CloneEntry["clonedAt"]
+): CloneEntry {
+  const from = source ? canonicalUrl(source) : null;
+  const heads = [...clonedAt] as UrlHeads;
+  return from && from !== url ? { source: from, clonedAt: heads } : { clonedAt: heads };
+}
+
+// Where a merge into `draft` (null for main) writes `url`: main's member
+// itself, the draft's clone, or a clone made now of the version the draft
+// reads, so nothing outside the draft is written.
+async function writableCopy(
+  repo: Repo,
+  draft: DocHandle<DraftDoc> | null,
+  url: AutomergeUrl
+): Promise<DocHandle<unknown>> {
+  if (!draft) return repo.find<unknown>(url);
+  const entry = draft.doc()?.clones?.[url];
+  if (entry?.cloneUrl) return repo.find<unknown>(entry.cloneUrl);
+  const source = await repo.find<unknown>(entry?.source ?? url);
+  const clonedAt = entry ? ([...entry.clonedAt] as UrlHeads) : source.heads();
+  const clone = cloneAt(repo, source, clonedAt);
+  const cloneUrl = canonicalUrl(clone.url);
+  draft.change((d) => {
+    const recorded = d.clones[url];
+    if (recorded) recorded.cloneUrl = cloneUrl;
+    else d.clones[url] = { clonedAt, cloneUrl };
+  });
+  return clone;
+}
+
+// The merges `draft` is the source or target of.
+async function mergesOf(
+  repo: Repo,
+  workspace: DocHandle<Workspace>,
+  draft: AutomergeUrl
+): Promise<Set<AutomergeUrl>> {
+  const found = new Set<AutomergeUrl>();
+  for (const url of workspace.doc()?.merges ?? []) {
+    if (url === draft) continue;
+    const doc = (await repo.find<MergeDoc>(url)).doc();
+    if (doc?.source === draft || doc?.target === draft) found.add(url);
+  }
+  return found;
+}
+
+function remove(list: AutomergeUrl[], url: AutomergeUrl): void {
+  const i = list.indexOf(url);
+  if (i >= 0) list.splice(i, 1);
+}

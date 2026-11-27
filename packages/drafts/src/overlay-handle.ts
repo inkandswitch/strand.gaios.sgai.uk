@@ -9,7 +9,7 @@ import {
 
 type Listener = (...args: unknown[]) => void;
 
-// The members a draft handle changes. Everything else (doc, heads, view,
+// The members a overlay handle changes. Everything else (doc, heads, view,
 // diff, ...) forwards to whichever handle currently backs it.
 const OWNED: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
   "url",
@@ -35,7 +35,7 @@ const OWNED: ReadonlySet<PropertyKey> = new Set<PropertyKey>([
   "dispose",
 ]);
 
-export type DraftHandleOpts<T> = {
+export type OverlayHandleOpts<T> = {
   presentedUrl: AutomergeUrl;
   backing: DocHandle<T>;
   // Runs before every write, and may swap the backing (to a fresh clone) so
@@ -47,14 +47,14 @@ export type DraftHandleOpts<T> = {
 };
 
 type SubEntry = {
-  wrapped: DraftHandle<unknown>;
+  wrapped: OverlayHandle<unknown>;
   segments: unknown[];
 };
 
 /**
  * A `DocHandle` that keeps reporting the url it was asked for while reading
- * and writing whichever handle backs it: the original on main, the draft's
- * clone on a draft, either pinned to a checkpoint's heads. Events from the
+ * and writing whichever handle backs it: the member itself on main, the
+ * version an overlay reads it as on a draft or a merge. Events from the
  * backing are re-emitted with `handle` stamped to this wrapper, and sub-handles
  * stay in the presented url space, so nothing downstream sees a clone's url.
  *
@@ -63,7 +63,7 @@ type SubEntry = {
  * `scopeReplaced: true`: no patch stream connects two forks, so consumers
  * have to re-read `doc()`.
  */
-export class DraftHandle<T> {
+export class OverlayHandle<T> {
   readonly #presentedUrl: AutomergeUrl;
   #handle: DocHandle<T>;
   readonly #beforeWrite: (() => void) | undefined;
@@ -71,14 +71,14 @@ export class DraftHandle<T> {
   readonly #listeners = new Map<string, Set<Listener>>();
   readonly #forwarders = new Map<string, Listener>();
   readonly #subs = new Map<AutomergeUrl, SubEntry>();
-  #self: DraftHandle<T>;
+  #self: OverlayHandle<T>;
 
-  constructor(opts: DraftHandleOpts<T>) {
+  constructor(opts: OverlayHandleOpts<T>) {
     this.#presentedUrl = opts.presentedUrl;
     this.#handle = opts.backing;
     this.#beforeWrite = opts.beforeWrite;
     this.#writable = opts.writable;
-    this.#self = forwardingProxy<DraftHandle<T>>(
+    this.#self = forwardingProxy<OverlayHandle<T>>(
       this,
       () => this.#handle,
       OWNED
@@ -169,14 +169,14 @@ export class DraftHandle<T> {
   }
 
   // A ref or cursor made from a sub-handle must name the presented document,
-  // not the clone, or it won't resolve back through the draft. Cached by
+  // not the clone, or it won't resolve back through the overlay. Cached by
   // presented url so a swap can re-base every live sub-handle.
   sub(...segments: unknown[]): DocHandle<unknown> {
     const backingSub = subOf(this.#handle, segments);
     const presented = restampUrl(this.#presentedUrl, backingSub.url);
     const cached = this.#subs.get(presented);
     if (cached) return cached.wrapped as unknown as DocHandle<unknown>;
-    const wrapped = new DraftHandle<unknown>({
+    const wrapped = new OverlayHandle<unknown>({
       presentedUrl: presented,
       backing: backingSub,
       beforeWrite: this.#beforeWrite,
@@ -186,7 +186,7 @@ export class DraftHandle<T> {
     return wrapped as unknown as DocHandle<unknown>;
   }
 
-  on(ev: string, fn: Listener): DraftHandle<T> {
+  on(ev: string, fn: Listener): OverlayHandle<T> {
     this.#forward(ev);
     let set = this.#listeners.get(ev);
     if (!set) {
@@ -197,12 +197,12 @@ export class DraftHandle<T> {
     return this.#self;
   }
 
-  off(ev: string, fn: Listener): DraftHandle<T> {
+  off(ev: string, fn: Listener): OverlayHandle<T> {
     this.#listeners.get(ev)?.delete(fn);
     return this.#self;
   }
 
-  once(ev: string, fn: Listener): DraftHandle<T> {
+  once(ev: string, fn: Listener): OverlayHandle<T> {
     const wrapper: Listener = (...args) => {
       this.off(ev, wrapper);
       fn(...args);
@@ -210,15 +210,15 @@ export class DraftHandle<T> {
     return this.on(ev, wrapper);
   }
 
-  addListener(ev: string, fn: Listener): DraftHandle<T> {
+  addListener(ev: string, fn: Listener): OverlayHandle<T> {
     return this.on(ev, fn);
   }
 
-  removeListener(ev: string, fn: Listener): DraftHandle<T> {
+  removeListener(ev: string, fn: Listener): OverlayHandle<T> {
     return this.off(ev, fn);
   }
 
-  removeAllListeners(ev?: string): DraftHandle<T> {
+  removeAllListeners(ev?: string): OverlayHandle<T> {
     if (ev) this.#listeners.get(ev)?.clear();
     else this.#listeners.clear();
     return this.#self;
@@ -270,7 +270,7 @@ export class DraftHandle<T> {
 }
 
 export function unwrap<T>(handle: DocHandle<T>): DocHandle<T> {
-  return handle instanceof DraftHandle
+  return handle instanceof OverlayHandle
     ? (handle.backingHandle as DocHandle<T>)
     : handle;
 }

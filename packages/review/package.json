@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "Compare the checked-out draft with another: a provider that mounts the other draft beside it, and answers which files differ, whose changes they are, and the other draft's version of a document.",
+  "description": "Compare the checked-out overlay with another: a provider that holds which two versions are compared.",
   "main": "./dist/index.js",
   "scripts": {
     "dev": "vite build --watch",

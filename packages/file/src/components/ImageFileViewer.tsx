@@ -44,7 +44,7 @@ export function ImageFileViewer(props: {
 	// showing it can fade or swipe between them.
 	const compare = props.element
 		? subscribe<any>(props.element, {
-				type: "compare:view",
+				type: "compare-mode:view",
 				modes: {"onion-skin": true, swipe: true},
 				prefers: "swipe",
 			})

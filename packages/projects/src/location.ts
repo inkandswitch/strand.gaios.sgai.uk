@@ -11,8 +11,8 @@ import {
  *
  * As a url (what open events carry): `automerge:<projectId>/<name>/<name>#<heads>`
  * In the hash, behind a slug of the project's name and ahead of the tool and
- * the draft:
- * `#<slug>/automerge:<projectId>/<name>/<name>#<heads>?tool=<toolId>&draft=<url>&compare=<url>`
+ * the overlay:
+ * `#<slug>/automerge:<projectId>/<name>/<name>#<heads>?tool=<toolId>&overlay=<url>&at=<id>&compare=<url|main>&compare-at=<id>`
  */
 export type Location = {
 	projectId: DocumentId
@@ -20,11 +20,17 @@ export type Location = {
 	segments: string[]
 	heads?: string
 	toolId?: string
-	/** the project's draft it's in; main when unset */
-	draft?: AutomergeUrl
-	/** the draft it's compared with, if any */
-	compare?: AutomergeUrl
+	/** the project's draft or merge it's in; main when unset */
+	overlay?: AutomergeUrl
+	/** the point in that overlay's history it's seen at; its working copy when unset */
+	at?: string
+	/** what it's compared with: an overlay, or main (null); unset when it isn't */
+	compare?: AutomergeUrl | null
+	/** the point in that one's history it's compared with; its working copy when unset */
+	compareAt?: string
 }
+
+const MAIN = "main"
 
 const SCHEME = "automerge:"
 
@@ -37,13 +43,18 @@ export function parseHash(hash: string): Location | undefined {
 	if (!location) return undefined
 	const params = new URLSearchParams(query)
 	const toolId = params.get("tool")
-	const draft = params.get("draft")
+	const overlay = params.get("overlay")
 	const compare = params.get("compare")
+	const at = params.get("at")
+	const compareAt = params.get("compare-at")
+	const compared = compare === MAIN || isValidAutomergeUrl(compare)
 	return {
 		...location,
 		...(toolId ? {toolId} : {}),
-		...(isValidAutomergeUrl(draft) ? {draft} : {}),
-		...(isValidAutomergeUrl(compare) ? {compare} : {}),
+		...(isValidAutomergeUrl(overlay) ? {overlay} : {}),
+		...(at ? {at} : {}),
+		...(compare === MAIN ? {compare: null} : isValidAutomergeUrl(compare) ? {compare} : {}),
+		...(compared && compareAt ? {compareAt} : {}),
 	}
 }
 
@@ -61,8 +72,12 @@ export function formatHash(location: Location, projectName: string) {
 	const slug = slugify(projectName)
 	const query = [
 		location.toolId && `tool=${encodeURIComponent(location.toolId)}`,
-		location.draft && `draft=${location.draft}`,
-		location.compare && `compare=${location.compare}`,
+		location.overlay && `overlay=${location.overlay}`,
+		location.at && `at=${encodeURIComponent(location.at)}`,
+		location.compare !== undefined && `compare=${location.compare ?? MAIN}`,
+		location.compare !== undefined &&
+			location.compareAt &&
+			`compare-at=${encodeURIComponent(location.compareAt)}`,
 	].filter(Boolean)
 	const params = query.length ? `?${query.join("&")}` : ""
 	return `${slug ? `${slug}/` : ""}${formatLocationUrl(location)}${params}`

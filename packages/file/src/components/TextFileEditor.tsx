@@ -1,4 +1,4 @@
-import {createMemo, onCleanup, Show, type Accessor} from "solid-js"
+import {createMemo, createSignal, onCleanup, Show, type Accessor} from "solid-js"
 import {
 	EditorView,
 	lineNumbers,
@@ -27,11 +27,11 @@ import {
 	emacsStyleKeymap,
 } from "@codemirror/commands"
 import {automergeSyncPlugin} from "@automerge/automerge-codemirror"
-import {isImmutableStringFileDoc} from "../datatype"
+import {fileText, isImmutableStringFileDoc} from "../datatype"
 import {scrollPastEndWhenLong} from "./scroll-past-end"
 import {collectExtensions} from "./codemirror-extensions"
 import {createFileComments} from "./comments"
-import {diffEditor, useDraftCompare, type DraftCompare} from "./draft-diff"
+import {diffEditor, follow, useDraftCompare, type DraftCompare} from "./draft-diff"
 import codemirrorTheme from "../codemirror-theme"
 import {getLanguageExtension} from "../languages"
 import type {FileDoc} from "../types"
@@ -58,7 +58,8 @@ function modshift(event: {
 }
 
 // A file is treated as text whenever its content actually is text — a plain
-// string (editable) or an ImmutableString (read-only). We key off the content
+// string (editable) or an ImmutableString (read-only). Text kept as bytes is
+// shown read-only too (see `isTextBytesFileDoc`). We key off the content
 // shape rather than the declared mimeType, which is frequently missing or
 // generic (e.g. application/octet-stream) for files that are perfectly editable
 // text.
@@ -91,31 +92,68 @@ type EditorProps = {
 	element?: HTMLElement
 }
 
-// Side by side, the other version is laid out beside the editor, so it's
-// rebuilt going in or out of it.
+// Whether `handle` takes writes. A handle the overlay provider hands out is
+// re-pointed in place: checked out at a point in history it turns read-only,
+// and back again on the working copy.
+const takesWrites = (handle: any) => !!handle && !handle.isReadOnly?.()
+
+/**
+ * Any text file: typed into when it's plain text read through a handle that
+ * takes writes, read-only otherwise (an ImmutableString, text kept as bytes,
+ * or a handle at a point in history), following the file as it changes.
+ * Which it is is read off the handle and the content, and the editor is
+ * rebuilt when that changes, as it is going in or out of side by side, where
+ * the other version is laid out beside it.
+ */
 export function TextFileEditor(props: EditorProps) {
 	const compare =
 		props.handle && props.element ? useDraftCompare(props.element, props.handle) : () => undefined
 	const beside = createMemo(() => compare()?.mode === "side-by-side")
+
+	// Asked again whenever the handle changes, which a re-point is. After the
+	// change has gone round its listeners, the editor's own among them.
+	const [handleWrites, setHandleWrites] = createSignal(takesWrites(props.handle))
+	if (props.handle) {
+		let live = true
+		const check = () =>
+			queueMicrotask(() => {
+				if (live) setHandleWrites(takesWrites(props.handle))
+			})
+		props.handle.on("change", check)
+		onCleanup(() => {
+			live = false
+			props.handle.off("change", check)
+		})
+	}
+	const writable = createMemo(() => handleWrites() && typeof props.doc.content === "string")
+
+	const shape = createMemo(
+		() => ({beside: beside(), writable: writable()}),
+		undefined,
+		{equals: (a, b) => a?.beside === b.beside && a?.writable === b.writable},
+	)
 	return (
-		<Show
-			when={beside()}
-			fallback={
-				<Editor doc={props.doc} handle={props.handle} element={props.element} compare={compare} />
-			}>
-			<Editor
-				doc={props.doc}
-				handle={props.handle}
-				element={props.element}
-				compare={compare}
-				beside
-			/>
+		<Show when={shape()} keyed>
+			{(current) => (
+				<Editor
+					doc={props.doc}
+					handle={props.handle}
+					element={props.element}
+					compare={compare}
+					beside={current.beside}
+					writable={current.writable}
+				/>
+			)}
 		</Show>
 	)
 }
 
 function Editor(
-	props: EditorProps & {compare: Accessor<DraftCompare | undefined>; beside?: boolean},
+	props: EditorProps & {
+		compare: Accessor<DraftCompare | undefined>
+		beside: boolean
+		writable: boolean
+	},
 ) {
 	const languageExtension = getLanguageExtension(
 		props.doc.extension,
@@ -130,12 +168,48 @@ function Editor(
 		props.handle && props.element
 			? createFileComments({handle: props.handle, element: props.element})
 			: undefined
+
+	// Typing: written through to the file as it's typed, and the file's own
+	// changes merged back in.
+	const editing = (handle: any) => [
+		history(),
+		indentUnit.of("\t"),
+		EditorState.allowMultipleSelections.of(true),
+		EditorView.clickAddsSelectionRange.of((event) => {
+			const mask = modshift(event)
+			if (mask == 1 << mod.option) return true
+			return false
+		}),
+		rectangularSelection({
+			eventFilter(event) {
+				const mask = modshift(event)
+				if (mask == ((1 << mod.shift) | (1 << mod.option)))
+					return true
+				return false
+			},
+		}),
+		keymap.of([
+			indentWithTab,
+			...emacsStyleKeymap,
+			...searchKeymap,
+			...historyKeymap,
+			...foldKeymap,
+			...defaultKeymap,
+		]),
+		tsCompartment.of([]),
+		automergeSyncPlugin({handle, path: ["content"]}),
+	]
+	// Read-only: nothing typed, and the file followed below.
+	const reading = () => [
+		EditorState.readOnly.of(true),
+		EditorView.editable.of(false),
+		keymap.of([...searchKeymap, ...foldKeymap, ...defaultKeymap]),
+	]
+
 	const editor = diffEditor({
-		doc: props.doc.content?.toString() || "",
+		doc: fileText(props.handle?.doc() ?? props.doc),
 		compare: props.compare,
-		beside: !!props.beside,
-		// The other draft's version is edited like this one, while it can be.
-		editsFrom: props.handle ? props.element : undefined,
+		beside: props.beside,
 		besideExtensions: [
 			lineNumbers(),
 			highlightSpecialChars(),
@@ -164,52 +238,35 @@ function Editor(
 			highlightActiveLineGutter(),
 			highlightActiveLine(),
 			highlightSelectionMatches(),
-			history(),
 			foldGutter(),
 			bracketMatching(),
-			indentUnit.of("\t"),
-			EditorState.allowMultipleSelections.of(true),
 			EditorState.tabSize.of(2),
 			EditorView.lineWrapping,
 			scrollPastEndWhenLong(),
-			EditorView.clickAddsSelectionRange.of((event) => {
-				const mask = modshift(event)
-				if (mask == 1 << mod.option) return true
-				return false
-			}),
-			rectangularSelection({
-				eventFilter(event) {
-					const mask = modshift(event)
-					if (mask == ((1 << mod.shift) | (1 << mod.option)))
-						return true
-					return false
-				},
-			}),
-			keymap.of([
-				indentWithTab,
-				...emacsStyleKeymap,
-				...searchKeymap,
-				...historyKeymap,
-				...foldKeymap,
-				...defaultKeymap,
-			]),
+			props.writable ? editing(props.handle) : reading(),
 			languageExtension,
-			tsCompartment.of([]),
 			...codemirrorTheme,
-			automergeSyncPlugin({handle: props.handle, path: ["content"]}),
 			comments?.extension ?? [],
 			// last, so they can override anything above
-			collectExtensions(props.element, props.handle, props.doc, false),
+			collectExtensions(props.element, props.handle, props.doc, !props.writable),
 		],
 	})
 	const view = editor.view
 	comments?.attach(view)
 
+	// Read-only, the file is followed as it changes: an ImmutableString is
+	// replaced whole, and a point in history moves in place.
+	if (!props.writable && props.handle) {
+		const read = () => follow(view, fileText(props.handle.doc()))
+		props.handle.on("change", read)
+		onCleanup(() => props.handle.off("change", read))
+	}
+
 	// For code files, connect to the shared TypeScript language server (tsgo,
 	// in a worker) and add its features to the editor in place. Each document
 	// is its own folder in the server's filesystem, so open files never clash.
 	// It's loaded on demand, so only code files pay for it.
-	const languageId = lspLanguage(props.doc.extension)
+	const languageId = props.writable ? lspLanguage(props.doc.extension) : undefined
 	if (languageId) {
 		let disposed = false
 		onCleanup(() => {

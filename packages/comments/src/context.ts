@@ -10,12 +10,25 @@ export type CommentsContext = {
   projectId: string;
   projectName: string;
   root: "folder" | "document";
-  /** the documents open in the dock (or the root document), in order */
+  /**
+   * what's visible in the dock (or the root document), in order: an open
+   * folder counts as every document beneath it
+   */
   openDocs: AutomergeUrl[];
+  /**
+   * the documents shown in views, when the frame says: a thread on one that
+   * isn't is opened to be revealed; `openDocs` when absent
+   */
+  viewed?: AutomergeUrl[];
   /** the checked-out draft's name */
   ours: string | null;
   /** the draft it's compared with, while comparing */
   theirs: string | null;
+  /**
+   * which threads to list, when the frame decides: on what's visible
+   * (`openDocs`), or all of them; it then titles the sidebar too
+   */
+  scope?: "open" | "all";
   /** the thread a tool last asked to show (counted, so asking again is new) */
   active: { threadUrl: AutomergeUrl; count: number } | null;
 };

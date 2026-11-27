@@ -1,5 +1,4 @@
 import type { AutomergeUrl, DocHandle, Repo } from "@automerge/automerge-repo/slim";
-import { load } from "@automerge/automerge/slim";
 import { getRegistry, type DatatypeImplementation } from "@inkandswitch/patchwork-plugins";
 import { subscribe } from "@inkandswitch/patchwork-providers";
 import type { FolderDoc } from "@inkandswitch/patchwork-filesystem";
@@ -65,43 +64,80 @@ export function useThreadsOf(
   return all;
 }
 
-/** What the compare provider says about the other draft's copy of a document. */
-type ComparedVersion = { draft: AutomergeUrl; doc: Uint8Array | null } | null;
+type Overlay = AutomergeUrl | null;
+// Only which two versions are read here, whichever kind of comparison it is.
+type Comparison = { kind: "compare" | "merge"; a: Overlay; b: Overlay } | null;
+type OverlaysState = { checkedOut: Overlay };
+// The repo views read through: an overlay's, which reads other overlays too.
+type OverlayRepo = { findIn?(overlay: Overlay, url: AutomergeUrl): Promise<DocHandle<DocWithComments>> };
 
 /**
- * While two drafts are compared: the open threads the other draft's copy of
- * each of `urls` has. Read from its bytes, so they can be shown but not
- * changed from here.
+ * While two versions are compared: the open threads the other version's copy
+ * of each of `urls` has. Shown, but not changed from here.
  */
 export function useTheirThreads(
-  element: HTMLElement,
+  element: HTMLElement & { repo?: unknown },
   urls: Accessor<AutomergeUrl[]>,
   comparing: Accessor<boolean>
 ): Accessor<Map<AutomergeUrl, CommentThread[]>> {
   const [all, setAll] = createSignal(new Map<AutomergeUrl, CommentThread[]>());
+  // The other version: B, or A from inside B.
+  const [other, setOther] = createSignal<{ overlay: Overlay } | undefined>(undefined, {
+    equals: (a, b) => a?.overlay === b?.overlay,
+  });
   createEffect(() => {
     if (!comparing()) {
-      setAll(new Map());
+      setOther(undefined);
       return;
     }
+    let comparison: Comparison | undefined;
+    let overlays: OverlaysState | undefined;
+    const work = () =>
+      setOther(
+        comparison && overlays
+          ? { overlay: overlays.checkedOut === comparison.a ? comparison.b : comparison.a }
+          : undefined
+      );
+    onCleanup(
+      subscribe<never>(element, { type: "compare" } as never, (value) => {
+        comparison = value as Comparison;
+        work();
+      })
+    );
+    onCleanup(
+      subscribe<never>(element, { type: "overlays" } as never, (value) => {
+        overlays = value as OverlaysState;
+        work();
+      })
+    );
+  });
+  createEffect(() => {
+    const current = other();
     const list = urls();
     setAll(new Map());
+    const repo = element.repo as OverlayRepo | undefined;
+    if (!current || !repo?.findIn) return;
+    const stops: (() => void)[] = [];
+    let live = true;
     for (const url of list) {
-      onCleanup(
-        subscribe<never>(element, { type: "compare:version", url } as never, (value) => {
-          const version = value as ComparedVersion;
-          let threads: CommentThread[] = [];
-          if (version?.doc) {
-            try {
-              threads = structuredClone(openThreads(load<DocWithComments>(version.doc)));
-            } catch (error) {
-              console.error("comments: couldn't read the other draft's copy", error);
-            }
-          }
-          setAll((previous) => new Map(previous).set(url, threads));
-        })
+      repo.findIn(current.overlay, url).then(
+        (handle) => {
+          if (!live) return;
+          const read = () =>
+            setAll((previous) =>
+              new Map(previous).set(url, structuredClone(openThreads(handle.doc())))
+            );
+          read();
+          handle.on("change", read);
+          stops.push(() => handle.off("change", read));
+        },
+        (error) => console.error("comments: couldn't read the other version's copy", error)
       );
     }
+    onCleanup(() => {
+      live = false;
+      for (const stop of stops) stop();
+    });
   });
   return all;
 }

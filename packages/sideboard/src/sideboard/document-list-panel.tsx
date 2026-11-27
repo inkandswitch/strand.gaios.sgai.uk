@@ -25,9 +25,11 @@ import {
   watchFolder,
 } from "./document-list/auto-expand.ts";
 import CreateNew, { preloadCreateNew } from "./create-new.tsx";
-import { createOpenEvent, type OpenDetail } from "./events.ts";
-import { useChangeMarks } from "./document-list/changes.ts";
+import { createOpenEvent, LOCATION_TYPE, type OpenDetail } from "./events.ts";
+import { useChangeMarks, type Mark } from "./document-list/changes.ts";
+import { asString } from "./lib/text.ts";
 import { DocumentList } from "./document-list/document-list.tsx";
+import { ChangeMark } from "./document-list/item.tsx";
 import { LoadingRows } from "./document-list/loading-row.tsx";
 import { subscribe } from "@inkandswitch/patchwork-providers-solid";
 import {
@@ -58,12 +60,14 @@ const ItemMenu = lazy(() =>
  * unchanged can be folded away.
  *
  * Documents are opened by where they sit under the folder
- * (`automerge:<folder>/<name>/<name>`) rather than by their own url.
+ * (`automerge:<folder>/<name>/<name>`) rather than by their own url. With
+ * `rootRow`, the folder itself heads the list and opens like the rest.
  */
 export function DocumentListPanel(props: {
   folderUrl: AutomergeUrl;
   repo: Repo;
   element: PatchworkViewElement;
+  rootRow?: boolean;
 }) {
   const [folder, folderHandle] = useDocument<FolderDoc>(() => props.folderUrl, {
     repo: props.repo,
@@ -177,6 +181,13 @@ export function DocumentListPanel(props: {
     <aside class="document-list" on:contextmenu={openNewMenu}>
       <Show when={changes.comparing()}>
         <div class="document-list__compare-bar">
+          <Show when={changes.merge()}>
+            {(merge) => (
+              <span class="document-list__compare-kind">
+                {merge().published ? "Pull request" : "Merge preview"}
+              </span>
+            )}
+          </Show>
           <button
             type="button"
             class="document-list__collapse"
@@ -225,6 +236,16 @@ export function DocumentListPanel(props: {
         }}
       >
         <Show when={folderReady()} fallback={<LoadingRows depth={0} />}>
+          <Show when={props.rootRow}>
+            <RootRow
+              url={props.folderUrl}
+              name={asString(folder()?.title) ?? ""}
+              pressed={isSelected(props.folderUrl)}
+              mark={changes.mark(props.folderUrl)}
+              unchanged={changes.comparing() && !changes.mark(props.folderUrl)}
+              open={() => open({ url: props.folderUrl })}
+            />
+          </Show>
           <Suspense fallback={<LoadingRows depth={0} />}>
             <DocumentList
               depth={0}
@@ -269,6 +290,49 @@ export function DocumentListPanel(props: {
   );
 }
 
+/**
+ * The folder the list is of, heading it: it opens like any row, and its
+ * location is its own url.
+ */
+function RootRow(props: {
+  url: AutomergeUrl;
+  name: string;
+  pressed: boolean;
+  mark: Mark | undefined;
+  unchanged: boolean;
+  open(): void;
+}) {
+  return (
+    <div class="document-list__item">
+      <div
+        role="treeitem"
+        tabindex="-1"
+        aria-label={props.name}
+        aria-selected={props.pressed ? "true" : undefined}
+        class="document-list-item document-list-item--root"
+        classList={{ "document-list-item--unchanged": props.unchanged }}
+        draggable="true"
+        data-doc-url={props.url}
+        data-doc-type="folder"
+        ondragstart={(event: DragEvent) =>
+          event.dataTransfer?.setData(LOCATION_TYPE, props.url)
+        }
+        on:click={() => props.open()}
+        onkeydown={(event: KeyboardEvent) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            props.open();
+          }
+        }}
+      >
+        <span class="document-list-item__name">{props.name}</span>
+        <Show when={props.mark}>{(mark) => <ChangeMark mark={mark()} />}</Show>
+      </div>
+    </div>
+  );
+}
+
 // Kept here (rather than index.tsx) so the entry point never statically
 // imports solid-js/web — the doc-list tool shouldn't load Solid until it's
 // actually mounted for a folder document.
@@ -278,7 +342,12 @@ export function renderDocumentListPanel(
 ) {
   return render(
     () => (
-      <DocumentListPanel folderUrl={folderUrl} repo={element.repo} element={element} />
+      <DocumentListPanel
+        folderUrl={folderUrl}
+        repo={element.repo}
+        element={element}
+        rootRow
+      />
     ),
     element
   );

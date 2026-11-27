@@ -1,5 +1,5 @@
-import type {AutomergeUrl} from "@automerge/automerge-repo/slim"
-import {accept, request, subscribe, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
+import {parseAutomergeUrl, type AutomergeUrl} from "@automerge/automerge-repo/slim"
+import {accept, subscribe, type SubscribeEvent} from "@inkandswitch/patchwork-providers"
 import {
 	createEffect,
 	createSignal,
@@ -8,40 +8,39 @@ import {
 	onMount,
 	Show,
 	type Accessor,
-	type JSX,
 	type Setter,
 } from "solid-js"
 import {
 	drawnByView,
 	offered,
 	optionsIn,
-	type CompareEdit,
 	type CompareSelector,
 	type CompareView,
-	type ComparedVersion,
 	type Mode,
 	type Options,
 	type Versions,
 	type WorkspaceCompare,
 } from "./compare.ts"
 import {CollapseToggle, ComparePicker, ModeControls} from "./compare-ui.tsx"
-import {useMounted} from "./hooks.ts"
+import {OtherOverlay} from "./overlays.tsx"
+import type {At, Member, Overlay} from "./types.ts"
 
 /**
- * The draft the checked-out one is compared with: views of it are checked
- * out of the workspace by a draft provider of their own. `draft` is unset
- * for main. `merging` while the checked-out draft's merge into it is looked
- * over: then the document shows as `after`, the hidden draft the merge's
- * preview is on, once it's made, read-only, beside the draft as it is.
+ * The version checked out, A, at `aAt` in its history, and the one it's
+ * compared with, B, at `bAt`: views of B are checked out of the root by an
+ * overlay provider of their own. `names` are what A and B are called.
+ * `merging` while A is a merge and B its target, or A and B are two points
+ * in one overlay's history: then B is before and A after, and before comes
+ * first.
  */
 export type Comparing = {
-	workspace: AutomergeUrl
-	draft: AutomergeUrl | undefined
-	name: string
-	/** the checked-out draft's name */
-	ours: string
+	root: AutomergeUrl
+	a: Overlay
+	aAt: At
+	b: Overlay
+	bAt: At
+	names: {a: string; b: string}
 	merging: boolean
-	after: AutomergeUrl | undefined
 }
 
 /**
@@ -203,10 +202,11 @@ export function PanelCompareControls(props: {
 }
 
 /**
- * A document, and while the checked-out draft is compared with another, that
- * draft's version beside it, laid out by the compare mode, unless the
+ * A document, and while the checked-out overlay is compared with another
+ * version, that version beside it, laid out by the compare mode, unless the
  * document's view draws the mode itself. The view showing the document stays
- * put as the mode changes, and is told the mode and the other version.
+ * put as the mode changes, and is told the mode; a view drawing both versions
+ * reads the other one itself.
  */
 export function Compared(props: {
 	url: AutomergeUrl
@@ -216,7 +216,7 @@ export function Compared(props: {
 	compare: PanelCompare
 }) {
 	const [slotB, setSlotB] = createSignal<HTMLDivElement>()
-	const [version, setVersion] = createSignal<ComparedVersion>(null)
+	const [missing, setMissing] = createSignal(false)
 	let host!: HTMLDivElement
 	let slotA!: HTMLDivElement
 	let view!: HTMLElement
@@ -228,15 +228,16 @@ export function Compared(props: {
 		if (!current?.module.compose || drawnByView(current, props.compare.asked())) return
 		return current
 	}
-	const missing = () => version()?.doc === null
-	const merging = () => !!comparing()?.merging
 
+	// Whether B has the document at all, laid out beside it.
 	onMount(() => {
 		createEffect(() => {
-			if (!comparing()) return setVersion(null)
+			const other = laidOut() && comparing()
+			if (!other) return setMissing(false)
+			const id = parseAutomergeUrl(props.url).documentId
 			onCleanup(
-				subscribe(host, {type: "compare:version", url: props.url}, next =>
-					setVersion(() => next as unknown as ComparedVersion)
+				subscribe<Member[]>(host, {type: "overlay:members", overlay: other.b, at: other.bAt}, members =>
+					setMissing(!members.some(member => parseAutomergeUrl(member.url).documentId === id))
 				)
 			)
 		})
@@ -246,93 +247,48 @@ export function Compared(props: {
 		const current = laidOut()
 		const b = slotB()
 		if (!current || !b) return
-		onCleanup(
-			current.module.compose!({a: slotA, b}, props.compare.options(current), props.compare.versions())
-		)
+		// A merge reads before (the target) to after: B, then A.
+		const slots = comparing()?.merging ? {a: b, b: slotA} : {a: slotA, b}
+		onCleanup(current.module.compose!(slots, props.compare.options(current), props.compare.versions()))
 	})
 
+	// Both versions' views are told the same: the mode, and its options.
 	const told = new Set<(view: CompareView) => void>()
-	const toldB = new Set<(view: CompareView) => void>()
-	let latest: () => CompareView = () => NOT_COMPARED
-	// The other draft's view, laid out beside it, is told the same the other
-	// way round: the checked-out draft's version is the other one there.
-	const mirrored = (): CompareView => {
-		const ours = latest()
-		if (!ours.mode) return ours
-		const mine = version()?.ours
-		return {
-			...ours,
-			other: mine ?? null,
-			missing: mine === null,
-			editable: false,
-			names: ours.names && {ours: ours.names.theirs, theirs: ours.names.ours},
-		}
-	}
+	let latest = (): CompareView => null
 	createEffect(() => {
 		const current = mode()
-		const other = version()
 		const options = current && props.compare.options(current)
-		const collapsed = !!current && props.compare.collapsed()
-		latest = () => ({
-			mode: current?.id ?? null,
-			options: options ? options.current() : null,
-			other: current ? (other?.doc ?? null) : null,
-			missing: !!current && other?.doc === null,
-			collapsed,
-			editable: !!current && !merging() && !!other?.doc,
-			names: current && comparing() ? {ours: comparing()!.ours, theirs: comparing()!.name} : null,
-			merging: !!current && merging(),
-		})
+		const collapsed = props.compare.collapsed()
+		latest = () =>
+			current && options ? {mode: current.id, options: withCollapsed(options.current(), collapsed)} : null
 		const tell = () => {
 			for (const respond of told) respond(latest())
-			for (const respond of toldB) respond(mirrored())
 		}
 		tell()
 		if (options) onCleanup(options.subscribe(tell))
 	})
 
-	// Only the document's own views are told, the checked-out draft's and the
-	// other's: views inside them aren't comparing anything.
+	// Only the document's own views are told, A's and B's: views inside them
+	// aren't comparing anything.
 	const onSubscribe = (event: SubscribeEvent) => {
-		const selector = event.detail.selector as CompareSelector | CompareEdit
+		const selector = event.detail.selector as CompareSelector
+		if (selector.type !== "compare-mode:view") return
 		const target = event.target as HTMLElement
-		if (selector.type === "compare:edit") {
-			// The view's edits to the other version, made by the provider that
-			// compares, for this document.
-			if (target !== view) return
-			accept<boolean>(event, respond => {
-				if (!latest().editable) return respond(false)
-				request<boolean>(host, {
-					type: "compare:edit",
-					url: props.url,
-					splices: selector.splices,
-				} as never).then(
-					done => respond(!!done),
-					() => respond(false)
-				)
-			})
+		const own = target === view
+		const other = target === viewB && !!slotB()?.contains(target)
+		if (!own && !other) {
+			if (slotB()?.contains(target)) accept<CompareView>(event, respond => respond(null))
 			return
 		}
-		if (selector.type !== "compare:view") return
-		if (target === view) {
-			accept<CompareView>(event, respond => {
-				props.compare.setAsked(selector)
-				told.add(respond)
-				respond(latest())
-				return () => {
-					told.delete(respond)
-					if (props.compare.asked() === selector) props.compare.setAsked(undefined)
-				}
-			})
-		} else if (target === viewB && slotB()?.contains(target)) {
-			accept<CompareView>(event, respond => {
-				toldB.add(respond)
-				respond(mirrored())
-				return () => toldB.delete(respond)
-			})
-		} else if (slotB()?.contains(target)) {
-			accept<CompareView>(event, respond => respond(NOT_COMPARED))
-		}
+		accept<CompareView>(event, respond => {
+			if (own) props.compare.setAsked(selector)
+			told.add(respond)
+			respond(latest())
+			return () => {
+				told.delete(respond)
+				if (own && props.compare.asked() === selector) props.compare.setAsked(undefined)
+			}
+		})
 	}
 	onMount(() => host.addEventListener("patchwork:subscribe", onSubscribe as EventListener))
 	onCleanup(() => host.removeEventListener("patchwork:subscribe", onSubscribe as EventListener))
@@ -348,59 +304,34 @@ export function Compared(props: {
 	}
 
 	return (
-		<div ref={host} class="projects__compare" classList={{"projects__compare--merge": merging()}}>
+		<div
+			ref={host}
+			class="projects__compare"
+			classList={{"projects__compare--merge": !!comparing()?.merging}}>
 			<div ref={slotA} class="projects__compare-slot" data-version="a">
-				<Show
-					when={merging() && comparing()}
-					fallback={
-						<patchwork-view
-							ref={reportTool}
-							class="projects__document"
-							doc-url={props.url}
-							tool-id={props.toolId}
-						/>
-					}>
-					{merge => (
-						<Show
-							when={merge().after}
-							keyed
-							fallback={<p class="projects__empty">Working out the merge…</p>}>
-							{after => (
-								<Show
-									when={!version()?.removed}
-									fallback={<p class="projects__empty">Removed by the merge</p>}>
-									<ReadOnly>
-										<OtherDraft workspace={merge().workspace} draft={after}>
-											<patchwork-view
-												ref={reportTool}
-												class="projects__document"
-												doc-url={props.url}
-												tool-id={props.tool() ?? props.toolId}
-											/>
-										</OtherDraft>
-									</ReadOnly>
-								</Show>
-							)}
-						</Show>
-					)}
-				</Show>
+				<patchwork-view
+					ref={reportTool}
+					class="projects__document"
+					doc-url={props.url}
+					tool-id={props.toolId}
+				/>
 			</div>
 			<Show when={laidOut() && comparing()}>
 				{other => (
 					<div ref={setSlotB} class="projects__compare-slot" data-version="b">
 						<Show
 							when={!missing()}
-							fallback={<p class="projects__empty">Not in {other().name}</p>}>
-							<Show when={other().draft ?? "main"} keyed>
-								{_draft => (
-									<OtherDraft workspace={other().workspace} draft={other().draft}>
+							fallback={<p class="projects__empty">Not in {other().names.b}</p>}>
+							<Show when={`${other().b ?? "main"}@${other().bAt ?? ""}`} keyed>
+								{_version => (
+									<OtherOverlay root={other().root} overlay={other().b} at={other().bAt}>
 										<patchwork-view
 											ref={element => (viewB = element)}
 											class="projects__document"
 											doc-url={props.url}
 											tool-id={props.tool() ?? props.toolId}
 										/>
-									</OtherDraft>
+									</OtherOverlay>
 								)}
 							</Show>
 						</Show>
@@ -411,84 +342,10 @@ export function Compared(props: {
 	)
 }
 
-/** The workspace with `draft` checked out (main when unset), for the views inside. */
-function OtherDraft(props: {
-	workspace: AutomergeUrl
-	draft: AutomergeUrl | undefined
-	children: JSX.Element
-}) {
-	const [element, setElement] = createSignal<HTMLElement>()
-	const mounted = useMounted("patchwork-draft-provider", element)
-	return (
-		<patchwork-view
-			ref={setElement}
-			class="projects__other-draft"
-			component="patchwork-draft-provider"
-			doc-url={props.workspace}
-			attr:draft={props.draft}>
-			<Show when={mounted()}>{props.children}</Show>
-		</patchwork-view>
-	)
-}
-
-/**
- * Views inside can be read, scrolled, searched and copied from, but nothing
- * typed, pasted or dropped reaches them.
- */
-function ReadOnly(props: {children: JSX.Element}) {
-	let element!: HTMLDivElement
-	onMount(() => {
-		const block = (event: Event) => {
-			event.preventDefault()
-			event.stopPropagation()
-		}
-		const onKey = (event: KeyboardEvent) => {
-			const reading =
-				READING_KEYS.has(event.key) ||
-				((event.metaKey || event.ctrlKey) && READING_SHORTCUTS.has(event.key.toLowerCase()))
-			if (!reading) block(event)
-		}
-		const blocked = ["beforeinput", "paste", "cut", "drop"] as const
-		for (const type of blocked) element.addEventListener(type, block, true)
-		element.addEventListener("keydown", onKey, true)
-		onCleanup(() => {
-			for (const type of blocked) element.removeEventListener(type, block, true)
-			element.removeEventListener("keydown", onKey, true)
-		})
-	})
-	return (
-		<div ref={element} class="projects__read-only">
-			{props.children}
-		</div>
-	)
-}
-
-const READING_KEYS = new Set([
-	"ArrowUp",
-	"ArrowDown",
-	"ArrowLeft",
-	"ArrowRight",
-	"PageUp",
-	"PageDown",
-	"Home",
-	"End",
-	"Tab",
-	"Escape",
-	"Shift",
-	"Meta",
-	"Control",
-	"Alt",
-])
-
-const READING_SHORTCUTS = new Set(["a", "c", "f", "g"])
-
-const NOT_COMPARED: CompareView = {
-	mode: null,
-	options: null,
-	other: null,
-	missing: false,
-	collapsed: false,
-	editable: false,
-	names: null,
-	merging: false,
+// A mode's options, as a view is told them: with whether to fold what's
+// unchanged away, where the options leave room for it.
+function withCollapsed(options: unknown, collapsed: boolean): unknown {
+	if (options === null || options === undefined) return {collapsed}
+	if (typeof options === "object" && !Array.isArray(options)) return {...options, collapsed}
+	return options
 }

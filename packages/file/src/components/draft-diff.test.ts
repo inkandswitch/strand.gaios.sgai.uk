@@ -1,7 +1,17 @@
 import {describe, expect, it} from "vitest"
 import {EditorState, Text} from "@codemirror/state"
 import {EditorView} from "@codemirror/view"
-import {combinedRanges, diffEditor, follow, modifiedLines, splicesOf, type DraftCompare} from "./draft-diff"
+import {
+	combinedRanges,
+	afterMarks,
+	diffEditor,
+	follow,
+	modifiedLines,
+	splicesOf,
+	versionRanges,
+	type DraftCompare,
+	type TextConflict,
+} from "./draft-diff"
 
 // Makes the splices, one after another, to `text`.
 const apply = (text: string, splices: ReturnType<typeof splicesOf>) =>
@@ -64,45 +74,58 @@ const comparing = (mode: DraftCompare["mode"], base: string, original: string): 
 	original,
 	base,
 	collapsed: false,
-	editable: false,
 	names: null,
 	merging: false,
+	conflicts: [],
 })
 
 const ghosts = (view: EditorView, kind: string) =>
 	[...view.dom.querySelectorAll(`.${kind}`)].map(each => each.textContent)
 
-describe("side by side", () => {
-	it("marks on each side what its draft changed since they parted", () => {
-		const base = "one\ntwo\nthree\nfour\nfive"
-		const editor = diffEditor({
-			doc: "one\nTWO\nthree\nfour\nfive\nadded",
-			extensions: [],
-			besideExtensions: [],
-			beside: true,
-			compare: () => comparing("side-by-side", base, "one\ntwo\nthree\nFOUR\nfive"),
-		})
-		const [ours, theirs] = editor.views
-		expect(modifiedLines(ours.state)).toEqual([2])
-		expect(modifiedLines(theirs.state)).toEqual([4])
-		expect(ours.dom.querySelectorAll(".cm-line.cm-insertedLine")).toHaveLength(1)
-		expect(theirs.dom.querySelectorAll(".cm-line.cm-insertedLine")).toHaveLength(0)
-		editor.destroy()
-	})
+const lineClasses = (view: EditorView, kind: string) =>
+	[...view.dom.querySelectorAll(`.cm-line.${kind}`)].map(each => each.textContent)
 
-	it("marks nothing on the side whose draft changed nothing", () => {
+describe("side by side", () => {
+	it("marks lines that differ yellow on both sides, nothing struck out", () => {
 		const base = "one\ntwo\nthree"
 		const editor = diffEditor({
-			doc: "one\nthree",
+			doc: "one\nTWO\nthree",
 			extensions: [],
 			besideExtensions: [],
 			beside: true,
 			compare: () => comparing("side-by-side", base, base),
 		})
 		const [ours, theirs] = editor.views
-		expect(ghosts(ours, "cm-deletedGhost")).toEqual(["two"])
-		expect(theirs.dom.querySelectorAll(".cm-deletedGhost, .cm-line.cm-insertedLine, .cm-line.cm-modifiedLine")).toHaveLength(0)
+		expect(lineClasses(ours, "cm-differsLine")).toEqual(["TWO"])
+		expect(lineClasses(theirs, "cm-differsLine")).toEqual(["two"])
+		expect(ours.dom.querySelectorAll(".cm-ghost")).toHaveLength(0)
 		editor.destroy()
+	})
+
+	it("marks lines only one side has: added by its draft, or removed by the other's", () => {
+		const base = "one\ntwo\nthree"
+		const editor = diffEditor({
+			doc: "one\nthree\nmine",
+			extensions: [],
+			besideExtensions: [],
+			beside: true,
+			compare: () => comparing("side-by-side", base, base),
+		})
+		const [ours, theirs] = editor.views
+		expect(lineClasses(ours, "cm-addedLine")).toEqual(["mine"])
+		expect(lineClasses(theirs, "cm-removedLine")).toEqual(["two"])
+		expect(theirs.dom.querySelectorAll(".cm-line.cm-addedLine, .cm-line.cm-differsLine")).toHaveLength(0)
+		editor.destroy()
+	})
+})
+
+describe("versionRanges", () => {
+	it("tells added from removed by the ancestor", () => {
+		const doc = Text.of(["a", "new", "b"])
+		const kinds = versionRanges("a\nb", doc, "a\nb").map(each => each.value.spec.class)
+		expect(kinds).toEqual(["cm-addedLine"])
+		const kept = versionRanges("a\nold\nb", Text.of(["a", "old", "b"]), "a\nb").map(each => each.value.spec.class)
+		expect(kept).toEqual(["cm-removedLine"])
 	})
 })
 
@@ -122,30 +145,122 @@ describe("stacked", () => {
 })
 
 describe("combined", () => {
-	it("marks both drafts' changes since they parted, in this draft's text", () => {
+	it("shows both versions where they differ, in their drafts' colours, nothing struck out", () => {
 		const editor = diffEditor({
-			doc: "one TWO three",
+			doc: "one\nTWO\nthree",
 			extensions: [],
 			besideExtensions: [],
 			beside: false,
-			compare: () => comparing("inline", "one two three", "two three four"),
+			compare: () => comparing("inline", "one\ntwo\nthree", "one\nTwo\nthree"),
 		})
 		const view = editor.view
-		expect(view.state.doc.toString()).toBe("one TWO three")
 		expect(view.state.readOnly).toBe(true)
-		expect(ghosts(view, "cm-oursInserted")).toEqual(["TWO"])
-		expect(ghosts(view, "cm-oursDeleted")).toEqual(["two"])
-		expect(ghosts(view, "cm-theirsDeleted")).toEqual(["one "])
-		expect(ghosts(view, "cm-theirsInserted")).toEqual([" four"])
+		expect(lineClasses(view, "cm-oursLine")).toEqual(["TWO"])
+		expect(ghosts(view, "cm-theirsLines")).toEqual(["Two"])
+		expect(view.dom.querySelector(".cm-oursDeleted, .cm-theirsDeleted")).toBeNull()
 		editor.destroy()
 	})
 
-	it("puts the other draft's changes where they fall in this draft's text", () => {
-		const ours = Text.of(["added", "a b c"])
-		const ranges = combinedRanges("a b c", ours, "a b c d")
-		const theirs = ranges.find(
-			each => (each.value.spec.widget as {className?: string})?.className === "cm-theirsInserted",
-		)
-		expect(theirs?.from).toBe(ours.length)
+	it("puts lines only theirs has where they'd be", () => {
+		const ours = Text.of(["a", "c"])
+		const ranges = combinedRanges(ours, "a\nb\nc")
+		expect(ranges).toHaveLength(1)
+		expect(ranges[0].from).toBe(2)
+		expect(ranges[0].value.spec.side).toBe(-1)
+	})
+
+	it("puts lines only theirs has at the end after the last line", () => {
+		const ours = Text.of(["a", "b"])
+		const ranges = combinedRanges(ours, "a\nb\nc")
+		expect(ranges.map(each => [each.from, each.value.spec.side])).toEqual([[ours.length, 1]])
 	})
 })
+
+describe("a merge's conflicts, in after", () => {
+	const doc = Text.of(["one", "2", "TWO", "four"])
+	const conflict = (state: TextConflict["state"]) => ({
+		from: doc.line(2).from,
+		to: doc.line(3).to,
+		source: "TWO",
+		target: "2",
+		both: "2\nTWO",
+		state,
+	})
+	const found = (marks: ReturnType<typeof afterMarks>) => {
+		const out: string[] = []
+		marks.between(0, doc.length, (at, to, mark) => {
+			const kind = mark.spec.widget?.constructor.name ?? mark.spec.class
+			out.push(`${doc.lineAt(at).number}${to > at ? `-${doc.lineAt(to).number}` : ""} ${kind}`)
+		})
+		return out
+	}
+
+	it("hides an open conflict's lines under a hatch, beneath its options", () => {
+		expect(found(afterMarks(doc, {conflicts: [conflict("open")]}, null))).toEqual([
+			"2 ConflictChips",
+			"2-3 Hatch",
+		])
+	})
+
+	it("shows the option hovered in place of the lines", () => {
+		const marks = afterMarks(doc, {conflicts: [conflict("open")]}, {index: 0, option: "both"})
+		expect(found(marks)).toEqual(["2 ConflictChips", "2-3 PreviewLines"])
+	})
+
+	it("colours each taken line by the side it came from", () => {
+		expect(found(afterMarks(doc, {conflicts: [conflict("both")]}, null))).toEqual([
+			"2 ConflictChips",
+			"2 cm-conflictTarget",
+			"3 cm-conflictSource",
+		])
+	})
+
+	it("drops the colour of a line that was edited", () => {
+		const edited = Text.of(["one", "2", "WINTER", "four"])
+		const marks = afterMarks(edited, {conflicts: [{...conflict("edited"), to: edited.line(3).to}]}, null)
+		const out: string[] = []
+		marks.between(0, edited.length, (at, _to, mark) => {
+			out.push(`${edited.lineAt(at).number} ${mark.spec.widget?.constructor.name ?? mark.spec.class}`)
+		})
+		expect(out).toEqual(["2 ConflictChips", "2 cm-conflictTarget"])
+	})
+})
+
+describe("a merge's conflicts, folding", () => {
+	it("keep a conflict open when it's resolved to what before has", () => {
+		const lines = Array.from({length: 30}, (_, i) => `line-${String(i + 1).padStart(2, "0")}`)
+		const text = lines.join("\n")
+		const doc = Text.of(lines)
+		const conflict: TextConflict = {
+			from: doc.line(15).from,
+			to: doc.line(15).to,
+			source: "SOURCE",
+			target: "line-15",
+			both: "line-15\nSOURCE",
+			state: "target",
+		}
+		const editor = diffEditor({
+			doc: text,
+			extensions: [],
+			besideExtensions: [],
+			beside: false,
+			compare: () => ({...comparing("stacked", text, text), collapsed: true, merging: true, conflicts: [conflict]}),
+		})
+		const shown = editor.view.contentDOM.textContent ?? ""
+		expect(shown).toContain("line-15")
+		expect(shown).not.toContain("line-05")
+		editor.destroy()
+
+		// Without it, that line reads as unchanged and folds away.
+		const plain = diffEditor({
+			doc: text,
+			extensions: [],
+			besideExtensions: [],
+			beside: false,
+			compare: () => ({...comparing("stacked", text, text), collapsed: true, merging: true, conflicts: []}),
+		})
+		expect(plain.view.contentDOM.textContent ?? "").not.toContain("line-15")
+		plain.destroy()
+	})
+})
+

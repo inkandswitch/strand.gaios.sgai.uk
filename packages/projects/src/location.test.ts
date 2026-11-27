@@ -54,11 +54,11 @@ describe("parseHash", () => {
 		})
 	})
 
-	it("reads the draft, and ignores one that isn't a url", () => {
+	it("reads the overlay, and ignores one that isn't a url", () => {
 		expect(
-			parseHash(`automerge:${PROJECT}/Roadmap?draft=automerge:${DRAFT}`)
-		).toEqual({projectId: PROJECT, segments: ["Roadmap"], draft: `automerge:${DRAFT}`})
-		expect(parseHash(`automerge:${PROJECT}?draft=nope`)).toEqual({
+			parseHash(`automerge:${PROJECT}/Roadmap?overlay=automerge:${DRAFT}`)
+		).toEqual({projectId: PROJECT, segments: ["Roadmap"], overlay: `automerge:${DRAFT}`})
+		expect(parseHash(`automerge:${PROJECT}?overlay=nope`)).toEqual({
 			projectId: PROJECT,
 			segments: [],
 		})
@@ -84,31 +84,56 @@ describe("formatHash", () => {
 		expect(parseHash(hash)).toEqual(location)
 	})
 
-	it("writes the draft after the tool", () => {
+	it("writes the points in history beside the overlay and what it's compared with", () => {
+		const location = {
+			projectId: PROJECT,
+			segments: ["Roadmap"],
+			overlay: `automerge:${DRAFT}` as AutomergeUrl,
+			at: "abc123",
+			compare: null,
+			compareAt: "def456",
+		}
+		const hash = formatHash(location, "Q3")
+		expect(hash).toBe(
+			`q3/automerge:${PROJECT}/Roadmap?overlay=automerge:${DRAFT}&at=abc123&compare=main&compare-at=def456`
+		)
+		expect(parseHash(hash)).toEqual(location)
+		// A point to compare with means nothing without something compared.
+		expect(parseHash(`automerge:${PROJECT}?compare-at=def456`)).toEqual({projectId: PROJECT, segments: []})
+	})
+
+	it("writes the overlay after the tool", () => {
 		const location = {
 			projectId: PROJECT,
 			segments: ["Roadmap"],
 			toolId: "markdown",
-			draft: `automerge:${DRAFT}` as AutomergeUrl,
+			overlay: `automerge:${DRAFT}` as AutomergeUrl,
 		}
 		const hash = formatHash(location, "Q3")
 		expect(hash).toBe(
-			`q3/automerge:${PROJECT}/Roadmap?tool=markdown&draft=automerge:${DRAFT}`
+			`q3/automerge:${PROJECT}/Roadmap?tool=markdown&overlay=automerge:${DRAFT}`
 		)
 		expect(parseHash(hash)).toEqual(location)
 	})
 
-	it("writes the draft it's compared with last", () => {
+	it("writes what it's compared with last", () => {
 		const location = {
 			projectId: PROJECT,
 			segments: [],
-			draft: `automerge:${DRAFT}` as AutomergeUrl,
+			overlay: `automerge:${DRAFT}` as AutomergeUrl,
 			compare: `automerge:${PROJECT}` as AutomergeUrl,
 		}
 		const hash = formatHash(location, "Q3")
 		expect(hash).toBe(
-			`q3/automerge:${PROJECT}?draft=automerge:${DRAFT}&compare=automerge:${PROJECT}`
+			`q3/automerge:${PROJECT}?overlay=automerge:${DRAFT}&compare=automerge:${PROJECT}`
 		)
+		expect(parseHash(hash)).toEqual(location)
+	})
+
+	it("names main as what it's compared with", () => {
+		const location = {projectId: PROJECT, segments: [], compare: null}
+		const hash = formatHash(location, "Q3")
+		expect(hash).toBe(`q3/automerge:${PROJECT}?compare=main`)
 		expect(parseHash(hash)).toEqual(location)
 	})
 
