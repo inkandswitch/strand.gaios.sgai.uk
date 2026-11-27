@@ -1,9 +1,9 @@
 const themes = [
-	{id: "warm", name: "Warm", colorScheme: "light"},
-	{id: "purple", name: "Purple", colorScheme: "light"},
-	{id: "teal", name: "Teal", colorScheme: "light"},
-	{id: "neutral", name: "Neutral", colorScheme: "light"},
-	{id: "dark", name: "Dark", colorScheme: "dark"},
+	{id: "warm", name: "Warm"},
+	{id: "purple", name: "Purple"},
+	{id: "teal", name: "Teal"},
+	{id: "neutral", name: "Neutral"},
+	{id: "dark", name: "Dark"},
 ]
 
 export const plugins = [
@@ -11,8 +11,8 @@ export const plugins = [
 		type: "patchwork:theme",
 		id: theme.id,
 		name: theme.name,
-		colorScheme: theme.colorScheme,
-		style: new URL("./gaios.css", import.meta.url).href,
+		// each theme's stylesheet says its own color-scheme
+		style: new URL(`./${theme.id}.css`, import.meta.url).href,
 		async load() {
 			return {}
 		},

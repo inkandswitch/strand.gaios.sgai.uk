@@ -19,12 +19,12 @@
   "keywords": [],
   "author": "Ink & Switch",
   "dependencies": {
-    "@inkandswitch/patchwork-filesystem": "^0.2.9",
-    "@inkandswitch/patchwork-plugins": "^1.2.5",
+    "@inkandswitch/patchwork-filesystem": "^0.2.23",
+    "@inkandswitch/patchwork-plugins": "^1.2.9",
     "solid-js": "^1.9.3"
   },
   "devDependencies": {
-    "@inkandswitch/patchwork-bootloader": "^0.7.2",
+    "@inkandswitch/patchwork-bootloader": "^0.9.9",
     "happy-dom": "^15.11.7",
     "typescript": "^5.8.3",
     "vite": "^7.3.1",
