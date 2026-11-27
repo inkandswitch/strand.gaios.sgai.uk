@@ -26,7 +26,7 @@ import {render} from "solid-js/web"
 import {useCompareModes, type Versions, type WorkspaceCompare} from "./compare.ts"
 import {FolderPanel} from "./folder-panel.tsx"
 import {useDocTitle} from "./hooks.ts"
-import type {Placement, ProjectRoute, Side} from "./navigation.ts"
+import {nothingOpen, type Placement, type ProjectRoute, type Side} from "./navigation.ts"
 import {OpenWith} from "./open-with.tsx"
 import {
 	Compared,
@@ -182,7 +182,8 @@ export function Dock(props: {
 			panels.get(target.id)?.setRoute(route)
 			target.api.setActive()
 		} else if (!active) {
-			add(route)
+			// the project's own tab only when it's asked for
+			if (!nothingOpen(route)) add(route)
 		} else if (placement && "to" in placement) {
 			add(route, positionFor(api, placement, active.group.id))
 		} else {

@@ -658,10 +658,10 @@ comparison.
 `navigation:focus`.
 
 Everything in a project opens in a tab, folders included: a location
-ending in a folder shows that folder, and a project with nothing else open
-shows itself, so the card is never empty while a project is open. The tree
-has the project as its top row; clicking a folder's row opens it, and its
-arrow unfolds it.
+ending in a folder shows that folder. The project itself opens the same
+way, but only when it's asked for: landing on a project, or closing its
+last tab, leaves the dock empty. The tree has the project as its top row;
+clicking a folder's row opens it, and its arrow unfolds it.
 
 A folder's tab lists its own entries, folders first, in the folder's order,
 with when each was last edited (the newest history entry that changed it,
@@ -672,8 +672,8 @@ tab is a review instead (see What differs between two versions).
 The root's tool reports what each group of tabs is showing, the tab in
 front only, with `navigation:showing { urls }`. The History panel and the
 comments cover what's visible: what's shown, each folder as every member
-beneath it. With the project itself shown, that's everything. There is no
-switch for it.
+beneath it. With nothing open, or the project itself shown, that's
+everything. There is no switch for it.
 
 ## What a view does
 

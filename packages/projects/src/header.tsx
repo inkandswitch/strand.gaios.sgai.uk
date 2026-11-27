@@ -104,7 +104,7 @@ export function WorkspaceHeader(props: {
 /**
  * What's checked out and what to do next with it, read as one sentence:
  *
- *   - one draft: `draft ▾ │ Compare`
+ *   - one draft: `draft ▾`
  *   - a point in its history: `draft ▾ │ point · read-only ×`
  *   - two points: `draft ▾ │ Ⓐ earlier → Ⓑ later ×`
  *   - two versions: `● ours ▾ ↔ ● theirs ▾ ×`
@@ -214,17 +214,6 @@ function VersionUnit(props: {
 								<ClearButton title="Back to the working copy" onClick={() => void leaveHistory()} />
 							</>
 						)}
-					</Show>
-					<Show when={!props.comparison && !props.overlays.at}>
-						<span class="projects__unit-divider" aria-hidden="true" />
-						<VersionPicker
-							label={`Compare ${name(ours())} with`}
-							title="Compare with another version"
-							overlays={compareChoices(props.overlays, ours())}
-							name={name}
-							pick={overlay => void props.send({type: "compare:set", overlay})}>
-							Compare
-						</VersionPicker>
 					</Show>
 				</div>
 			}>
@@ -372,8 +361,7 @@ function MergeUnit(props: {
 
 /**
  * A token in the unit that opens a list of versions to pick one from: a
- * version's name (with its dot, while two are on screen) or, given
- * children, those instead.
+ * version's name, with its dot while two are on screen.
  */
 function VersionPicker(props: {
 	label: string
@@ -385,7 +373,6 @@ function VersionPicker(props: {
 	name(overlay: Overlay): string
 	checked?(overlay: Overlay): boolean
 	pick(overlay: Overlay): void
-	children?: JSX.Element
 }) {
 	const id = createUniqueId()
 	let token!: HTMLButtonElement
@@ -396,7 +383,6 @@ function VersionPicker(props: {
 				ref={token}
 				type="button"
 				class="projects__token"
-				classList={{"projects__token--action": !!props.children}}
 				aria-haspopup="menu"
 				title={props.title}
 				disabled={props.overlays.length === 0}
@@ -404,12 +390,8 @@ function VersionPicker(props: {
 				<Show when={props.dot}>
 					{color => <span class="projects__token-dot" style={{background: color()}} aria-hidden="true" />}
 				</Show>
-				<Show when={props.children} fallback={<span class="projects__token-name">{props.name(props.current ?? null)}</span>}>
-					{props.children}
-				</Show>
-				<Show when={!props.children}>
-					<CaretIcon />
-				</Show>
+				<span class="projects__token-name">{props.name(props.current ?? null)}</span>
+				<CaretIcon />
 			</button>
 			<OverlaySubmenu
 				ref={element => (menu = element)}

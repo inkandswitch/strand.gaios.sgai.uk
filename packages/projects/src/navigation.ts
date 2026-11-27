@@ -35,6 +35,17 @@ export type ProjectRoute = {
 	resolved: Resolved
 	location: Location
 	placement?: Placement
+	/** asked for by an open, rather than landed on (see `nothingOpen`) */
+	opened?: boolean
+}
+
+/**
+ * Whether a route is a folder project with nothing open in it: its root,
+ * landed on rather than opened. The root opens like any folder, but only
+ * when it's asked for.
+ */
+export function nothingOpen(route: ProjectRoute): boolean {
+	return !route.opened && route.resolved.root === "folder" && route.resolved.trail.length === 0
 }
 
 /**
@@ -146,7 +157,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 	const selectedView = createMemo<SelectedView | undefined>(
 		() => {
 			const current = project()
-			return current
+			return current && !nothingOpen(current)
 				? {url: current.resolved.docUrl, toolId: current.location.toolId ?? null}
 				: undefined
 		},
@@ -244,7 +255,9 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 				compareAt: undefined,
 				...versionsOf(current.location),
 			},
-			"replace"
+			"replace",
+			undefined,
+			panel.opened
 		)
 	}
 
@@ -253,7 +266,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		const compareAt = overlay === undefined ? undefined : (at ?? undefined)
 		if (!current) return
 		if (current.location.compare === overlay && current.location.compareAt === compareAt) return
-		show(current.resolved, {...current.location, compare: overlay, compareAt}, "replace")
+		show(current.resolved, {...current.location, compare: overlay, compareAt}, "replace", undefined, current.opened)
 	}
 
 	function packages() {
@@ -392,24 +405,27 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 		void relocate(current.resolved, scoped.find).then(
 			next => {
 				if (mine !== attempt) return
-				if (next) show(next, location, "replace")
+				if (next) show(next, location, "replace", undefined, current.opened)
 				else show(projectRoot(current.resolved), atRoot(location), "replace")
 			},
 			error => mine === attempt && reject(error, "replace")
 		)
 	}
 
+	// What an open pushes was asked for; what's replaced was landed on,
+	// unless it says it was opened.
 	function show(
 		resolved: Resolved,
 		location: Location,
 		mode: HistoryMode,
-		placement?: Placement
+		placement?: Placement,
+		opened = mode === "push"
 	) {
 		const canonical = {
 			...location,
 			segments: resolved.trail.map(step => step.segment),
 		}
-		setRoute({page: "project", resolved, location: canonical, placement})
+		setRoute({page: "project", resolved, location: canonical, placement, opened})
 		write(formatHash(canonical, resolved.projectName), mode)
 	}
 
@@ -447,7 +463,7 @@ export function createNavigation(element: HTMLElement, repo: Repo): Navigation {
 					const now = project()
 					if (!live || now?.resolved !== resolved) return
 					if (!next) show(projectRoot(resolved), atRoot(now.location), "replace")
-					else if (!sameNames(next, resolved)) show(next, now.location, "replace")
+					else if (!sameNames(next, resolved)) show(next, now.location, "replace", undefined, now.opened)
 				})
 			for (const url of folders) {
 				void scoped.provider.repo.find(url).then(handle => {
